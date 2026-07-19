@@ -1,0 +1,40 @@
+VERDICT: APPROVED_WITH_COMMENTS
+
+The requested UI fixes are implemented correctly, but there are delivery/scope concerns to address before marking the task fully clean.
+
+Critical findings / analysis:
+- The background layering issue is addressed by moving `AppBackground` behind the app stack (`-z-10`), which resolves the prior interaction/overlay conflict.
+- Team Owner tab readability is improved by raising inactive-tab contrast (`text-white/70` + stronger hover state), which directly targets the visibility complaint.
+- The app still builds successfully (`npm run build`), so no immediate compile-time regression was introduced.
+- However, the task diff includes a very large unrelated portal refactor (especially `FanPortal.tsx` and broad `TeamOwnerPortal.tsx` rewrites) plus lockfile churn. This is high-risk for a narrowly scoped UI fix and makes regression review harder.
+- Also, the two targeted fixes currently appear in uncommitted working-tree changes. If they are not committed, the task result is not durable/reproducible.
+
+Security:
+- None observed (no serious authz, secret handling, injection, or data-exposure issues introduced by these changes).
+
+Next actions:
+1) Commit the intended z-index/tab-visibility fixes so the final state is actually captured in version control.
+2) Split or revert unrelated large portal changes from this task branch (or move them to separate tasks/PRs) to reduce regression risk.
+3) Re-run a quick smoke pass on Team Owner/Fan portal navigation after scope cleanup to confirm no user-facing behavior drift.
+
+VERDICT: APPROVED_WITH_COMMENTS
+VERDICT: APPROVED_WITH_COMMENTS
+
+The requested UI fixes are implemented correctly, but there are delivery/scope concerns to address before marking the task fully clean.
+
+Critical findings / analysis:
+- The background layering issue is addressed by moving `AppBackground` behind the app stack (`-z-10`), which resolves the prior interaction/overlay conflict.
+- Team Owner tab readability is improved by raising inactive-tab contrast (`text-white/70` + stronger hover state), which directly targets the visibility complaint.
+- The app still builds successfully (`npm run build`), so no immediate compile-time regression was introduced.
+- However, the task diff includes a very large unrelated portal refactor (especially `FanPortal.tsx` and broad `TeamOwnerPortal.tsx` rewrites) plus lockfile churn. This is high-risk for a narrowly scoped UI fix and makes regression review harder.
+- Also, the two targeted fixes currently appear in uncommitted working-tree changes. If they are not committed, the task result is not durable/reproducible.
+
+Security:
+- None observed (no serious authz, secret handling, injection, or data-exposure issues introduced by these changes).
+
+Next actions:
+1) Commit the intended z-index/tab-visibility fixes so the final state is actually captured in version control.
+2) Split or revert unrelated large portal changes from this task branch (or move them to separate tasks/PRs) to reduce regression risk.
+3) Re-run a quick smoke pass on Team Owner/Fan portal navigation after scope cleanup to confirm no user-facing behavior drift.
+
+VERDICT: APPROVED_WITH_COMMENTS

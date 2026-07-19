@@ -1,0 +1,33 @@
+=====================================
+KICKLIVE LOGO PLACEMENT INSTRUCTIONS
+=====================================
+
+Please place your PNG logo files in this /public folder:
+
+1. kicklive-icon.png
+   - This is the app icon (square with rounded corners)
+   - Used for: Browser tab favicon, login page, signup page, header
+   - Recommended size: 512x512 pixels
+
+2. kicklive-logo.png (Optional - for future use)
+   - This is the horizontal banner logo
+   - Used for: Email headers, presentations, marketing
+   - Recommended size: 800x200 pixels
+
+=====================================
+IMPORTANT:
+=====================================
+- Make sure the files are named EXACTLY as shown above (lowercase)
+- Files must be in PNG format
+- Place them directly in the /public folder (same level as this file)
+- After adding logos, rebuild the app: npm run build
+
+=====================================
+Current Status:
+=====================================
+✓ All code references updated to use PNG format
+✓ Favicon link updated in index.html
+✓ All component image sources updated
+⚠ Waiting for you to add the actual PNG files
+
+=====================================

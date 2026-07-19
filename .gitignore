@@ -1,0 +1,10 @@
+node_modules/
+dist/
+build/
+venv/
+env/
+.env
+.DS_Store
+*.zip
+*.tar.gz
+*.log

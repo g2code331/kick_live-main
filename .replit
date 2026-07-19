@@ -1,0 +1,41 @@
+modules = ["nodejs-24"]
+[nix]
+channel = "stable-25_05"
+
+[userenv]
+
+[userenv.shared]
+VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZuZWZwY2plZWJhd3NlYnhqaGNmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQwNDAyMTQsImV4cCI6MjA5OTYxNjIxNH0.YkPu5IxtEPZHK9i0oiMTRROrwCT3ZdF1RgCEhaqDhwo"
+VITE_SUPABASE_URL = "https://fnefpcjeebawsebxjhcf.supabase.co"
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start application"
+
+[[workflows.workflow]]
+name = "Start application"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run dev"
+waitForPort = 5000
+
+[workflows.workflow.metadata]
+outputType = "webview"
+
+[[ports]]
+localPort = 5000
+externalPort = 80
+
+[[ports]]
+localPort = 5001
+externalPort = 3001
