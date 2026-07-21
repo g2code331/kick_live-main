@@ -147,13 +147,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (error) return { error: error.message };
 
       if (data.user) {
-        await supabase.from('profiles').insert({
-          id: data.user.id,
-          email,
-          username,
-          phone,
-          role,
-        });
+        const { error: profileError } = await supabase.from('profiles').upsert(
+          { id: data.user.id, email, username, phone, role },
+          { onConflict: 'id' }
+        );
+        if (profileError) {
+          console.error('Profile role upsert failed:', profileError.message);
+          return { error: `Account created, but role assignment failed: ${profileError.message}` };
+        }
       }
 
       return { error: null };
