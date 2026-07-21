@@ -17,7 +17,8 @@ export default function TeamsPage() {
         // Fetch all teams
         const { data: teamsData } = await supabase
           .from('teams')
-          .select('id, name, short_name, city, coach, primary_color, secondary_color')
+          .select('id, name, short_name, city, coach, primary_color, secondary_color, status')
+          .in('status', ['active', null as any])
           .order('name');
         
         setTeams(teamsData || []);

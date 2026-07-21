@@ -133,7 +133,7 @@ class DataLoader {
     try {
       // Only fetch essential columns with limits - REDUCES DATA BY 80%
       const [teams, players, competitions, matches, media] = await Promise.all([
-        supabase.from('teams').select('id, name, short_name, primary_color, secondary_color').limit(50),
+        supabase.from('teams').select('id, name, short_name, primary_color, secondary_color, status').in('status', ['active', null as any]).limit(50),
         supabase.from('players').select('id, name, team_id, goals, assists').order('goals', { ascending: false }).limit(100),
         supabase.from('competitions').select('id, name, type, season, status').order('created_at', { ascending: false }).limit(20),
         supabase.from('matches').select('id, home_team_id, away_team_id, home_score, away_score, status, minute, start_time').order('start_time', { ascending: false }).limit(100),
@@ -223,7 +223,8 @@ class DataLoader {
   private async loadTeams(): Promise<any[]> {
     const { data, error } = await supabase
       .from('teams')
-      .select('id, name, short_name, city, primary_color, secondary_color')
+      .select('id, name, short_name, city, primary_color, secondary_color, status')
+      .in('status', ['active', null as any])
       .order('name')
       .limit(50);
     if (error) throw error;

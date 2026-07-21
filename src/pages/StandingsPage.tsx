@@ -52,8 +52,9 @@ export default function StandingsPage() {
 
         const { data: teamsData } = await supabase
           .from('teams')
-          .select('id, name, short_name, primary_color, secondary_color')
-          .in('id', Array.from(teamIds));
+          .select('id, name, short_name, primary_color, secondary_color, status')
+          .in('id', Array.from(teamIds))
+          .in('status', ['active', null as any]);
 
         const teamsMap = new Map((teamsData || []).map(t => [t.id, t]));
 

@@ -110,7 +110,7 @@ export default function TeamProfile() {
     );
   }
 
-  if (!team) {
+  if (!team || (team.status && team.status !== 'active')) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
