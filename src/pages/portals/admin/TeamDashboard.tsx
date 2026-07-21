@@ -31,12 +31,14 @@ function InlineMsg({ msg }: { msg: { type: string; text: string } | null }) {
   );
 }
 
-type SubTab = 'active' | 'pending';
+type SubTab = 'active' | 'pending' | 'rejected';
 
 export default function TeamDashboard() {
   const [teams, setTeams] = useState<any[]>([]);
   const [pendingTeams, setPendingTeams] = useState<any[]>([]);
+  const [rejectedTeams, setRejectedTeams] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [restoring, setRestoring] = useState<number | null>(null);
   const [approving, setApproving] = useState<number | null>(null);
   const [subTab, setSubTab] = useState<SubTab>('active');
 
@@ -54,21 +56,40 @@ export default function TeamDashboard() {
 
   const fetchTeams = useCallback(async () => {
   setLoading(true);
-  const [allTeams, pending] = await Promise.all([
+  const [allTeams, pending, rejected] = await Promise.all([
     supabase
       .from('teams')
       .select('id, name, short_name, city, venue, coach, primary_color, secondary_color, status, owner_id, created_at')
-      .not('status', 'eq', 'pending')
+      .eq('status', 'active')
       .order('name'),
     supabase
       .from('teams')
       .select('id, name, short_name, city, venue, coach, primary_color, secondary_color, status, owner_id, created_at')
       .eq('status', 'pending')
       .order('created_at', { ascending: false }),
+    supabase
+      .from('teams')
+      .select('id, name, short_name, city, venue, coach, primary_color, secondary_color, status, owner_id, created_at')
+      .eq('status', 'rejected')
+      .order('created_at', { ascending: false }),
   ]);
 
   if (pending.error) console.error('Pending teams query failed:', pending.error.message);
   if (allTeams.error) console.error('Teams query failed:', allTeams.error.message);
+  if (rejected.error) console.error('Rejected teams query failed:', rejected.error.message);
+
+  // Fetch owner profiles for pending + rejected together (avoids relying on a fragile FK embed)
+  const attachProfiles = async (rows: any[]) => {
+    if (rows.length === 0) return rows;
+    const ownerIds = rows.map((t: any) => t.owner_id).filter(Boolean);
+    if (ownerIds.length === 0) return rows;
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('id, username, email')
+      .in('id', ownerIds);
+    const byId = Object.fromEntries((profiles || []).map((pr: any) => [pr.id, pr]));
+    return rows.map((t: any) => ({ ...t, profiles: byId[t.owner_id] || null }));
+  };
 
   if (allTeams.error?.message?.includes('status')) {
     const { data } = await supabase
@@ -77,25 +98,16 @@ export default function TeamDashboard() {
       .order('name');
     setTeams(data || []);
     setPendingTeams([]);
+    setRejectedTeams([]);
   } else {
     setTeams(allTeams.data || []);
-    let p = pending.data || [];
 
-    // Fetch owner profiles separately (avoids relying on a fragile FK embed)
-    if (p.length > 0) {
-      const ownerIds = p.map((t: any) => t.owner_id).filter(Boolean);
-      if (ownerIds.length > 0) {
-        const { data: profiles } = await supabase
-          .from('profiles')
-          .select('id, username, email')
-          .in('id', ownerIds);
-        const byId = Object.fromEntries((profiles || []).map((pr: any) => [pr.id, pr]));
-        p = p.map((t: any) => ({ ...t, profiles: byId[t.owner_id] || null }));
-      }
-    }
-
+    const p = await attachProfiles(pending.data || []);
     setPendingTeams(p);
     if (p.length > 0) setSubTab('pending');
+
+    const r = await attachProfiles(rejected.data || []);
+    setRejectedTeams(r);
   }
   setLoading(false);
 }, []);
@@ -123,6 +135,17 @@ export default function TeamDashboard() {
       fetchTeams();
     } catch (err: any) { error('Reject failed: ' + err.message); }
     finally { setApproving(null); }
+  };
+
+  const handleRestore = async (team: any) => {
+    setRestoring(team.id);
+    try {
+      const { error: err } = await supabase.from('teams').update({ status: 'pending' }).eq('id', team.id);
+      if (err) throw err;
+      success(`"${team.name}" moved back to Pending Approval for review.`);
+      fetchTeams();
+    } catch (err: any) { error('Restore failed: ' + err.message); }
+    finally { setRestoring(null); }
   };
 
   // ── Edit / Delete ────────────────────────────────────────────────────────────
@@ -209,6 +232,26 @@ export default function TeamDashboard() {
               subTab === 'pending' ? 'bg-black/20 text-black' : 'bg-yellow-500 text-black'
             }`}>
               {pendingTeams.length}
+            </span>
+          )}
+        </button>
+
+        {/* Rejected tab */}
+        <button
+          onClick={() => setSubTab('rejected')}
+          className={`relative flex items-center gap-2.5 px-5 py-3 rounded-2xl font-black text-xs uppercase tracking-widest transition-all ${
+            subTab === 'rejected'
+              ? 'bg-red-500 text-white shadow-lg shadow-red-500/20'
+              : 'bg-white/5 text-white/50 hover:text-white hover:bg-white/10'
+          }`}
+        >
+          <XCircle size={14} />
+          Rejected
+          {rejectedTeams.length > 0 && (
+            <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-black ${
+              subTab === 'rejected' ? 'bg-black/20 text-white' : 'bg-red-500 text-white'
+            }`}>
+              {rejectedTeams.length}
             </span>
           )}
         </button>
@@ -412,6 +455,88 @@ export default function TeamDashboard() {
                             className="flex items-center justify-center gap-2 p-2.5 bg-red-500/10 rounded-xl hover:bg-red-500/20 text-red-400 transition-all text-[10px] font-black uppercase tracking-widest"
                           >
                             <Trash2 size={13} /> Delete
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ════════════════════════════════════════════════════════════════════
+              REJECTED TEAMS TAB
+              ════════════════════════════════════════════════════════════════════ */}
+          {subTab === 'rejected' && (
+            <div>
+              {rejectedTeams.length === 0 ? (
+                <div className="glass rounded-[2rem] p-16 text-center border border-white/5">
+                  <div className="w-20 h-20 rounded-full bg-white/5 flex items-center justify-center mx-auto mb-5">
+                    <XCircle size={36} className="text-white/20" />
+                  </div>
+                  <h3 className="text-xl font-black uppercase text-white mb-2">No Rejected Teams</h3>
+                  <p className="text-white/30 text-sm">Teams you reject will show up here.</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {rejectedTeams.map(team => (
+                    <div
+                      key={team.id}
+                      className="glass rounded-[2rem] border border-red-500/20 overflow-hidden hover:border-red-500/40 transition-all"
+                    >
+                      <div className="h-1 w-full bg-gradient-to-r from-red-500 to-red-400" />
+
+                      <div className="p-6 flex flex-col sm:flex-row items-start sm:items-center gap-5">
+                        <div
+                          className="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl font-black italic shadow-xl shrink-0 border-2 border-white/10 opacity-50"
+                          style={{ background: `linear-gradient(135deg, ${team.primary_color || '#39FF14'}, ${team.secondary_color || '#000'})` }}
+                        >
+                          {team.short_name?.[0] || '?'}
+                        </div>
+
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap mb-1">
+                            <h3 className="font-black italic uppercase tracking-tighter text-lg text-white/70">{team.name}</h3>
+                            <span className="px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest bg-red-500/20 text-red-400 border border-red-500/30">
+                              Rejected
+                            </span>
+                          </div>
+
+                          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-white/30">
+                            {team.short_name && <span className="font-black text-white/40">{team.short_name}</span>}
+                            {team.city && <span className="flex items-center gap-1"><MapPin size={10} /> {team.city}</span>}
+                            {team.venue && <span>🏟 {team.venue}</span>}
+                          </div>
+
+                          <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-white/20 mt-1.5">
+                            {team.profiles?.username && (
+                              <span className="flex items-center gap-1">
+                                <User size={9} /> {team.profiles.username}
+                                {team.profiles.email ? ` · ${team.profiles.email}` : ''}
+                              </span>
+                            )}
+                            <span>📅 Submitted {new Date(team.created_at).toLocaleDateString()}</span>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col sm:flex-row gap-2 shrink-0 w-full sm:w-auto">
+                          <button
+                            onClick={() => handleRestore(team)}
+                            disabled={restoring === team.id}
+                            className="flex items-center justify-center gap-2 px-6 py-3 rounded-2xl bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 hover:bg-yellow-500 hover:text-black hover:border-transparent font-black text-xs uppercase tracking-widest transition-all disabled:opacity-50 min-w-[110px]"
+                          >
+                            {restoring === team.id
+                              ? <Loader2 size={14} className="animate-spin" />
+                              : <RefreshCw size={14} />}
+                            Restore
+                          </button>
+                          <button
+                            onClick={() => { setSelectedTeam(team); setShowDeleteModal(true); }}
+                            className="flex items-center justify-center gap-2 px-6 py-3 rounded-2xl bg-white/5 text-white/40 border border-white/10 hover:bg-red-500 hover:text-white hover:border-transparent font-black text-xs uppercase tracking-widest transition-all min-w-[110px]"
+                          >
+                            <Trash2 size={14} />
+                            Delete
                           </button>
                         </div>
                       </div>
