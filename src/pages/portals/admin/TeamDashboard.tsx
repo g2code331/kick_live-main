@@ -53,35 +53,52 @@ export default function TeamDashboard() {
   const { msg, success, error } = useMsg();
 
   const fetchTeams = useCallback(async () => {
-    setLoading(true);
-    const [allTeams, pending] = await Promise.all([
-      supabase
-        .from('teams')
-        .select('id, name, short_name, city, venue, coach, primary_color, secondary_color, status, owner_id, created_at')
-        .not('status', 'eq', 'pending')
-        .order('name'),
-      supabase
-        .from('teams')
-        .select('id, name, short_name, city, venue, coach, primary_color, secondary_color, status, owner_id, created_at, profiles(username, email)')
-        .eq('status', 'pending')
-        .order('created_at', { ascending: false }),
-    ]);
-    if (allTeams.error?.message?.includes('status')) {
-      const { data } = await supabase
-        .from('teams')
-        .select('id, name, short_name, city, primary_color, secondary_color, created_at')
-        .order('name');
-      setTeams(data || []);
-      setPendingTeams([]);
-    } else {
-      setTeams(allTeams.data || []);
-      const p = pending.data || [];
-      setPendingTeams(p);
-      // Auto-switch to pending tab when requests exist
-      if (p.length > 0) setSubTab('pending');
+  setLoading(true);
+  const [allTeams, pending] = await Promise.all([
+    supabase
+      .from('teams')
+      .select('id, name, short_name, city, venue, coach, primary_color, secondary_color, status, owner_id, created_at')
+      .not('status', 'eq', 'pending')
+      .order('name'),
+    supabase
+      .from('teams')
+      .select('id, name, short_name, city, venue, coach, primary_color, secondary_color, status, owner_id, created_at')
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false }),
+  ]);
+
+  if (pending.error) console.error('Pending teams query failed:', pending.error.message);
+  if (allTeams.error) console.error('Teams query failed:', allTeams.error.message);
+
+  if (allTeams.error?.message?.includes('status')) {
+    const { data } = await supabase
+      .from('teams')
+      .select('id, name, short_name, city, primary_color, secondary_color, created_at')
+      .order('name');
+    setTeams(data || []);
+    setPendingTeams([]);
+  } else {
+    setTeams(allTeams.data || []);
+    let p = pending.data || [];
+
+    // Fetch owner profiles separately (avoids relying on a fragile FK embed)
+    if (p.length > 0) {
+      const ownerIds = p.map((t: any) => t.owner_id).filter(Boolean);
+      if (ownerIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, username, email')
+          .in('id', ownerIds);
+        const byId = Object.fromEntries((profiles || []).map((pr: any) => [pr.id, pr]));
+        p = p.map((t: any) => ({ ...t, profiles: byId[t.owner_id] || null }));
+      }
     }
-    setLoading(false);
-  }, []);
+
+    setPendingTeams(p);
+    if (p.length > 0) setSubTab('pending');
+  }
+  setLoading(false);
+}, []);
 
   useEffect(() => { fetchTeams(); }, [fetchTeams]);
 
