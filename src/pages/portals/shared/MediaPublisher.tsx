@@ -9,6 +9,8 @@ interface MediaPublisherProps {
 
 export default function MediaPublisher({ isOpen, onClose }: MediaPublisherProps) {
   const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     title: '',
     category: 'News',
@@ -17,14 +19,51 @@ export default function MediaPublisher({ isOpen, onClose }: MediaPublisherProps)
     excerpt: ''
   });
 
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setUploadError('Please select an image file.');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setUploadError('Image must be under 5MB.');
+      return;
+    }
+
+    setUploadError(null);
+    setUploading(true);
+    try {
+      const ext = file.name.split('.').pop();
+      const path = `articles/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const { error: uploadErr } = await supabase.storage.from('media').upload(path, file, {
+        cacheControl: '3600',
+        upsert: false,
+      });
+      if (uploadErr) throw uploadErr;
+
+      const { data: publicUrlData } = supabase.storage.from('media').getPublicUrl(path);
+      setFormData(prev => ({ ...prev, image_url: publicUrlData.publicUrl }));
+    } catch (err: any) {
+      setUploadError(err.message || 'Upload failed.');
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!formData.image_url) {
+      setUploadError('Please upload an image or paste an image URL before publishing.');
+      return;
+    }
     setLoading(true);
     try {
       const { error } = await supabase.from('media').insert([{
         title: formData.title,
         category: formData.category,
-        image_url: formData.image_url || 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800',
+        image_url: formData.image_url,
         content: formData.content,
         excerpt: formData.excerpt,
         created_at: new Date().toISOString()
@@ -87,19 +126,45 @@ export default function MediaPublisher({ isOpen, onClose }: MediaPublisherProps)
               </select>
             </div>
             <div className="space-y-2">
-              <label className="text-[10px] font-black uppercase tracking-widest text-white/40">Featured Image URL</label>
-              <div className="relative">
-                 <ImageIcon size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20" />
-                 <input
-                  type="url"
-                  value={formData.image_url}
-                  onChange={e => setFormData({...formData, image_url: e.target.value})}
-                  className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-3 py-3 text-sm focus:outline-none focus:border-purple-500/50"
-                  placeholder="https://..."
-                />
-              </div>
+              <label className="text-[10px] font-black uppercase tracking-widest text-white/40">Featured Image</label>
+              <label className="flex items-center justify-center gap-2 w-full bg-white/5 border border-dashed border-white/20 rounded-xl p-3 text-xs text-white/40 cursor-pointer hover:border-purple-500/50 hover:text-white/60 transition-colors">
+                {uploading ? (
+                  <><Loader2 size={14} className="animate-spin" /> Uploading…</>
+                ) : (
+                  <><Upload size={14} /> {formData.image_url ? 'Change image' : 'Upload image'}</>
+                )}
+                <input type="file" accept="image/*" onChange={handleFileSelect} className="hidden" disabled={uploading} />
+              </label>
             </div>
           </div>
+
+          {formData.image_url && (
+            <div className="rounded-xl overflow-hidden border border-white/10 h-32">
+              <img src={formData.image_url} alt="Preview" className="w-full h-full object-cover" />
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <label className="text-[10px] font-black uppercase tracking-widest text-white/40 flex items-center gap-2">
+              <LinkIcon size={11} /> Or paste an image URL instead
+            </label>
+            <div className="relative">
+               <ImageIcon size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20" />
+               <input
+                type="url"
+                value={formData.image_url}
+                onChange={e => { setFormData({...formData, image_url: e.target.value}); setUploadError(null); }}
+                className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-3 py-3 text-sm focus:outline-none focus:border-purple-500/50"
+                placeholder="https://..."
+              />
+            </div>
+          </div>
+
+          {uploadError && (
+            <div className="bg-red-500/10 border border-red-500/30 text-red-400 px-4 py-2.5 rounded-xl text-xs font-bold">
+              {uploadError}
+            </div>
+          )}
 
           <div className="space-y-2">
             <label className="text-[10px] font-black uppercase tracking-widest text-white/40">Short Excerpt</label>
