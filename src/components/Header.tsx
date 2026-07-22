@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { Bell, Search, LogIn, User, Shield, X, Trophy, Calendar, Target } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import { dataLoader } from '../lib/DataLoader';
 
 export default function Header() {
   const navigate = useNavigate();
@@ -26,10 +27,18 @@ export default function Header() {
 
   // The enlarged wordmark also acts as the app refresh control.
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     if (isRefreshing) return;
     setIsRefreshing(true);
-    window.setTimeout(() => window.location.reload(), 550);
+    try {
+      // Refresh data in place instead of reloading the document. This avoids
+      // the white-screen/PWA startup problem caused by a hard reload.
+      await dataLoader.loadAll();
+    } catch (error) {
+      console.warn('[Header] Refresh failed:', error);
+    } finally {
+      window.setTimeout(() => setIsRefreshing(false), 350);
+    }
   };
 
   const navItems = [
