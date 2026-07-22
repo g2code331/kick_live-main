@@ -57,17 +57,17 @@ export default function TeamsPage() {
         <p className="text-white/40 font-bold uppercase tracking-[0.3em] text-xs">Professional teams in KickLive</p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 sm:gap-3">
         {teams.map((team) => (
           <div 
             key={team.id} 
             className="group relative cursor-pointer"
             onClick={() => navigate(`/team/${team.id}`)}
           >
-            <div className="relative glass rounded-2xl overflow-hidden border border-white/5 transition-all group-hover:border-brand-green/30">
-              <div className="h-24 relative">
+            <div className="relative glass rounded-xl overflow-hidden border border-white/5 transition-all group-hover:border-brand-green/30">
+              <div className="h-16 sm:h-20 relative">
                 <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="w-14 h-14 rounded-full flex items-center justify-center text-2xl font-black" style={{
+                  <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center text-2xl font-black" style={{
                     background: `linear-gradient(135deg, ${team.primary_color}, ${team.secondary_color})`,
                     color: team.secondary_color === '#000000' ? '#fff' : '#000'
                   }}>
@@ -76,20 +76,20 @@ export default function TeamsPage() {
                 </div>
               </div>
 
-              <div className="p-4 text-center">
-                 <h3 className="text-base font-black italic uppercase mb-2 truncate">{team.name}</h3>
-                 <div className="flex items-center justify-center gap-1 mb-4">
+              <div className="p-2 sm:p-3 text-center">
+                 <h3 className="text-xs sm:text-sm font-black italic uppercase mb-1 truncate">{team.name}</h3>
+                 <div className="flex items-center justify-center gap-1 mb-2">
                     <MapPin size={10} className="text-white/40" />
                     <span className="text-[10px] text-white/40 truncate">{team.city || 'Unknown'}</span>
                  </div>
 
-                 <div className="grid grid-cols-2 gap-2 mb-4">
-                    <div className="bg-white/5 rounded-lg p-2">
-                       <p className="text-sm font-black text-brand-green">{playerCounts.get(team.id) || 0}</p>
+                 <div className="grid grid-cols-2 gap-1 mb-2">
+                    <div className="bg-white/5 rounded-md p-1.5">
+                       <p className="text-xs font-black text-brand-green">{playerCounts.get(team.id) || 0}</p>
                        <p className="text-[8px] text-white/40 uppercase">Players</p>
                     </div>
-                    <div className="bg-white/5 rounded-lg p-2">
-                       <p className="text-xs font-black text-brand-blue truncate">{team.coach || 'TBD'}</p>
+                    <div className="bg-white/5 rounded-md p-1.5">
+                       <p className="text-[10px] font-black text-brand-blue truncate">{team.coach || 'TBD'}</p>
                        <p className="text-[8px] text-white/40 uppercase">Coach</p>
                     </div>
                  </div>

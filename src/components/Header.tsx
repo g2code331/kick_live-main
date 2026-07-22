@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Bell, Search, LogIn, User, Shield, X, Trophy, Calendar } from 'lucide-react';
+import { Bell, Search, LogIn, User, Shield, X, Trophy, Calendar, Target } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 
@@ -11,7 +11,10 @@ export default function Header() {
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<{ teams: any[]; matches: any[] }>({ teams: [], matches: [] });
+  const [searchResults, setSearchResults] = useState<{ teams: any[]; matches: any[]; players: any[]; pages: any[] }>({ teams: [], matches: [], players: [], pages: [] });
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const lastNotificationIds = useRef<Set<number>>(new Set());
   const [searchOpen, setSearchOpen] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
 
@@ -39,40 +42,80 @@ export default function Header() {
 
   const isActive = (path: string) => location.pathname === path;
 
-  // Live search
+  // Search the complete searchable catalogue and route every result to its destination.
   useEffect(() => {
     if (!searchQuery.trim()) {
-      setSearchResults({ teams: [], matches: [] });
+      setSearchResults({ teams: [], matches: [], players: [], pages: [] });
       return;
     }
     const q = searchQuery.trim().toLowerCase();
     const delay = setTimeout(async () => {
-      const [teamsRes, matchesRes] = await Promise.all([
-        supabase.from('teams').select('id, name, short_name, primary_color').ilike('name', `%${q}%`).limit(5),
-        supabase.from('matches').select('id, home_score, away_score, status, homeTeam:teams!home_team_id(name), awayTeam:teams!away_team_id(name)').or(`status.in.(first_half,second_half,extra_time,full_time,completed)`).limit(5),
+      const [teamsRes, playersRes, matchesRes] = await Promise.all([
+        supabase.from('teams').select('id, name, short_name, city, primary_color').or(`name.ilike.%${q}%,short_name.ilike.%${q}%,city.ilike.%${q}%`).limit(20),
+        supabase.from('players').select('id, name, position, team_id, teams(name)').or(`name.ilike.%${q}%,position.ilike.%${q}%`).limit(20),
+        supabase.from('matches').select('id, home_score, away_score, status, start_time, homeTeam:teams!home_team_id(name), awayTeam:teams!away_team_id(name), competitions(name)').limit(100),
       ]);
-      setSearchResults({
-        teams: teamsRes.data || [],
-        matches: (matchesRes.data || []).filter((m: any) =>
-          m.homeTeam?.name?.toLowerCase().includes(q) || m.awayTeam?.name?.toLowerCase().includes(q)
-        ),
-      });
-    }, 300);
+      const matches = (matchesRes.data || []).filter((m: any) => {
+        const text = `${m.homeTeam?.name || ''} ${m.awayTeam?.name || ''} ${m.competitions?.name || ''} ${m.status || ''}`.toLowerCase();
+        return text.includes(q);
+      }).slice(0, 20);
+      const pages = navItems.filter(item => `${item.label} ${item.path}`.toLowerCase().includes(q));
+      setSearchResults({ teams: teamsRes.data || [], players: playersRes.data || [], matches, pages });
+    }, 250);
     return () => clearTimeout(delay);
   }, [searchQuery]);
+
+  // Browsers require a user gesture before audio can play. Unlock it once, then use it for every new alert.
+  const unlockAudio = () => {
+    if (!audioContextRef.current) {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioContextClass) audioContextRef.current = new AudioContextClass();
+    }
+    if (audioContextRef.current.state === 'suspended') audioContextRef.current.resume();
+  };
+  const playGoalSound = () => {
+    try {
+      unlockAudio();
+      const ctx = audioContextRef.current;
+      if (!ctx) return;
+      const now = ctx.currentTime;
+      [659.25, 783.99, 987.77, 1318.51].forEach((frequency, index) => {
+        const oscillator = ctx.createOscillator();
+        const gain = ctx.createGain();
+        oscillator.type = 'sine'; oscillator.frequency.value = frequency;
+        gain.gain.setValueAtTime(0.0001, now + index * 0.11);
+        gain.gain.exponentialRampToValueAtTime(0.18, now + index * 0.11 + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + index * 0.11 + 0.42);
+        oscillator.connect(gain).connect(ctx.destination);
+        oscillator.start(now + index * 0.11); oscillator.stop(now + index * 0.11 + 0.45);
+      });
+    } catch { /* Audio is optional when the browser blocks it. */ }
+  };
+  useEffect(() => {
+    const unlock = () => unlockAudio();
+    window.addEventListener('pointerdown', unlock, { once: true });
+    return () => window.removeEventListener('pointerdown', unlock);
+  }, []);
 
   // Load recent match results for notifications
   const loadNotifications = async () => {
     const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const { data } = await supabase
-      .from('matches')
-      .select('id, home_score, away_score, status, start_time, homeTeam:teams!home_team_id(name, short_name), awayTeam:teams!away_team_id(name, short_name)')
-      .in('status', ['full_time', 'completed'])
-      .gte('start_time', yesterday)
-      .order('start_time', { ascending: false })
-      .limit(8);
-    setNotifications(data || []);
+    const [{ data: matchData }, { data: appData }] = await Promise.all([
+      supabase.from('matches').select('id, home_score, away_score, status, start_time, homeTeam:teams!home_team_id(name, short_name), awayTeam:teams!away_team_id(name, short_name)').in('status', ['full_time', 'completed']).gte('start_time', yesterday).order('start_time', { ascending: false }).limit(8),
+      supabase.from('notifications').select('id, title, message, created_at, match_id').gte('created_at', yesterday).order('created_at', { ascending: false }).limit(20),
+    ]);
+    const next = [...(matchData || []), ...(appData || []).map((n: any) => ({ ...n, isAppNotification: true }))];
+    const nextIds = new Set(next.map((n: any) => n.id));
+    if (lastNotificationIds.current.size > 0 && next.some((n: any) => !lastNotificationIds.current.has(n.id))) playGoalSound();
+    lastNotificationIds.current = nextIds;
+    setNotifications(next);
   };
+
+  useEffect(() => {
+    loadNotifications();
+    const timer = window.setInterval(loadNotifications, 30000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const handleNotifToggle = () => {
     if (!notifOpen) loadNotifications();
@@ -83,7 +126,7 @@ export default function Header() {
   // Close dropdowns on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (searchRef.current && !searchRef.current.contains(e.target as Node)) setSearchOpen(false);
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) { setSearchOpen(false); setMobileSearchOpen(false); }
       if (notifRef.current && !notifRef.current.contains(e.target as Node)) setNotifOpen(false);
     };
     document.addEventListener('mousedown', handler);
@@ -125,18 +168,18 @@ export default function Header() {
           <img
             src="/kicklive-logo.png.png"
             alt="KickLive"
-            className="relative h-9 sm:h-11 md:h-[3.25rem] w-auto object-contain drop-shadow-[0_0_10px_rgba(0,212,255,0.55)] hover:drop-shadow-[0_0_20px_rgba(255,0,212,0.7)] transition-all duration-300"
+            className="relative h-11 sm:h-14 md:h-[4.25rem] w-auto object-contain drop-shadow-[0_0_10px_rgba(0,212,255,0.55)] hover:drop-shadow-[0_0_20px_rgba(255,0,212,0.7)] transition-all duration-300"
           />
         </div>
 
         {/* Right Side */}
         <div className="flex items-center gap-3">
           {/* Search */}
-          <div ref={searchRef} className="relative hidden lg:block">
+          <div ref={searchRef} className={`relative ${mobileSearchOpen ? 'absolute left-4 right-4 top-full mt-2 z-[210]' : 'hidden lg:block'}`}>
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40" />
             <input
               type="text"
-              placeholder="Search teams, matches…"
+              placeholder="Search anything: teams, players, matches…"
               value={searchQuery}
               onChange={e => { setSearchQuery(e.target.value); setSearchOpen(true); }}
               onFocus={() => setSearchOpen(true)}
@@ -149,8 +192,8 @@ export default function Header() {
             )}
 
             {/* Search Dropdown */}
-            {searchOpen && (searchResults.teams.length > 0 || searchResults.matches.length > 0) && (
-              <div className="absolute top-full mt-2 right-0 w-72 glass rounded-2xl border border-white/10 shadow-2xl overflow-hidden z-[200]">
+            {searchOpen && (searchResults.teams.length > 0 || searchResults.matches.length > 0 || searchResults.players.length > 0 || searchResults.pages.length > 0) && (
+              <div className="absolute top-full mt-2 right-0 w-80 max-h-[70vh] overflow-y-auto glass rounded-2xl border border-white/10 shadow-2xl overflow-hidden z-[200]">
                 {searchResults.teams.length > 0 && (
                   <div>
                     <p className="text-[10px] font-black uppercase tracking-widest text-white/30 px-4 pt-3 pb-1">Teams</p>
@@ -168,6 +211,8 @@ export default function Header() {
                     ))}
                   </div>
                 )}
+                {searchResults.pages.length > 0 && <div><p className="text-[10px] font-black uppercase tracking-widest text-white/30 px-4 pt-3 pb-1">Destinations</p>{searchResults.pages.map(page => <button key={page.path} onClick={() => { navigate(page.path); setSearchOpen(false); setMobileSearchOpen(false); setSearchQuery(''); }} className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 text-left"><Target size={14} className="text-brand-green" /><span className="text-sm font-bold">{page.label}</span></button>)}</div>}
+                {searchResults.players.length > 0 && <div><p className="text-[10px] font-black uppercase tracking-widest text-white/30 px-4 pt-3 pb-1">Players</p>{searchResults.players.map(player => <button key={player.id} onClick={() => { navigate(`/player/${player.id}`); setSearchOpen(false); setMobileSearchOpen(false); setSearchQuery(''); }} className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 text-left"><User size={14} className="text-brand-blue" /><span className="text-sm font-bold truncate">{player.name}</span><span className="text-[10px] text-white/40 ml-auto">{player.teams?.name || player.position}</span></button>)}</div>}
                 {searchResults.matches.length > 0 && (
                   <div>
                     <p className="text-[10px] font-black uppercase tracking-widest text-white/30 px-4 pt-3 pb-1">Matches</p>
@@ -189,6 +234,9 @@ export default function Header() {
               </div>
             )}
           </div>
+
+          {/* Search icon remains visible on phones */}
+          <button onClick={() => { setMobileSearchOpen(v => !v); setSearchOpen(true); setNotifOpen(false); }} aria-label="Search" className="lg:hidden p-2 hover:bg-white/5 rounded-full"><Search size={18} className="text-white/70" /></button>
 
           {/* Notifications Bell */}
           <div ref={notifRef} className="relative">
@@ -215,15 +263,15 @@ export default function Header() {
                     {notifications.map(n => (
                       <button
                         key={n.id}
-                        onClick={() => { navigate(`/match/${n.id}`); setNotifOpen(false); }}
+                        onClick={() => { if (n.match_id) navigate(`/match/${n.match_id}`); setNotifOpen(false); }}
                         className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white/5 transition-colors text-left"
                       >
                         <Trophy size={14} className="text-brand-green shrink-0" />
                         <div className="flex-1 min-w-0">
-                          <p className="text-xs font-bold truncate">{n.homeTeam?.short_name} vs {n.awayTeam?.short_name}</p>
-                          <p className="text-[10px] text-white/30 uppercase font-bold">Full Time</p>
+                          <p className="text-xs font-bold truncate">{n.isAppNotification ? (n.title || n.message || 'New KickLive notification') : `${n.homeTeam?.short_name} vs ${n.awayTeam?.short_name}`}</p>
+                          <p className="text-[10px] text-white/30 uppercase font-bold">{n.isAppNotification ? 'Notification' : 'Full Time'}</p>
                         </div>
-                        <span className="text-sm font-black text-brand-green">{n.home_score} – {n.away_score}</span>
+                        {!n.isAppNotification && <span className="text-sm font-black text-brand-green">{n.home_score} – {n.away_score}</span>}
                       </button>
                     ))}
                   </div>

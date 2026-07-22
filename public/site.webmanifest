@@ -1,7 +1,9 @@
 {
   "name": "KICK live",
   "short_name": "kLIVE",
-  "start_url": "/",
+  "start_url": "/#/",
+  "scope": "/",
+  "id": "/#/",
   "display": "standalone",
   "theme_color": "#0B0E13",
   "background_color": "#0B0E13",
