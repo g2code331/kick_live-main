@@ -136,23 +136,21 @@ export default function Header() {
   return (
     <header className="sticky top-0 z-50 glass border-b border-white/10">
       <div className="container mx-auto px-4 py-3 relative flex items-center justify-between">
-        {/* Refresh Button (was the icon logo) */}
+        {/* Enlarged left wordmark logo */}
         <button
-          onClick={handleRefresh}
-          aria-label="Refresh app"
-          title="Refresh"
+          onClick={() => navigate('/')}
+          aria-label="Go to KickLive home"
+          title="KickLive home"
           className="relative flex items-center justify-center shrink-0 group focus:outline-none"
         >
           <span
-            className="absolute inset-0 rounded-full opacity-40 group-hover:opacity-70 transition-opacity duration-500 animate-brand-aura -z-10"
+            className="absolute inset-0 scale-125 rounded-full opacity-40 group-hover:opacity-70 transition-opacity duration-500 animate-brand-aura -z-10"
             aria-hidden="true"
           />
           <img
-            src="/kicklive-icon.png"
-            alt="Refresh"
-            className={`relative h-14 sm:h-16 md:h-20 w-auto object-contain drop-shadow-[0_0_14px_rgba(57,255,20,0.5)] transition-transform duration-300 ${
-              isRefreshing ? 'animate-spin' : 'group-hover:rotate-[25deg] group-active:scale-90'
-            }`}
+            src="/kicklive-logo.png.png"
+            alt="KickLive"
+            className="relative h-12 sm:h-14 md:h-16 w-auto max-w-[180px] object-contain drop-shadow-[0_0_14px_rgba(0,212,255,0.55)] transition-transform duration-300 group-hover:scale-105 group-active:scale-95"
           />
         </button>
 
