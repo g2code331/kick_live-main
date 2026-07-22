@@ -11,21 +11,6 @@
   --color-brand-border: rgba(255, 255, 255, 0.1);
 }
 
-/* Modern logo treatment: a restrained neon aura instead of a flat glow */
-.logo-shell { isolation: isolate; }
-.logo-halo {
-  position: absolute;
-  inset: 12%;
-  z-index: -1;
-  border-radius: 9999px;
-  background: conic-gradient(from 210deg, #39FF14, #00D4FF 38%, #FF00D4 72%, #39FF14);
-  filter: blur(18px);
-  opacity: .42;
-  transform: scale(1.18);
-  transition: opacity .35s ease, transform .35s ease;
-}
-.logo-shell:hover .logo-halo { opacity: .78; transform: scale(1.28); }
-
 /* KickLive Gradient Utilities */
 .gradient-kick {
   background: linear-gradient(135deg, #39FF14 0%, #00D4FF 50%, #FF00D4 100%);

@@ -24,6 +24,14 @@ export default function Header() {
   const notifRef = useRef<HTMLDivElement>(null);
 
 
+  // The enlarged wordmark also acts as the app refresh control.
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const handleRefresh = () => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    window.setTimeout(() => window.location.reload(), 550);
+  };
+
   const navItems = [
     { path: '/', label: 'HOME', icon: '🏠' },
     { path: '/matches', label: 'MATCHES', icon: '⚽' },
@@ -93,11 +101,14 @@ export default function Header() {
   // Load recent match results for notifications
   const loadNotifications = async () => {
     const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const [{ data: matchData }, { data: appData }] = await Promise.all([
-      supabase.from('matches').select('id, home_score, away_score, status, start_time, homeTeam:teams!home_team_id(name, short_name), awayTeam:teams!away_team_id(name, short_name)').in('status', ['full_time', 'completed']).gte('start_time', yesterday).order('start_time', { ascending: false }).limit(8),
-      supabase.from('notifications').select('id, title, message, created_at, match_id').gte('created_at', yesterday).order('created_at', { ascending: false }).limit(20),
-    ]);
-    const next = [...(matchData || []), ...(appData || []).map((n: any) => ({ ...n, isAppNotification: true }))];
+    const { data: matchData } = await supabase
+      .from('matches')
+      .select('id, home_score, away_score, status, start_time, homeTeam:teams!home_team_id(name, short_name), awayTeam:teams!away_team_id(name, short_name)')
+      .in('status', ['full_time', 'completed'])
+      .gte('start_time', yesterday)
+      .order('start_time', { ascending: false })
+      .limit(8);
+    const next = matchData || [];
     const nextIds = new Set(next.map((n: any) => n.id));
     if (lastNotificationIds.current.size > 0 && next.some((n: any) => !lastNotificationIds.current.has(n.id))) playGoalSound();
     lastNotificationIds.current = nextIds;
@@ -131,19 +142,15 @@ export default function Header() {
       <div className="container mx-auto px-4 py-3 relative flex items-center justify-between">
         {/* Enlarged left wordmark logo */}
         <button
-          onClick={() => navigate('/')}
-          aria-label="Go to KickLive home"
-          title="KickLive home"
+          onClick={handleRefresh}
+          aria-label="Refresh app"
+          title="Refresh app"
           className="logo-shell relative flex items-center justify-center shrink-0 group focus:outline-none"
         >
-          <span
-            className="logo-halo"
-            aria-hidden="true"
-          />
           <img
             src="/kicklive-logo.png.png"
             alt="KickLive"
-            className="relative h-14 sm:h-16 md:h-20 w-auto max-w-[240px] object-contain drop-shadow-[0_4px_10px_rgba(0,0,0,0.6)] transition-transform duration-300 group-hover:scale-[1.03] group-active:scale-[0.98]"
+            className={`relative h-14 sm:h-16 md:h-20 w-auto max-w-[240px] object-contain drop-shadow-[0_4px_10px_rgba(0,0,0,0.6)] transition-transform duration-300 group-hover:scale-[1.03] group-active:scale-[0.98] ${isRefreshing ? 'animate-spin' : ''}`}
           />
         </button>
 
@@ -239,15 +246,15 @@ export default function Header() {
                     {notifications.map(n => (
                       <button
                         key={n.id}
-                        onClick={() => { if (n.match_id) navigate(`/match/${n.match_id}`); setNotifOpen(false); }}
+                        onClick={() => { navigate(`/match/${n.id}`); setNotifOpen(false); }}
                         className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white/5 transition-colors text-left"
                       >
                         <Trophy size={14} className="text-brand-green shrink-0" />
                         <div className="flex-1 min-w-0">
-                          <p className="text-xs font-bold truncate">{n.isAppNotification ? (n.title || n.message || 'New KickLive notification') : `${n.homeTeam?.short_name} vs ${n.awayTeam?.short_name}`}</p>
-                          <p className="text-[10px] text-white/30 uppercase font-bold">{n.isAppNotification ? 'Notification' : 'Full Time'}</p>
+                          <p className="text-xs font-bold truncate">{n.homeTeam?.short_name} vs {n.awayTeam?.short_name}</p>
+                          <p className="text-[10px] text-white/30 uppercase font-bold">Full Time</p>
                         </div>
-                        {!n.isAppNotification && <span className="text-sm font-black text-brand-green">{n.home_score} – {n.away_score}</span>}
+                        <span className="text-sm font-black text-brand-green">{n.home_score} – {n.away_score}</span>
                       </button>
                     ))}
                   </div>
