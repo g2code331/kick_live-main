@@ -148,7 +148,7 @@ export default function Header() {
 
   return (
     <header className="sticky top-0 z-50 glass border-b border-white/10">
-      <div className="container mx-auto px-4 py-3 relative flex items-center justify-between">
+      <div className="container mx-auto px-4 py-0 h-20 sm:h-24 md:h-28 relative flex items-center justify-between">
         {/* Enlarged left wordmark logo */}
         <button
           onClick={handleRefresh}
