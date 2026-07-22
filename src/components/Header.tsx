@@ -20,6 +20,14 @@ export default function Header() {
   const [notifications, setNotifications] = useState<any[]>([]);
   const notifRef = useRef<HTMLDivElement>(null);
 
+  // Refresh button state
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const handleRefresh = () => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    window.setTimeout(() => window.location.reload(), 550);
+  };
+
   const navItems = [
     { path: '/', label: 'HOME', icon: '🏠' },
     { path: '/matches', label: 'MATCHES', icon: '⚽' },
@@ -84,31 +92,42 @@ export default function Header() {
 
   return (
     <header className="sticky top-0 z-50 glass border-b border-white/10">
-      <div className="container mx-auto px-4 py-3 flex items-center justify-between">
-        {/* Logo */}
-        <div className="relative flex items-center cursor-pointer shrink-0" onClick={() => navigate('/')}>
-          <div className="absolute inset-0 bg-brand-green/30 blur-2xl rounded-full animate-pulse -z-10" aria-hidden="true" />
+      <div className="container mx-auto px-4 py-3 relative flex items-center justify-between">
+        {/* Refresh Button (was the icon logo) */}
+        <button
+          onClick={handleRefresh}
+          aria-label="Refresh app"
+          title="Refresh"
+          className="relative flex items-center justify-center shrink-0 group focus:outline-none"
+        >
+          <span
+            className="absolute inset-0 rounded-full opacity-40 group-hover:opacity-70 transition-opacity duration-500 animate-brand-aura -z-10"
+            aria-hidden="true"
+          />
+          <img
+            src="/kicklive-icon.png"
+            alt="Refresh"
+            className={`relative h-14 sm:h-16 md:h-20 w-auto object-contain drop-shadow-[0_0_14px_rgba(57,255,20,0.5)] transition-transform duration-300 ${
+              isRefreshing ? 'animate-spin' : 'group-hover:rotate-[25deg] group-active:scale-90'
+            }`}
+          />
+        </button>
+
+        {/* Centered Wordmark Logo */}
+        <div
+          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center cursor-pointer"
+          onClick={() => navigate('/')}
+        >
+          <span
+            className="absolute inset-0 scale-150 rounded-full opacity-50 animate-brand-aura -z-10"
+            aria-hidden="true"
+          />
           <img
             src="/kicklive-logo.png.png"
             alt="KickLive"
-            className="relative h-12 sm:h-14 md:h-16 w-auto object-contain drop-shadow-[0_0_10px_rgba(57,255,20,0.55)] hover:drop-shadow-[0_0_18px_rgba(57,255,20,0.85)] transition-all duration-300"
+            className="relative h-9 sm:h-11 md:h-[3.25rem] w-auto object-contain drop-shadow-[0_0_10px_rgba(0,212,255,0.55)] hover:drop-shadow-[0_0_20px_rgba(255,0,212,0.7)] transition-all duration-300"
           />
         </div>
-
-        {/* Desktop Nav */}
-        <nav className="hidden md:flex items-center gap-1">
-          {navItems.map((item) => (
-            <button
-              key={item.path}
-              onClick={() => navigate(item.path)}
-              className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
-                isActive(item.path) ? 'text-brand-green bg-brand-green/10' : 'text-white/60 hover:text-brand-green hover:bg-white/5'
-              }`}
-            >
-              {item.label}
-            </button>
-          ))}
-        </nav>
 
         {/* Right Side */}
         <div className="flex items-center gap-3">
@@ -244,6 +263,21 @@ export default function Header() {
           )}
         </div>
       </div>
+
+      {/* Desktop Nav */}
+      <nav className="hidden md:flex items-center justify-center gap-1 py-2 border-t border-white/5">
+        {navItems.map((item) => (
+          <button
+            key={item.path}
+            onClick={() => navigate(item.path)}
+            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
+              isActive(item.path) ? 'text-brand-green bg-brand-green/10' : 'text-white/60 hover:text-brand-green hover:bg-white/5'
+            }`}
+          >
+            {item.label}
+          </button>
+        ))}
+      </nav>
 
       {/* Mobile Nav */}
       <div className="md:hidden flex items-center justify-around py-2 border-t border-white/5">
