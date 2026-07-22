@@ -682,9 +682,9 @@ function PlayersTab({ team, onToast }: { team: any; onToast: any }) {
                         <td className="px-4 py-3 text-center font-black text-brand-green">{p.goals || 0}</td>
                         <td className="px-4 py-3 text-center font-bold text-white/40">{p.assists || 0}</td>
                         <td className="px-4 py-3">
-                          <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button onClick={() => openEdit(p)} className="p-1.5 rounded-lg text-white/30 hover:text-brand-green hover:bg-brand-green/10"><Edit2 size={13} /></button>
-                            <button onClick={() => handleDelete(p)} disabled={deleting === p.id} className="p-1.5 rounded-lg text-white/30 hover:text-red-400 hover:bg-red-400/10 disabled:opacity-50">
+                          <div className="flex items-center justify-end gap-1 opacity-100 transition-opacity">
+                            <button type="button" onClick={() => openEdit(p)} aria-label={`Edit ${p.name}`} title="Edit player" className="p-2 rounded-lg text-brand-green bg-brand-green/10 hover:bg-brand-green/20"><Edit2 size={15} /></button>
+                            <button type="button" onClick={() => handleDelete(p)} disabled={deleting === p.id} aria-label={`Delete ${p.name}`} title="Delete player" className="p-2 rounded-lg text-red-400 bg-red-400/10 hover:bg-red-400/20 disabled:opacity-50">
                               {deleting === p.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
                             </button>
                           </div>
