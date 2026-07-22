@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import Loading from "../components/Loading";
 import Header from "../components/Header";
@@ -10,6 +10,9 @@ export default function HomePage() {
   const [topScorers, setTopScorers] = useState<any[]>([]);
   const [news, setNews] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [newsIndex, setNewsIndex] = useState(0);
+  const newsScrollRef = useRef<HTMLDivElement>(null);
+  const newsHovering = useRef(false);
 
   useEffect(() => {
     async function loadRealData() {
@@ -56,6 +59,21 @@ export default function HomePage() {
 
     return () => clearInterval(pollInterval);
   }, []);
+
+  // Auto-advance the "Latest News" carousel every 4s, pausing while the user is interacting
+  useEffect(() => {
+    if (news.length <= 1) return;
+    const id = setInterval(() => {
+      if (newsHovering.current) return;
+      setNewsIndex(prev => {
+        const next = (prev + 1) % news.length;
+        const card = newsScrollRef.current?.children[next] as HTMLElement | undefined;
+        card?.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' });
+        return next;
+      });
+    }, 4000);
+    return () => clearInterval(id);
+  }, [news.length]);
 
   if (loading) return <Loading text="Loading..." size="md" />;
 
@@ -149,29 +167,60 @@ export default function HomePage() {
 
         {/* Latest News */}
         <section className="mb-6">
-          <h2 className="text-xl font-black uppercase mb-4">📰 Latest News</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-black uppercase">📰 Latest News</h2>
+            {news.length > 0 && (
+              <button onClick={() => navigate('/news')} className="text-xs font-bold text-brand-green hover:underline">
+                See all
+              </button>
+            )}
+          </div>
           {news.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {news.slice(0, 4).map((item) => (
-                <div key={item.id} className="glass rounded-xl overflow-hidden border border-white/10 hover:border-brand-green/30 transition-all cursor-pointer">
-                  <div className="aspect-video overflow-hidden">
-                    <img
-                      src={item.image_url || 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&auto=format&fit=crop'}
-                      alt={item.title}
-                      className="w-full h-full object-cover transition-transform duration-300 hover:scale-105"
-                      onError={e => { e.currentTarget.src = 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&auto=format&fit=crop'; }}
+            <>
+              <div
+                ref={newsScrollRef}
+                onMouseEnter={() => { newsHovering.current = true; }}
+                onMouseLeave={() => { newsHovering.current = false; }}
+                onTouchStart={() => { newsHovering.current = true; }}
+                onTouchEnd={() => { newsHovering.current = false; }}
+                className="flex gap-4 overflow-x-auto snap-x snap-mandatory pb-2 -mx-4 px-4 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                style={{ touchAction: 'pan-y' }}
+              >
+                {news.map((item) => (
+                  <div
+                    key={item.id}
+                    onClick={() => navigate('/news', { state: { articleId: item.id } })}
+                    className="snap-start shrink-0 w-[78%] sm:w-[320px] glass rounded-xl overflow-hidden border border-white/10 hover:border-brand-green/30 transition-all cursor-pointer"
+                  >
+                    <div className="aspect-video overflow-hidden">
+                      <img
+                        src={item.image_url || 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&auto=format&fit=crop'}
+                        alt={item.title}
+                        className="w-full h-full object-cover transition-transform duration-300 hover:scale-105"
+                        onError={e => { e.currentTarget.src = 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&auto=format&fit=crop'; }}
+                      />
+                    </div>
+                    <div className="p-4">
+                      <span className="text-[10px] text-brand-green font-bold uppercase">{item.category || 'News'}</span>
+                      <h3 className="font-bold mt-1 text-sm line-clamp-2">{item.title || 'News Title'}</h3>
+                      <p className="text-[10px] text-white/40 mt-2">
+                        {item.created_at ? new Date(item.created_at).toLocaleDateString() : 'Recent'}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {news.length > 1 && (
+                <div className="flex items-center justify-center gap-1.5 mt-3">
+                  {news.map((_, i) => (
+                    <span
+                      key={i}
+                      className={`h-1.5 rounded-full transition-all ${i === newsIndex ? 'w-5 bg-brand-green' : 'w-1.5 bg-white/20'}`}
                     />
-                  </div>
-                  <div className="p-4">
-                    <span className="text-[10px] text-brand-green font-bold uppercase">{item.category || 'News'}</span>
-                    <h3 className="font-bold mt-1 text-sm line-clamp-2">{item.title || 'News Title'}</h3>
-                    <p className="text-[10px] text-white/40 mt-2">
-                      {item.created_at ? new Date(item.created_at).toLocaleDateString() : 'Recent'}
-                    </p>
-                  </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              )}
+            </>
           ) : (
             <div className="glass rounded-xl p-8 text-center">
               <p className="text-white/40 text-sm">No news yet</p>

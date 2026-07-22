@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Search, X, ChevronRight, Clock, Eye, Tag, ArrowLeft, Loader2, Newspaper } from 'lucide-react';
 import Header from '../components/Header';
 import { supabase } from '../lib/supabase';
@@ -32,6 +32,7 @@ function timeSince(dateStr: string) {
 
 export default function NewsPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [articles, setArticles] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [category, setCategory] = useState<Category>('All');
@@ -55,7 +56,8 @@ export default function NewsPage() {
     if (category !== 'All') q = q.eq('category', category);
     if (searchQuery.trim()) q = q.ilike('title', `%${searchQuery.trim()}%`);
 
-    const { data } = await q;
+    const { data, error } = await q;
+    if (error) console.error('Failed to load articles:', error.message);
     if (!error) {
       const incoming = data || [];
       setArticles(prev => reset ? incoming : [...prev, ...incoming]);
@@ -72,6 +74,25 @@ export default function NewsPage() {
     fetchArticles(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [category, searchQuery]);
+
+  // If we arrived here from the homepage carousel with a specific article in mind,
+  // fetch it directly (regardless of current filters/pagination) and open it.
+  useEffect(() => {
+    const articleId = (location.state as any)?.articleId;
+    if (!articleId) return;
+    (async () => {
+      const { data } = await supabase
+        .from('media')
+        .select('id, title, excerpt, content, category, image_url, created_at, views')
+        .eq('id', articleId)
+        .maybeSingle();
+      if (data) {
+        setSelected(data);
+        supabase.from('media').update({ views: (data.views || 0) + 1 }).eq('id', data.id).then(() => {});
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Increment views when article is opened (best-effort, ignore errors)
   const openArticle = async (article: any) => {
