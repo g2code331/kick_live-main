@@ -159,7 +159,7 @@ export default function Header() {
           <img
             src="/kicklive-logo.png.png"
             alt="KickLive"
-            className={`relative h-14 sm:h-16 md:h-20 w-auto max-w-[240px] object-contain drop-shadow-[0_4px_10px_rgba(0,0,0,0.6)] transition-transform duration-300 group-hover:scale-[1.03] group-active:scale-[0.98] ${isRefreshing ? 'animate-spin' : ''}`}
+            className={`relative h-20 sm:h-24 md:h-28 w-auto max-w-[320px] object-contain drop-shadow-[0_4px_10px_rgba(0,0,0,0.6)] transition-transform duration-300 group-hover:scale-[1.03] group-active:scale-[0.98] ${isRefreshing ? 'animate-spin' : ''}`}
           />
         </button>
 
