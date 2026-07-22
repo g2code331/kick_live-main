@@ -71,7 +71,7 @@ export default function Header() {
       const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
       if (AudioContextClass) audioContextRef.current = new AudioContextClass();
     }
-    if (audioContextRef.current.state === 'suspended') audioContextRef.current.resume();
+    if (audioContextRef.current?.state === 'suspended') audioContextRef.current.resume();
   };
   const playGoalSound = () => {
     try {
