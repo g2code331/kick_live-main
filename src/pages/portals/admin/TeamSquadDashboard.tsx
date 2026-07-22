@@ -199,16 +199,22 @@ export default function TeamSquadDashboard({ team, onBack }: TeamSquadDashboardP
                       <p className="text-xs text-white/40 uppercase">{player.position} • {player.nationality || 'Unknown'}</p>
                     </div>
                   </div>
-                  <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button 
+                  <div className="flex gap-2 opacity-100 transition-opacity">
+                    <button
+                      type="button"
+                      aria-label={`Edit ${player.name}`}
+                      title="Edit player"
                       onClick={() => handleEditPlayer(player)}
-                      className="p-2 bg-white/5 hover:bg-white/10 rounded-lg transition-colors"
+                      className="p-2.5 bg-brand-blue/15 text-brand-blue hover:bg-brand-blue/25 rounded-lg transition-colors"
                     >
                       <Edit size={16} />
                     </button>
-                    <button 
+                    <button
+                      type="button"
+                      aria-label={`Delete ${player.name}`}
+                      title="Delete player"
                       onClick={() => handleDeletePlayer(player.id)}
-                      className="p-2 bg-brand-red/10 hover:bg-brand-red/20 text-brand-red rounded-lg transition-colors"
+                      className="p-2.5 bg-brand-red/10 hover:bg-brand-red/20 text-brand-red rounded-lg transition-colors"
                     >
                       <Trash2 size={16} />
                     </button>
