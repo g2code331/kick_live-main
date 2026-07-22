@@ -86,9 +86,13 @@ export default function Header() {
     <header className="sticky top-0 z-50 glass border-b border-white/10">
       <div className="container mx-auto px-4 py-3 flex items-center justify-between">
         {/* Logo */}
-        <div className="flex items-center gap-2 cursor-pointer" onClick={() => navigate('/')}>
-          <img src="/kicklive-icon.png" alt="KickLive" className="w-8 h-8 object-contain" />
-          <span className="font-black text-lg italic uppercase text-brand-green hidden sm:block">KickLive</span>
+        <div className="relative flex items-center cursor-pointer shrink-0" onClick={() => navigate('/')}>
+          <div className="absolute inset-0 bg-brand-green/30 blur-2xl rounded-full animate-pulse -z-10" aria-hidden="true" />
+          <img
+            src="/kicklive-logo.png.png"
+            alt="KickLive"
+            className="relative h-12 sm:h-14 md:h-16 w-auto object-contain drop-shadow-[0_0_10px_rgba(57,255,20,0.55)] hover:drop-shadow-[0_0_18px_rgba(57,255,20,0.85)] transition-all duration-300"
+          />
         </div>
 
         {/* Desktop Nav */}

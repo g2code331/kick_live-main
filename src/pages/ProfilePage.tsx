@@ -1,9 +1,15 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, User, Mail, Smartphone, Key, Bell, Save, LogOut, Eye, EyeOff, Camera, Calendar, Activity, Globe, CheckCircle, XCircle } from 'lucide-react';
+import { ArrowLeft, User, Mail, Smartphone, Key, Bell, Save, LogOut, Eye, EyeOff, Camera, Calendar, Activity, Globe, CheckCircle, XCircle, LayoutDashboard } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import Header from '../components/Header';
+
+const DASHBOARD_BY_ROLE: Record<string, { label: string; path: string }> = {
+  admin: { label: 'Go to Admin Dashboard', path: '/admin' },
+  media: { label: 'Go to Media Dashboard', path: '/media-portal' },
+  team_manager: { label: 'Go to Team Dashboard', path: '/team-owner' },
+};
 
 export default function ProfilePage() {
   const navigate = useNavigate();
@@ -60,6 +66,8 @@ export default function ProfilePage() {
     }
   };
 
+  const dashboard = profile?.role ? DASHBOARD_BY_ROLE[profile.role] : null;
+
   if (!user) {
     return (
       <div className="relative min-h-screen">
@@ -99,6 +107,16 @@ export default function ProfilePage() {
         </button>
 
         <div className="glass rounded-[3rem] border border-white/10 overflow-hidden shadow-2xl">
+          {dashboard && (
+            <div className="px-6 sm:px-8 pt-6">
+              <button
+                onClick={() => navigate(dashboard.path)}
+                className="w-full flex items-center justify-center gap-2 gradient-green text-black px-6 py-3.5 rounded-2xl font-black uppercase text-sm tracking-widest hover:scale-[1.02] transition-transform shadow-lg shadow-brand-green/20"
+              >
+                <LayoutDashboard size={18} /> {dashboard.label}
+              </button>
+            </div>
+          )}
           <div className="flex flex-col md:flex-row min-h-[560px]">
             {/* Sidebar */}
             <aside className="md:w-64 bg-white/5 border-b md:border-b-0 md:border-r border-white/10 p-8 flex flex-col">
