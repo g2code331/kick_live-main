@@ -23,13 +23,6 @@ export default function Header() {
   const [notifications, setNotifications] = useState<any[]>([]);
   const notifRef = useRef<HTMLDivElement>(null);
 
-  // Refresh button state
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const handleRefresh = () => {
-    if (isRefreshing) return;
-    setIsRefreshing(true);
-    window.setTimeout(() => window.location.reload(), 550);
-  };
 
   const navItems = [
     { path: '/', label: 'HOME', icon: '🏠' },
@@ -141,34 +134,19 @@ export default function Header() {
           onClick={() => navigate('/')}
           aria-label="Go to KickLive home"
           title="KickLive home"
-          className="relative flex items-center justify-center shrink-0 group focus:outline-none"
+          className="logo-shell relative flex items-center justify-center shrink-0 group focus:outline-none"
         >
           <span
-            className="absolute inset-0 scale-125 rounded-full opacity-40 group-hover:opacity-70 transition-opacity duration-500 animate-brand-aura -z-10"
+            className="logo-halo"
             aria-hidden="true"
           />
           <img
             src="/kicklive-logo.png.png"
             alt="KickLive"
-            className="relative h-12 sm:h-14 md:h-16 w-auto max-w-[180px] object-contain drop-shadow-[0_0_14px_rgba(0,212,255,0.55)] transition-transform duration-300 group-hover:scale-105 group-active:scale-95"
+            className="relative h-14 sm:h-16 md:h-20 w-auto max-w-[240px] object-contain drop-shadow-[0_4px_10px_rgba(0,0,0,0.6)] transition-transform duration-300 group-hover:scale-[1.03] group-active:scale-[0.98]"
           />
         </button>
 
-        {/* Centered Wordmark Logo */}
-        <div
-          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center cursor-pointer"
-          onClick={() => navigate('/')}
-        >
-          <span
-            className="absolute inset-0 scale-150 rounded-full opacity-50 animate-brand-aura -z-10"
-            aria-hidden="true"
-          />
-          <img
-            src="/kicklive-logo.png.png"
-            alt="KickLive"
-            className="relative h-11 sm:h-14 md:h-[4.25rem] w-auto object-contain drop-shadow-[0_0_10px_rgba(0,212,255,0.55)] hover:drop-shadow-[0_0_20px_rgba(255,0,212,0.7)] transition-all duration-300"
-          />
-        </div>
 
         {/* Right Side */}
         <div className="flex items-center gap-3">
