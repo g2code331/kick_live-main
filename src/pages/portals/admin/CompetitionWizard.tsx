@@ -175,8 +175,8 @@ interface CompetitionWizardProps {
                 </div>
               </div>
               
-              <div className="grid grid-cols-3 gap-4">
-                {['league', 'cup', 'knockout'].map(t => (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {['league', 'cup', 'knockout', 'friendly'].map(t => (
                   <button key={t} onClick={() => setCompetitionConfig({...config, type: t as any})} className={`p-6 rounded-2xl border-2 transition-all ${config.type === t ? 'border-brand-green bg-brand-green/10' : 'border-white/5 bg-white/5'}`}>
                     <p className="font-black uppercase italic text-xs">{t}</p>
                   </button>
