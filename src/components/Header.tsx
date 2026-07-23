@@ -141,7 +141,7 @@ export default function Header() {
 
   return (
     <header className="sticky top-0 z-50 glass border-b border-white/10">
-      <div className="container mx-auto px-4 py-0 h-16 sm:h-20 md:h-24 relative flex items-center justify-between">
+      <div className="container mx-auto px-4 py-0 h-24 sm:h-28 md:h-32 relative flex items-center justify-between">
         {/* Enlarged left wordmark logo */}
         <button
           onClick={handleRefresh}
@@ -152,7 +152,7 @@ export default function Header() {
           <img
             src="/kicklive-logo.png.png"
             alt="KickLive"
-            className={`relative h-20 sm:h-24 md:h-28 w-auto max-w-[320px] object-contain drop-shadow-[0_4px_10px_rgba(0,0,0,0.6)] transition-transform duration-300 group-hover:scale-[1.03] group-active:scale-[0.98] ${isRefreshing ? 'animate-spin' : ''}`}
+            className={`relative h-24 sm:h-28 md:h-32 w-auto max-w-[360px] object-contain drop-shadow-[0_4px_10px_rgba(0,0,0,0.6)] transition-transform duration-300 group-hover:scale-[1.03] group-active:scale-[0.98] ${isRefreshing ? 'animate-spin' : ''}`}
           />
         </button>
 
