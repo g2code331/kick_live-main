@@ -12,7 +12,7 @@ interface CompetitionWizardProps {
 }
 
   type Step = 'basic' | 'teams' | 'format' | 'rules' | 'preview';
-  type TournamentFormat = 'league' | 'cup' | 'knockout';
+  type TournamentFormat = 'league' | 'cup' | 'knockout' | 'friendly';
   
   export default function CompetitionWizard({ isOpen, onClose }: CompetitionWizardProps) {
     const [currentStep, setCurrentStep] = useState<Step>('basic');
@@ -48,12 +48,18 @@ interface CompetitionWizardProps {
   }
 
   const toggleTeam = (id: number) => {
-    setCompetitionConfig(prev => ({
-      ...prev,
-      selectedTeams: prev.selectedTeams.includes(id) 
-        ? prev.selectedTeams.filter(t => t !== id)
-        : [...prev.selectedTeams, id]
-    }));
+    setCompetitionConfig(prev => {
+      if (prev.type === 'friendly' && !prev.selectedTeams.includes(id) && prev.selectedTeams.length >= 2) {
+        setWizardMsg({ type: 'error', text: 'Friendly tournaments allow exactly 2 teams' });
+        return prev;
+      }
+      return {
+        ...prev,
+        selectedTeams: prev.selectedTeams.includes(id)
+          ? prev.selectedTeams.filter(t => t !== id)
+          : [...prev.selectedTeams, id]
+      };
+    });
   };
 
   const handleGenerate = async () => {
@@ -66,6 +72,12 @@ interface CompetitionWizardProps {
         return;
       }
       
+      if (config.type === 'friendly' && config.selectedTeams.length !== 2) {
+        setWizardMsg({ type: 'error', text: 'Friendly tournaments require exactly 2 teams' });
+        setLoading(false);
+        return;
+      }
+
       if (config.selectedTeams.length < 2) {
         setWizardMsg({ type: 'error', text: 'Please select at least 2 teams' });
         setLoading(false);
@@ -174,6 +186,8 @@ interface CompetitionWizardProps {
           )}
 
           {currentStep === 'teams' && (
+            <>
+            <div className="mb-4 rounded-xl border border-brand-blue/20 bg-brand-blue/10 p-4 text-sm text-white/70">{config.type === 'friendly' ? 'Friendly requires exactly 2 teams.' : 'Select the teams for this tournament.'}</div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {availableTeams.map(team => (
                 <button key={team.id} onClick={() => toggleTeam(team.id)} className={`p-4 rounded-xl border transition-all text-left flex items-center gap-3 ${config.selectedTeams.includes(team.id) ? 'border-brand-green bg-brand-green/10' : 'border-white/5 bg-white/5'}`}>
@@ -182,6 +196,7 @@ interface CompetitionWizardProps {
                 </button>
               ))}
             </div>
+            </>
           )}
 
           {currentStep === 'format' && (
@@ -196,6 +211,7 @@ interface CompetitionWizardProps {
                   { id: 'league', label: 'League Format', desc: 'Teams play in a league table. Winner has most points.', icon: <Hash /> },
                   { id: 'cup', label: 'Cup Format', desc: 'Group stage followed by knockout rounds.', icon: <Trophy /> },
                   { id: 'knockout', label: 'Knockout Only', desc: 'Direct elimination. Lose and you\'re out.', icon: <Zap /> },
+                  { id: 'friendly', label: 'Friendly', desc: 'Exactly two selected teams play a friendly fixture.', icon: <Calendar /> },
                 ].map(format => (
                   <button
                     key={format.id}
@@ -381,7 +397,9 @@ interface CompetitionWizardProps {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="bg-white/5 rounded-lg p-4 text-center">
                     <p className="text-2xl font-black text-brand-green">
-                      {config.type === 'league' 
+                      {config.type === 'friendly'
+                        ? (config.homeAway ? 2 : 1)
+                        : config.type === 'league' 
                         ? Math.floor(config.selectedTeams.length * (config.selectedTeams.length - 1) / (config.homeAway ? 1 : 2))
                         : config.type === 'cup'
                           ? Math.floor(config.selectedTeams.length / 2) + Math.ceil(Math.log2(config.selectedTeams.length)) * 2
@@ -392,7 +410,9 @@ interface CompetitionWizardProps {
                   </div>
                   <div className="bg-white/5 rounded-lg p-4 text-center">
                     <p className="text-2xl font-black text-brand-blue">
-                      {config.type === 'league' 
+                      {config.type === 'friendly'
+                        ? (config.homeAway ? 2 : 1)
+                        : config.type === 'league' 
                         ? (config.homeAway ? 2 : 1) * (config.selectedTeams.length - 1)
                         : Math.ceil(Math.log2(config.selectedTeams.length)) + 1
                       }

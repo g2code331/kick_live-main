@@ -26,8 +26,9 @@ export default function HomePage() {
           supabase
             .from('players')
             .select('id, name, goals, nationality, teams(name)')
+            .gt('goals', 0)
             .order('goals', { ascending: false })
-            .limit(10),
+            .limit(3),
           supabase
             .from('media')
             .select('id, title, category, image_url, created_at, excerpt')
@@ -136,7 +137,7 @@ export default function HomePage() {
           <h2 className="text-xl font-black uppercase mb-4">⚽ Top Scorers</h2>
           <div className="glass rounded-xl overflow-hidden">
             <div className="divide-y divide-white/5">
-              {topScorers.slice(0, 5).map((player, i) => (
+              {topScorers.slice(0, 3).map((player, i) => (
                 <div
                   key={player.id}
                   className="flex items-center justify-between p-3 hover:bg-white/5 transition-all cursor-pointer"

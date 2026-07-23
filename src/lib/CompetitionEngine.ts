@@ -6,7 +6,7 @@
  * Follows FIFA competition standards
  */
 
-export type CompetitionFormat = 'league' | 'cup' | 'knockout';
+export type CompetitionFormat = 'league' | 'cup' | 'knockout' | 'friendly';
 
 export interface Team {
   id: number;
@@ -459,6 +459,27 @@ export class KnockoutEngine {
   }
 }
 
+/** One-off or home-and-away friendly fixtures. Friendly tournaments require exactly two teams. */
+export class FriendlyEngine {
+  private teams: Team[];
+  private config: any;
+  constructor(teams: Team[], config: any) { this.teams = teams; this.config = config; }
+  generateFixtures(competitionId: number): Match[] {
+    if (this.teams.length !== 2) return [];
+    const start = new Date(this.config.startDate);
+    const makeMatch = (home: Team, away: Team, date: Date, matchday: number): Match => ({
+      competition_id: competitionId, home_team_id: home.id, away_team_id: away.id,
+      start_time: date.toISOString(), matchday, round: 'Friendly', venue: 'TBD', status: 'scheduled'
+    });
+    const fixtures = [makeMatch(this.teams[0], this.teams[1], start, 1)];
+    if (this.config.homeAway) {
+      const returnDate = new Date(start); returnDate.setDate(returnDate.getDate() + 7);
+      fixtures.push(makeMatch(this.teams[1], this.teams[0], returnDate, 2));
+    }
+    return fixtures;
+  }
+}
+
 /**
  * MAIN COMPETITION ENGINE FACTORY
  */
@@ -476,6 +497,8 @@ export class CompetitionEngine {
         return new CupEngine(teams, config as CupConfig).generateFixtures(competitionId);
       case 'knockout':
         return new KnockoutEngine(teams, config as KnockoutConfig).generateFixtures(competitionId);
+      case 'friendly':
+        return new FriendlyEngine(teams, config as any).generateFixtures(competitionId);
       default:
         throw new Error(`Unknown competition format: ${format}`);
     }
