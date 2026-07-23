@@ -22,6 +22,8 @@ export default function MatchControlDashboard({ match, isOpen, onClose, onUpdate
   const [minute, setMinute] = useState(match?.minute || 0);
   const [period, setPeriod] = useState<MatchPeriod>('first_half');
   const [isTimerRunning, setIsTimerRunning] = useState(false);
+  const [matchStatus, setMatchStatus] = useState(match?.status || 'scheduled');
+  const controlsDisabled = ['scheduled', 'waiting', 'cancelled', 'abandoned', 'postponed'].includes(matchStatus);
   const [homeTeam, setHomeTeam] = useState<any>(null);
   const [awayTeam, setAwayTeam] = useState<any>(null);
   const [events, setEvents] = useState<any[]>([]);
@@ -86,6 +88,7 @@ export default function MatchControlDashboard({ match, isOpen, onClose, onUpdate
         .single();
       
       if (matchData) {
+        setMatchStatus(matchData.status || 'scheduled');
         setHomeTeam(matchData.homeTeam);
         setAwayTeam(matchData.awayTeam);
         setHomeScore(matchData.home_score || 0);
@@ -119,6 +122,7 @@ export default function MatchControlDashboard({ match, isOpen, onClose, onUpdate
   }
 
   const handleKickOff = async () => {
+    setMatchStatus(period);
     const now = new Date();
     await supabase.from('matches').update({
       status: period,
@@ -173,6 +177,7 @@ export default function MatchControlDashboard({ match, isOpen, onClose, onUpdate
   };
 
   const saveMatchState = async () => {
+    if (controlsDisabled) return;
     try {
       await supabase.from('matches').update({
         minute,
@@ -201,6 +206,7 @@ export default function MatchControlDashboard({ match, isOpen, onClose, onUpdate
   };
 
   const handleEventClick = (eventType: string) => {
+    if (controlsDisabled) return;
     setSelectedEventType(eventType);
     setShowEventModal(true);
   };
@@ -248,6 +254,7 @@ export default function MatchControlDashboard({ match, isOpen, onClose, onUpdate
   };
 
   const addCommentary = async () => {
+    if (controlsDisabled) return;
     if (!newComment.trim()) return;
     try {
       await supabase.from('match_commentary').insert([{
@@ -263,6 +270,8 @@ export default function MatchControlDashboard({ match, isOpen, onClose, onUpdate
   };
 
   const updateStat = async (stat: string, value: number, isHome: boolean) => {
+    if (controlsDisabled) return;
+    value = Math.max(0, stat === 'possession' ? Math.min(100, value) : value);
     const key = isHome ? `home_${stat}` : `away_${stat}`;
     setStats((prev: any) => ({ ...prev, [key]: value }));
     
@@ -315,14 +324,14 @@ export default function MatchControlDashboard({ match, isOpen, onClose, onUpdate
               <h2 className="text-2xl font-black italic uppercase">{homeTeam?.name || 'Home'}</h2>
               <div className="flex items-center justify-center gap-2 mt-4">
                 <button 
-                  onClick={() => setHomeScore((s: number) => Math.max(0, s - 1))}
+                  disabled={controlsDisabled} onClick={() => setHomeScore((s: number) => Math.max(0, s - 1))}
                   className="w-12 h-12 rounded-xl bg-white/5 hover:bg-white/10 text-2xl font-bold flex items-center justify-center"
                 >
                   <Minus size={24} />
                 </button>
                 <span className="text-6xl font-black text-brand-green w-32">{homeScore}</span>
                 <button 
-                  onClick={() => setHomeScore((s: number) => s + 1)}
+                  disabled={controlsDisabled} onClick={() => setHomeScore((s: number) => s + 1)}
                   className="w-12 h-12 rounded-xl gradient-green text-black text-2xl font-bold flex items-center justify-center"
                 >
                   <Plus size={24} />
@@ -355,14 +364,14 @@ export default function MatchControlDashboard({ match, isOpen, onClose, onUpdate
               <h2 className="text-2xl font-black italic uppercase">{awayTeam?.name || 'Away'}</h2>
               <div className="flex items-center justify-center gap-2 mt-4">
                 <button 
-                  onClick={() => setAwayScore((s: number) => Math.max(0, s - 1))}
+                  disabled={controlsDisabled} onClick={() => setAwayScore((s: number) => Math.max(0, s - 1))}
                   className="w-12 h-12 rounded-xl bg-white/5 hover:bg-white/10 text-2xl font-bold flex items-center justify-center"
                 >
                   <Minus size={24} />
                 </button>
                 <span className="text-6xl font-black text-brand-green w-32">{awayScore}</span>
                 <button 
-                  onClick={() => setAwayScore((s: number) => s + 1)}
+                  disabled={controlsDisabled} onClick={() => setAwayScore((s: number) => s + 1)}
                   className="w-12 h-12 rounded-xl gradient-green text-black text-2xl font-bold flex items-center justify-center"
                 >
                   <Plus size={24} />
@@ -514,23 +523,21 @@ export default function MatchControlDashboard({ match, isOpen, onClose, onUpdate
               <div key={i} className="space-y-2">
                 <div className="flex items-center justify-between text-sm">
                   {statItem.editable ? (
-                    <input
-                      type="number"
-                      value={statItem.home}
-                      onChange={(e) => updateStat(statItem.stat, parseInt(e.target.value), true)}
-                      className="w-20 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-center focus:border-brand-green/50"
-                    />
+                    <div className="flex items-center gap-1">
+                      <button type="button" disabled={controlsDisabled} onClick={() => updateStat(statItem.stat, Number(statItem.home) - 1, true)} className="w-7 h-7 rounded-lg bg-white/5 text-lg disabled:opacity-30">−</button>
+                      <span className="w-10 text-center font-black">{statItem.home}</span>
+                      <button type="button" disabled={controlsDisabled} onClick={() => updateStat(statItem.stat, Number(statItem.home) + 1, true)} className="w-7 h-7 rounded-lg bg-brand-green/15 text-brand-green text-lg disabled:opacity-30">+</button>
+                    </div>
                   ) : (
                     <span className="text-white/60 w-20 text-center">{statItem.home}</span>
                   )}
                   <span className="text-xs text-white/40">{statItem.label}</span>
                   {statItem.editable ? (
-                    <input
-                      type="number"
-                      value={statItem.away}
-                      onChange={(e) => updateStat(statItem.stat, parseInt(e.target.value), false)}
-                      className="w-20 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-center focus:border-brand-blue/50"
-                    />
+                    <div className="flex items-center gap-1">
+                      <button type="button" disabled={controlsDisabled} onClick={() => updateStat(statItem.stat, Number(statItem.away) - 1, false)} className="w-7 h-7 rounded-lg bg-white/5 text-lg disabled:opacity-30">−</button>
+                      <span className="w-10 text-center font-black">{statItem.away}</span>
+                      <button type="button" disabled={controlsDisabled} onClick={() => updateStat(statItem.stat, Number(statItem.away) + 1, false)} className="w-7 h-7 rounded-lg bg-brand-blue/15 text-brand-blue text-lg disabled:opacity-30">+</button>
+                    </div>
                   ) : (
                     <span className="text-white/60 w-20 text-center">{statItem.away}</span>
                   )}

@@ -9,10 +9,21 @@ interface CompetitionEditorProps {
   onUpdate: () => void;
 }
 
+const defaultCompetitionSettings = {
+  num_groups: 4, teams_per_group: 4, qualifying_teams_per_group: 2,
+  has_third_place_playoff: false, knockout_rounds: ['Round of 16', 'Quarter-finals', 'Semi-finals', 'Final'],
+  match_duration: 90, half_time_duration: 15, extra_time_duration: 30, penalty_shootout: false,
+  kickoff_times: ['15:00', '18:00', '20:00'], match_days: ['Saturday', 'Sunday'], rest_days_between: 3,
+  points_win: 3, points_draw: 1, points_loss: 0, allow_draws: true, away_goals_rule: false,
+  var_enabled: false, substitutions: 5, yellow_card_suspension: 2, red_card_suspension: 1,
+  tiebreakers: ['points', 'goal_difference', 'goals_scored', 'head_to_head']
+};
+
 export default function CompetitionEditor({ competition, isOpen, onClose, onUpdate }: CompetitionEditorProps) {
   const [activeTab, setActiveTab] = useState<'general' | 'format' | 'schedule' | 'rules'>('general');
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
+    ...defaultCompetitionSettings,
     name: competition?.name || '',
     season: competition?.season || '2025',
     format: competition?.format || competition?.type || 'league',
@@ -56,6 +67,7 @@ export default function CompetitionEditor({ competition, isOpen, onClose, onUpda
         status: competition.status || 'upcoming',
         start_date: competition.start_date || '',
         end_date: competition.end_date || '',
+        ...(competition.settings || {}),
       }));
     }
   }, [competition]);
@@ -63,21 +75,40 @@ export default function CompetitionEditor({ competition, isOpen, onClose, onUpda
   const handleSave = async () => {
     setLoading(true);
     try {
-      const { error } = await supabase
-        .from('competitions')
-        .update({
-          name: formData.name,
-          season: formData.season,
-          format: formData.format,
-          status: formData.status,
-          start_date: formData.start_date,
-          end_date: formData.end_date,
-        })
-        .eq('id', competition.id);
-
+      const settings = {
+        num_groups: formData.num_groups, teams_per_group: formData.teams_per_group,
+        qualifying_teams_per_group: formData.qualifying_teams_per_group,
+        has_third_place_playoff: formData.has_third_place_playoff,
+        knockout_rounds: formData.knockout_rounds, match_duration: formData.match_duration,
+        half_time_duration: formData.half_time_duration, extra_time_duration: formData.extra_time_duration,
+        penalty_shootout: formData.penalty_shootout, kickoff_times: formData.kickoff_times,
+        match_days: formData.match_days, rest_days_between: formData.rest_days_between,
+        points_win: formData.points_win, points_draw: formData.points_draw, points_loss: formData.points_loss,
+        allow_draws: formData.allow_draws, away_goals_rule: formData.away_goals_rule,
+        var_enabled: formData.var_enabled, substitutions: formData.substitutions,
+        yellow_card_suspension: formData.yellow_card_suspension, red_card_suspension: formData.red_card_suspension,
+        tiebreakers: formData.tiebreakers
+      };
+      const { error } = await supabase.from('competitions').update({
+        name: formData.name, season: formData.season, type: formData.format, format: formData.format,
+        status: formData.status, start_date: formData.start_date || null, end_date: formData.end_date || null, settings
+      }).eq('id', competition.id);
       if (error) throw error;
 
-      alert('Competition updated successfully!');
+      // Apply schedule changes only to matches that have not started.
+      const { data: scheduledMatches } = await supabase.from('matches').select('id, start_time, status')
+        .eq('competition_id', competition.id).in('status', ['scheduled', 'waiting']).order('start_time');
+      if (scheduledMatches?.length && formData.kickoff_times.length) {
+        const updated = scheduledMatches.map((m: any, index: number) => {
+          const date = new Date(m.start_time || formData.start_date || new Date().toISOString());
+          const time = formData.kickoff_times[index % formData.kickoff_times.length].split(':');
+          date.setHours(Number(time[0]), Number(time[1]), 0, 0);
+          return supabase.from('matches').update({ start_time: date.toISOString() }).eq('id', m.id);
+        });
+        await Promise.all(updated);
+      }
+
+      alert('Competition, schedule, and rules saved successfully!');
       onUpdate();
       onClose();
     } catch (err: any) {

@@ -135,3 +135,6 @@ CREATE POLICY "Team managers can manage their players"
 
 -- ── 9. Quick-check for pending teams after running ───────────────────────────
 -- SELECT id, name, status, owner_id FROM teams WHERE status = 'pending';
+
+-- Competition editor persistence: schedule, format, and match rules.
+ALTER TABLE public.competitions ADD COLUMN IF NOT EXISTS settings JSONB NOT NULL DEFAULT '{}'::jsonb;
