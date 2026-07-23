@@ -99,16 +99,22 @@ export default function CompetitionEditor({ competition, isOpen, onClose, onUpda
       const { data: scheduledMatches } = await supabase.from('matches').select('id, start_time, status')
         .eq('competition_id', competition.id).in('status', ['scheduled', 'waiting']).order('start_time');
       if (scheduledMatches?.length && formData.kickoff_times.length) {
+        const baseDate = new Date(formData.start_date || new Date().toISOString());
         const updated = scheduledMatches.map((m: any, index: number) => {
-          const date = new Date(m.start_time || formData.start_date || new Date().toISOString());
+          const date = new Date(baseDate);
+          date.setDate(baseDate.getDate() + index * Math.max(1, Number(formData.rest_days_between) + 1));
           const time = formData.kickoff_times[index % formData.kickoff_times.length].split(':');
           date.setHours(Number(time[0]), Number(time[1]), 0, 0);
           return supabase.from('matches').update({ start_time: date.toISOString() }).eq('id', m.id);
         });
         await Promise.all(updated);
       }
+      if (formData.status === 'cancelled') {
+        await supabase.from('matches').update({ status: 'cancelled' })
+          .eq('competition_id', competition.id).in('status', ['scheduled', 'waiting']);
+      }
 
-      alert('Competition, schedule, and rules saved successfully!');
+      alert('Competition, schedule, rules, and match status saved successfully!');
       onUpdate();
       onClose();
     } catch (err: any) {
