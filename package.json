@@ -6,9 +6,18 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "app:build": "npm run build && npx cap sync",
+    "android": "npm run app:build && npx cap open android",
+    "ios": "npm run app:build && npx cap open ios",
+    "android:run": "npm run app:build && npx cap run android",
+    "ios:run": "npm run app:build && npx cap run ios"
   },
   "dependencies": {
+    "@capacitor/android": "^8.4.2",
+    "@capacitor/cli": "^8.4.2",
+    "@capacitor/core": "^8.4.2",
+    "@capacitor/ios": "^8.4.2",
     "@supabase/supabase-js": "^2.109.0",
     "@types/canvas-confetti": "^1.9.0",
     "canvas-confetti": "^1.9.4",
