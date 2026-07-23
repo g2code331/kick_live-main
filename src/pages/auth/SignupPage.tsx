@@ -128,33 +128,33 @@ export default function SignupPage({ onNavigate }: SignupPageProps) {
               SELECT YOUR ROLE
             </label>
             
-            <div className="flex flex-col gap-4">
+            <div className="grid grid-cols-2 gap-2 md:flex md:flex-col md:gap-4">
               {/* Fan Role - Featured Big */}
               <button
                 type="button"
                 onClick={() => handleRoleSelect('fan')}
-                className={`w-full p-6 rounded-2xl border-2 transition-all text-left flex items-center justify-between group ${
+                className={`w-full col-span-2 md:col-span-1 p-3 md:p-6 rounded-2xl border-2 transition-all text-left flex items-center justify-between group ${
                   role === 'fan'
                     ? 'border-brand-blue bg-brand-blue/10 scale-[1.02]'
                     : 'border-white/10 hover:border-white/20 bg-white/5'
                 }`}
               >
-                <div className="flex items-center gap-6">
-                  <div className={`w-16 h-16 rounded-2xl flex items-center justify-center transition-colors ${
+                <div className="flex items-center gap-3 md:gap-6">
+                  <div className={`w-10 h-10 md:w-16 md:h-16 rounded-xl md:rounded-2xl flex items-center justify-center transition-colors ${
                     role === 'fan' ? 'bg-brand-blue text-white' : 'bg-white/5 text-white/20'
                   }`}>
-                    <Heart size={32} />
+                    <Heart size={22} className="md:w-8 md:h-8" />
                   </div>
                   <div>
                     <h3 className="text-xl font-black uppercase italic tracking-tighter">Fan</h3>
-                    <p className="text-xs text-white/40 mt-1 max-w-xs">Follow matches, make predictions, and engage with the community</p>
+                    <p className="hidden md:block text-xs text-white/40 mt-1 max-w-xs">Follow matches, make predictions, and engage with the community</p>
                   </div>
                 </div>
                 {role === 'fan' && <div className="w-6 h-6 bg-brand-blue rounded-full flex items-center justify-center"><Check size={14} /></div>}
               </button>
 
               {/* Other Roles - Smaller Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="col-span-2 grid grid-cols-2 md:grid-cols-3 gap-2 md:gap-4">
                 {[
                   { id: 'team_manager', label: 'Manager', icon: <Users size={20} />, color: 'yellow-500' },
                   { id: 'media', label: 'Media', icon: <Newspaper size={20} />, color: 'purple-500' },
@@ -164,13 +164,13 @@ export default function SignupPage({ onNavigate }: SignupPageProps) {
                     key={option.id}
                     type="button"
                     onClick={() => handleRoleSelect(option.id as UserRole)}
-                    className={`p-4 rounded-xl border-2 transition-all text-center flex flex-col items-center gap-2 ${
+                    className={`p-2 md:p-4 rounded-xl border-2 transition-all text-center flex flex-col items-center gap-1 md:gap-2 ${
                       role === option.id
                         ? `border-${option.color} bg-white/10`
                         : 'border-white/5 bg-white/5 hover:border-white/10'
                     }`}
                   >
-                    <div className={`p-3 rounded-lg ${role === option.id ? `bg-${option.color} text-black` : 'bg-white/5 text-white/40'}`}>
+                    <div className={`p-2 md:p-3 rounded-lg ${role === option.id ? `bg-${option.color} text-black` : 'bg-white/5 text-white/40'}`}>
                       {option.icon}
                     </div>
                     <span className="text-xs font-black uppercase tracking-widest">{option.label}</span>

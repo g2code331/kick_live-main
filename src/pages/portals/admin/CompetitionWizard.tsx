@@ -43,7 +43,7 @@ interface CompetitionWizardProps {
 
   async function fetchTeams() {
     // Only fetch necessary columns, limit to 50 teams
-    const { data } = await supabase.from('teams').select('id, name, short_name').order('name').limit(50);
+    const { data } = await supabase.from('teams').select('id, name, short_name, status').eq('status', 'active').order('name').limit(50);
     setAvailableTeams(data || []);
   }
 
@@ -190,9 +190,23 @@ interface CompetitionWizardProps {
             <div className="mb-4 rounded-xl border border-brand-blue/20 bg-brand-blue/10 p-4 text-sm text-white/70">{config.type === 'friendly' ? 'Friendly requires exactly 2 teams.' : 'Select the teams for this tournament.'}</div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {availableTeams.map(team => (
-                <button key={team.id} onClick={() => toggleTeam(team.id)} className={`p-4 rounded-xl border transition-all text-left flex items-center gap-3 ${config.selectedTeams.includes(team.id) ? 'border-brand-green bg-brand-green/10' : 'border-white/5 bg-white/5'}`}>
+                <button
+                  key={team.id}
+                  type="button"
+                  disabled={config.type === 'friendly' && config.selectedTeams.length >= 2 && !config.selectedTeams.includes(team.id)}
+                  onClick={() => toggleTeam(team.id)}
+                  className={`relative p-4 rounded-xl border transition-all text-left flex items-center gap-3 ${
+                    config.selectedTeams.includes(team.id)
+                      ? 'border-brand-green bg-brand-green/10'
+                      : config.type === 'friendly' && config.selectedTeams.length >= 2
+                        ? 'border-red-500/20 bg-red-500/5 opacity-50 cursor-not-allowed'
+                        : 'border-white/5 bg-white/5 hover:border-white/20'
+                  }`}
+                >
                   <div className="w-8 h-8 rounded bg-white/10 flex items-center justify-center font-black text-xs">{team.short_name[0]}</div>
                   <span className="text-xs font-bold truncate">{team.name}</span>
+                  {config.selectedTeams.includes(team.id) && <span className="ml-auto text-[8px] font-black uppercase text-brand-green">Selected</span>}
+                  {config.type === 'friendly' && config.selectedTeams.length >= 2 && !config.selectedTeams.includes(team.id) && <span className="ml-auto text-[8px] font-black uppercase text-red-400">Unavailable</span>}
                 </button>
               ))}
             </div>
