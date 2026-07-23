@@ -35,13 +35,25 @@ function AppContent() {
 
   useEffect(() => {
     console.log('[App] Initializing background data loader...');
-    dataLoader.loadAll().then(() => {
-      console.log('[App] ✓ Initial data loaded');
-    }).catch(err => {
-      console.error('[App] Initial data load failed:', err);
-    });
+    const refreshInBackground = () => {
+      dataLoader.loadAll().then(() => {
+        console.log('[App] ✓ Background data refreshed');
+      }).catch(err => {
+        console.warn('[App] Background refresh skipped:', err);
+      });
+    };
+    refreshInBackground();
     dataLoader.startAutoRefresh();
-    return () => { dataLoader.stopAutoRefresh(); };
+    const resume = () => {
+      if (document.visibilityState === 'visible') refreshInBackground();
+    };
+    document.addEventListener('visibilitychange', resume);
+    window.addEventListener('pageshow', resume);
+    return () => {
+      dataLoader.stopAutoRefresh();
+      document.removeEventListener('visibilitychange', resume);
+      window.removeEventListener('pageshow', resume);
+    };
   }, []);
 
 
