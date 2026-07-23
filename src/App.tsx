@@ -22,6 +22,7 @@ import MatchDetails from "./pages/MatchDetails";
 import ProfilePage from "./pages/ProfilePage";
 import NewsPage from "./pages/NewsPage";
 import { dataLoader } from "./lib/DataLoader";
+import UpdateBanner from "./components/UpdateBanner";
 
 function AppContent() {
   const { user, profile, loading } = useAuth();
@@ -66,6 +67,7 @@ function AppContent() {
   return (
     <div className="overflow-x-hidden">
       <AppBackground />
+      <UpdateBanner />
       <Routes>
         {/* Public Routes */}
         <Route path="/" element={<HomePage />} />
