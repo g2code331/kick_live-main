@@ -1,4 +1,10 @@
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
+
+interface KickLiveUpdaterPlugin {
+  downloadAndInstall(options: { url: string }): Promise<{ started: boolean }>;
+}
+
+const KickLiveUpdater = registerPlugin<KickLiveUpdaterPlugin>('KickLiveUpdater');
 
 export const APP_VERSION = '1.0.0';
 export const UPDATE_MANIFEST_URL = 'https://kicklive1.vercel.app/app-version.json';
@@ -35,8 +41,6 @@ export async function fetchUpdateManifest(): Promise<UpdateManifest | null> {
 
 export async function installAndroidUpdate(apkUrl: string): Promise<boolean> {
   if (Capacitor.getPlatform() !== 'android') return false;
-  const updater = (window as Window & { KickLiveUpdater?: { downloadAndInstall: (options: { url: string }) => Promise<void> } }).KickLiveUpdater;
-  if (!updater) return false;
-  await updater.downloadAndInstall({ url: apkUrl });
+  await KickLiveUpdater.downloadAndInstall({ url: apkUrl });
   return true;
 }
