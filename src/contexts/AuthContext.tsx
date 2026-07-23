@@ -51,7 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const authRequest = supabase.auth.getSession();
         const { data: { session }, error } = await Promise.race([
           authRequest,
-          new Promise<any>(resolve => window.setTimeout(() => resolve({ data: { session: null }, error: new Error('Authentication timed out') }), 8000))
+          new Promise<any>(resolve => window.setTimeout(() => resolve({ data: { session: null }, error: new Error('Authentication timed out') }), 3500))
         ]);
         
         if (!isMounted) return;
@@ -64,13 +64,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         setSession(session);
         setUser(session?.user ?? null);
-        
-        if (session?.user) {
-          const profile = await fetchProfile(session.user.id);
-          if (isMounted && profile) setProfile(profile);
-        }
-        
+        // Let public pages render immediately. Profile data finishes in the background.
         setLoading(false);
+        if (session?.user) {
+          fetchProfile(session.user.id).then(profile => {
+            if (isMounted && profile) setProfile(profile);
+          });
+        }
       } catch (err) {
         console.error('Auth init failed:', err);
         if (isMounted) setLoading(false);
@@ -84,15 +84,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       setSession(session);
       setUser(session?.user ?? null);
-      
+      setLoading(false);
       if (session?.user) {
-        const profile = await fetchProfile(session.user.id);
-        if (profile) setProfile(profile);
+        fetchProfile(session.user.id).then(profile => { if (isMounted && profile) setProfile(profile); });
       } else {
         setProfile(null);
       }
-      
-      setLoading(false);
     });
 
     return () => {

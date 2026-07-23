@@ -23,6 +23,7 @@ import ProfilePage from "./pages/ProfilePage";
 import NewsPage from "./pages/NewsPage";
 import { dataLoader } from "./lib/DataLoader";
 import UpdateBanner from "./components/UpdateBanner";
+import Loading from "./components/Loading";
 
 function AppContent() {
   const { user, profile, loading } = useAuth();
@@ -43,26 +44,6 @@ function AppContent() {
     return () => { dataLoader.stopAutoRefresh(); };
   }, []);
 
-  if (loading) {
-    return (
-      <>
-        <AppBackground />
-        <div className="relative min-h-screen flex items-center justify-center">
-          <div className="text-center z-10">
-            <div className="w-32 h-32 mx-auto mb-6 animate-spin">
-              <img src="/kicklive-icon.png" alt="KickLive" className="w-full h-full object-contain" />
-            </div>
-            <p className="text-[#39FF14] font-black uppercase tracking-[0.3em] animate-pulse">Loading...</p>
-            <div className="flex gap-2 mt-4 justify-center">
-              <div className="w-2 h-2 bg-brand-green rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-              <div className="w-2 h-2 bg-brand-green rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-              <div className="w-2 h-2 bg-brand-green rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-            </div>
-          </div>
-        </div>
-      </>
-    );
-  }
 
   return (
     <div className="overflow-x-hidden">
@@ -89,10 +70,10 @@ function AppContent() {
         {/* User Profile */}
         <Route path="/profile" element={<ProfilePage />} />
         {/* Protected Portal Routes */}
-        <Route path="/admin" element={user && profile?.role === 'admin' ? <AdminPortal onNavigate={handleNavigate} /> : <Navigate to="/" />} />
-        <Route path="/team-owner" element={user && profile?.role === 'team_manager' ? <TeamOwnerPortal /> : <Navigate to="/" />} />
-        <Route path="/team-portal" element={user && profile?.role === 'team_manager' ? <TeamPortal onNavigate={handleNavigate} /> : <Navigate to="/" />} />
-        <Route path="/media-portal" element={user && profile?.role === 'media' ? <MediaPortal onNavigate={handleNavigate} /> : <Navigate to="/" />} />
+        <Route path="/admin" element={loading ? <Loading text="Checking account..." size="sm" /> : user && profile?.role === 'admin' ? <AdminPortal onNavigate={handleNavigate} /> : <Navigate to="/" />} />
+        <Route path="/team-owner" element={loading ? <Loading text="Checking account..." size="sm" /> : user && profile?.role === 'team_manager' ? <TeamOwnerPortal /> : <Navigate to="/" />} />
+        <Route path="/team-portal" element={loading ? <Loading text="Checking account..." size="sm" /> : user && profile?.role === 'team_manager' ? <TeamPortal onNavigate={handleNavigate} /> : <Navigate to="/" />} />
+        <Route path="/media-portal" element={loading ? <Loading text="Checking account..." size="sm" /> : user && profile?.role === 'media' ? <MediaPortal onNavigate={handleNavigate} /> : <Navigate to="/" />} />
         {/* Catch all */}
         <Route path="*" element={<HomePage />} />
       </Routes>
