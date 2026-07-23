@@ -1,8 +1,8 @@
 {
-  "version": "1.0.1",
+  "version": "1.0.2",
   "releaseDate": "2026-07-23",
   "releaseNotes": [
-    "Signed KickLive Android release"
+    "Fixed native updater and refreshed app branding"
   ],
   "androidApkUrl": "https://kicklive1.vercel.app/downloads/kicklive-latest.apk"
 }
