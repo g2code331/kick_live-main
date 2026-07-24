@@ -156,7 +156,9 @@ export default function MatchControlFull({ match, onBack }: MatchControlFullProp
           } else {
             setTotalSeconds((matchData.minute || 0) * 60);
           }
-          if (matchData.status) setPeriod(matchData.status);
+          if (matchData.status) {
+            setPeriod(['scheduled', 'waiting', 'postponed'].includes(matchData.status) ? 'first_half' : matchData.status);
+          }
         }
         
         // Limit events to 50 most recent
@@ -610,16 +612,16 @@ export default function MatchControlFull({ match, onBack }: MatchControlFullProp
                 <Activity size={24} className="text-brand-green" /> Match Events
               </h3>
               <div className="flex gap-2">
-                <button onClick={() => handleEventClick('goal')} className="p-3 rounded-xl bg-brand-green/10 border border-brand-green/30 text-brand-green hover:bg-brand-green/20 transition-all">
+                <button disabled={controlsDisabled || isLocked} onClick={() => handleEventClick('goal')} className="p-3 rounded-xl bg-brand-green/10 border border-brand-green/30 text-brand-green hover:bg-brand-green/20 transition-all">
                   🏆
                 </button>
-                <button onClick={() => handleEventClick('yellow_card')} className="p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/30 text-yellow-500 hover:bg-yellow-500/20 transition-all">
+                <button disabled={controlsDisabled || isLocked} onClick={() => handleEventClick('yellow_card')} className="p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/30 text-yellow-500 hover:bg-yellow-500/20 transition-all">
                   🟨
                 </button>
-                <button onClick={() => handleEventClick('red_card')} className="p-3 rounded-xl bg-brand-red/10 border border-brand-red/30 text-brand-red hover:bg-brand-red/20 transition-all">
+                <button disabled={controlsDisabled || isLocked} onClick={() => handleEventClick('red_card')} className="p-3 rounded-xl bg-brand-red/10 border border-brand-red/30 text-brand-red hover:bg-brand-red/20 transition-all">
                   🟥
                 </button>
-                <button onClick={() => handleEventClick('substitution')} className="p-3 rounded-xl bg-brand-blue/10 border border-brand-blue/30 text-brand-blue hover:bg-brand-blue/20 transition-all">
+                <button disabled={controlsDisabled || isLocked} onClick={() => handleEventClick('substitution')} className="p-3 rounded-xl bg-brand-blue/10 border border-brand-blue/30 text-brand-blue hover:bg-brand-blue/20 transition-all">
                   🔄
                 </button>
               </div>
@@ -667,7 +669,7 @@ export default function MatchControlFull({ match, onBack }: MatchControlFullProp
                 className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-brand-blue/50"
                 onKeyPress={(e) => e.key === 'Enter' && addCommentary()}
               />
-              <button onClick={addCommentary} className="gradient-green text-black px-6 rounded-xl font-black uppercase tracking-widest">
+              <button disabled={controlsDisabled || isLocked} onClick={addCommentary} className="gradient-green text-black px-6 rounded-xl font-black uppercase tracking-widest disabled:opacity-40">
                 Post
               </button>
             </div>
