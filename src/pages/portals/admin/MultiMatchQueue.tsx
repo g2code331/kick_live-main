@@ -41,8 +41,10 @@ export default function MultiMatchQueue() {
   // Proper status filtering for time-sensitive match states
   const liveMatches = matches.filter(m => 
     m.status === 'first_half' || 
+    m.status === 'half_time' ||
     m.status === 'second_half' ||
     m.status === 'extra_time' ||
+    m.status === 'penalty_shootout' ||
     m.status === 'live'
   );
   
@@ -66,6 +68,9 @@ export default function MultiMatchQueue() {
       case 'live':
       case 'first_half':
       case 'second_half':
+      case 'half_time':
+      case 'extra_time':
+      case 'penalty_shootout':
         return <AlertCircle size={16} className="text-brand-red animate-pulse" />;
       case 'finished':
       case 'full_time':
@@ -128,7 +133,7 @@ export default function MultiMatchQueue() {
                       </div>
                       <div className="text-right">
                         <p className="text-xs font-bold">
-                          {match.status === 'live' || match.status === 'first_half' || match.status === 'second_half'
+                          {['live', 'first_half', 'half_time', 'second_half', 'extra_time', 'penalty_shootout'].includes(match.status)
                             ? `${match.minute}'`
                             : match.status}
                         </p>

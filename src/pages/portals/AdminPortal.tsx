@@ -475,7 +475,7 @@ export default function AdminPortal({ onNavigate }: { onNavigate: (page: string)
       {/* Modals & Wizards */}
       {isCompetitionWizardOpen && <CompetitionWizard isOpen={isCompetitionWizardOpen} onClose={() => setIsCompetitionWizardOpen(false)} />}
       {isCompetitionEditorOpen && <CompetitionEditor competition={selectedCompetition} isOpen={isCompetitionEditorOpen} onClose={() => setIsCompetitionEditorOpen(false)} onUpdate={() => {}} />}
-      {isFixturesViewerOpen && <FixturesViewer competition={selectedCompetition} isOpen={isFixturesViewerOpen} onClose={() => setIsFixturesViewerOpen(false)} />}
+      {isFixturesViewerOpen && <FixturesViewer competition={selectedCompetition} isOpen={isFixturesViewerOpen} onClose={() => setIsFixturesViewerOpen(false)} onOpenMatchQueue={() => setActiveTab('matches')} />}
       {isPlayerCreatorOpen && <PlayerCreator isOpen={isPlayerCreatorOpen} onClose={() => setIsPlayerCreatorOpen(false)} />}
       {isMediaPublisherOpen && <MediaPublisher isOpen={isMediaPublisherOpen} onClose={() => setIsMediaPublisherOpen(false)} />}
       {isSettingsOpen && <AppSettingsDashboard isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />}

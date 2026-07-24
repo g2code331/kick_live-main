@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { X, Calendar, MapPin, Edit2, Search, Filter, Loader2, Play, RotateCcw, Save }  from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
 import { CompetitionEngine } from '../../../lib/CompetitionEngine';
@@ -9,10 +8,10 @@ interface FixturesViewerProps {
   competition: any;
   isOpen: boolean;
   onClose: () => void;
+  onOpenMatchQueue?: () => void;
 }
 
-export default function FixturesViewer({ competition, isOpen, onClose }: FixturesViewerProps) {
-  const navigate = useNavigate();
+export default function FixturesViewer({ competition, isOpen, onClose, onOpenMatchQueue }: FixturesViewerProps) {
   const [fixtures, setFixtures] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -260,7 +259,7 @@ export default function FixturesViewer({ competition, isOpen, onClose }: Fixture
                         className="w-10 h-10 rounded-xl bg-brand-blue/10 text-brand-blue flex items-center justify-center hover:bg-brand-blue hover:text-black transition-all"
                       ><Edit2 size={16} /></button>
                       <button
-                        onClick={() => navigate(`/match/${match.id}`)}
+                        onClick={() => { onClose(); onOpenMatchQueue?.(); }}
                         aria-label="Open match"
                         title="Open match details"
                         className="w-10 h-10 rounded-xl bg-[#39FF14]/10 text-[#39FF14] flex items-center justify-center hover:bg-[#39FF14] hover:text-black transition-all"
