@@ -31,6 +31,7 @@ export default function MatchControlFull({ match, onBack }: MatchControlFullProp
   const seconds = totalSeconds % 60;
   const [homeTeam, setHomeTeam] = useState<any>(null);
   const [awayTeam, setAwayTeam] = useState<any>(null);
+  const [allPlayers, setAllPlayers] = useState<any[]>([]);
   const [events, setEvents] = useState<any[]>([]);
   const [commentary, setCommentary] = useState<any[]>([]);
   const [newComment, setNewComment] = useState('');
@@ -141,6 +142,10 @@ export default function MatchControlFull({ match, onBack }: MatchControlFullProp
         if (matchData.start_time) setKickoffTime(new Date(matchData.start_time).toISOString().slice(0, 16));
         setHomeTeam(matchData.homeTeam);
         setAwayTeam(matchData.awayTeam);
+        const { data: playersData } = await supabase.from('players')
+          .select('id, name, number, position, team_id, goals, assists')
+          .in('team_id', [matchData.home_team_id, matchData.away_team_id]);
+        setAllPlayers(playersData || []);
         setHomeScore(matchData.home_score || 0);
         setAwayScore(matchData.away_score || 0);
 
@@ -352,8 +357,9 @@ export default function MatchControlFull({ match, onBack }: MatchControlFullProp
   };
 
   const handleEventSubmit = async (eventData: any) => {
+    if (controlsDisabled || isLocked) return;
     try {
-      await supabase.from('match_events').insert([{
+      const { error: eventError } = await supabase.from('match_events').insert([{
         match_id: match.id,
         event_type: eventData.eventType,
         minute: eventData.minute,
@@ -364,12 +370,23 @@ export default function MatchControlFull({ match, onBack }: MatchControlFullProp
         card_reason: eventData.reason,
         description: eventData.description
       }]);
+      if (eventError) throw eventError;
       
       if (eventData.eventType === 'goal') {
-        if (eventData.teamId === homeTeam?.id) {
-          setHomeScore((prev: number) => prev + 1);
-        } else if (eventData.teamId === awayTeam?.id) {
-          setAwayScore((prev: number) => prev + 1);
+        const isHomeGoal = eventData.teamId === homeTeam?.id;
+        const isAwayGoal = eventData.teamId === awayTeam?.id;
+        if (isHomeGoal) setHomeScore((prev: number) => prev + 1);
+        if (isAwayGoal) setAwayScore((prev: number) => prev + 1);
+        const nextHomeScore = isHomeGoal ? homeScore + 1 : homeScore;
+        const nextAwayScore = isAwayGoal ? awayScore + 1 : awayScore;
+        await supabase.from('matches').update({ home_score: nextHomeScore, away_score: nextAwayScore }).eq('id', match.id);
+        if (eventData.goalType !== 'own_goal' && eventData.playerId) {
+          const scorer = allPlayers.find(p => p.id === eventData.playerId);
+          await supabase.from('players').update({ goals: (scorer?.goals || 0) + 1 }).eq('id', eventData.playerId);
+        }
+        if (eventData.assistId) {
+          const assister = allPlayers.find(p => p.id === eventData.assistId);
+          await supabase.from('players').update({ assists: (assister?.assists || 0) + 1 }).eq('id', eventData.assistId);
         }
       }
       
@@ -752,7 +769,7 @@ export default function MatchControlFull({ match, onBack }: MatchControlFullProp
           eventType={selectedEventType}
           homeTeam={homeTeam}
           awayTeam={awayTeam}
-          allPlayers={[]}
+          allPlayers={allPlayers}
           currentMinute={minute}
           onSubmit={handleEventSubmit}
           onClose={() => setShowEventModal(false)}
