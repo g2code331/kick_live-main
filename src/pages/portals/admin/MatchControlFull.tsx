@@ -58,6 +58,7 @@ export default function MatchControlFull({ match, onBack }: MatchControlFullProp
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [password, setPassword] = useState('');
   const [unlockError, setUnlockError] = useState('');
+  const [periodNotice, setPeriodNotice] = useState('');
 
   useEffect(() => {
     if (match?.status === 'full_time' || match?.status === 'completed') {
@@ -107,6 +108,9 @@ export default function MatchControlFull({ match, onBack }: MatchControlFullProp
               : 0;
           if (s >= maxSeconds) {
             setIsTimerRunning(false);
+            if (period === 'first_half') setPeriodNotice(`FIRST HALF ENDED — ${kickoffSettings.firstHalfDuration} MINUTES`);
+            if (period === 'second_half') setPeriodNotice(`SECOND HALF ENDED — ${kickoffSettings.secondHalfDuration} MINUTES`);
+            if (period === 'extra_time') setPeriodNotice(`EXTRA TIME ENDED — ${kickoffSettings.extraTimeDuration} MINUTES`);
             return maxSeconds;
           }
           return s + 1;
@@ -157,13 +161,17 @@ export default function MatchControlFull({ match, onBack }: MatchControlFullProp
             // Reconstruct elapsed seconds from the stored start time
             const now = Date.now();
             const startMs = new Date(matchData.match_start_time).getTime();
-            const elapsed = Math.floor((now - startMs) / 1000) + (matchData.elapsed_seconds_before_pause || 0);
+            const elapsed = matchData.match_start_time
+              ? Math.floor((now - startMs) / 1000) + (matchData.elapsed_seconds_before_pause || 0)
+              : (matchData.elapsed_seconds_before_pause || (matchData.minute || 0) * 60);
             setTotalSeconds(Math.max(0, elapsed));
           } else {
-            setTotalSeconds((matchData.minute || 0) * 60);
+            setTotalSeconds(matchData.elapsed_seconds_before_pause || (matchData.minute || 0) * 60);
           }
           if (matchData.status) {
-            setPeriod(['scheduled', 'waiting', 'postponed'].includes(matchData.status) ? 'first_half' : matchData.status);
+            const loadedPeriod = ['scheduled', 'waiting', 'postponed'].includes(matchData.status) ? 'first_half' : matchData.status;
+            setPeriod(loadedPeriod);
+            if (loadedPeriod === 'half_time') setPeriodNotice(`FIRST HALF ENDED — ${(matchData.timer_config?.firstHalfDuration || 45)} MINUTES`);
           }
         }
         
@@ -227,6 +235,7 @@ export default function MatchControlFull({ match, onBack }: MatchControlFullProp
   const handlePause = async () => {
     setIsTimerRunning(false);
     await supabase.from('matches').update({
+      match_start_time: null,
       elapsed_seconds_before_pause: totalSeconds,
       minute: Math.floor(totalSeconds / 60),
       status: period,
@@ -244,6 +253,7 @@ export default function MatchControlFull({ match, onBack }: MatchControlFullProp
       elapsed_seconds_before_pause: 0,
       status: period,
     }).eq('id', match.id);
+    setPeriodNotice('');
     setIsTimerRunning(true);
   };
 
@@ -254,9 +264,12 @@ export default function MatchControlFull({ match, onBack }: MatchControlFullProp
     const htSeconds = htMinute * 60;
     setTotalSeconds(htSeconds);
     setPeriod('half_time');
+    setPeriodNotice(`FIRST HALF ENDED — ${kickoffSettings.firstHalfDuration} MINUTES`);
     await addEvent('half_time', htMinute);
     await supabase.from('matches').update({
       status: 'half_time',
+      match_start_time: null,
+      elapsed_seconds_before_pause: htSeconds,
       minute: htMinute,
       home_score: homeScore,
       away_score: awayScore,
@@ -268,6 +281,7 @@ export default function MatchControlFull({ match, onBack }: MatchControlFullProp
     const startSec = kickoffSettings.firstHalfDuration * 60;
     setTotalSeconds(startSec);
     setPeriod('second_half');
+    setPeriodNotice('');
     setIsTimerRunning(true);
     const now = new Date();
     const startTime = new Date(now.getTime() - (startSec * 1000));
@@ -275,7 +289,7 @@ export default function MatchControlFull({ match, onBack }: MatchControlFullProp
       status: 'second_half',
       minute: kickoffSettings.firstHalfDuration,
       match_start_time: startTime.toISOString(),
-      elapsed_seconds_before_pause: startSec,
+      elapsed_seconds_before_pause: 0,
     }).eq('id', match.id);
     await addEvent('second_half_start', kickoffSettings.firstHalfDuration);
   };
@@ -516,6 +530,7 @@ export default function MatchControlFull({ match, onBack }: MatchControlFullProp
               <div className="mt-3 px-6 py-3 bg-white/5 rounded-2xl border border-white/10">
                 <p className="text-sm font-black uppercase text-white/40">{period.replace(/_/g, ' ')}</p>
               </div>
+              {periodNotice && <p className="mt-3 text-xs font-black uppercase tracking-widest text-yellow-400">{periodNotice}</p>}
             </div>
 
             {/* Away Team */}
