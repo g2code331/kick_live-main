@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { X, Calendar, MapPin, Edit2, Search, Filter, Loader2, Play, RotateCcw, Save }  from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
 import { CompetitionEngine } from '../../../lib/CompetitionEngine';
-import MatchControlComplete from './MatchControlComplete';
+import MatchControlFull from './MatchControlFull';
 
 interface FixturesViewerProps {
   competition: any;
@@ -250,7 +250,6 @@ export default function FixturesViewer({ competition, isOpen, onClose }: Fixture
                         <p className="text-[10px] font-black text-white/20 uppercase tracking-widest flex items-center gap-1"><MapPin size={10}/> {match.venue || 'TBD'}</p>
                         <p className="text-[10px] font-black text-white/40 uppercase tracking-widest mt-1">{new Date(match.start_time).toLocaleDateString()}</p>
                       </div>
-                      {['scheduled', 'waiting', 'postponed'].includes(match.status) && <button onClick={() => handleMatchStatus(match, 'first_half')} title="Kick off match" className="px-3 h-10 rounded-xl bg-brand-green/10 text-brand-green text-[10px] font-black uppercase hover:bg-brand-green hover:text-black transition-all">Kick Off</button>}
                       {!['full_time', 'completed', 'cancelled'].includes(match.status) && <button onClick={() => handleMatchStatus(match, 'cancelled')} title="Remove from schedule" className="px-3 h-10 rounded-xl bg-red-500/10 text-red-400 text-[10px] font-black uppercase hover:bg-red-500 hover:text-white transition-all">Cancel</button>}
                       <button
                         onClick={() => handleEditMatch(match)}
@@ -297,12 +296,10 @@ export default function FixturesViewer({ competition, isOpen, onClose }: Fixture
         </div>
       )}
 
-      {isMatchControlOpen && (
-        <MatchControlComplete 
-          match={selectedMatch} 
-          isOpen={isMatchControlOpen} 
-          onClose={() => setIsMatchControlOpen(false)} 
-          onUpdate={loadFixtures}
+      {isMatchControlOpen && selectedMatch && (
+        <MatchControlFull
+          match={selectedMatch}
+          onBack={() => { setIsMatchControlOpen(false); loadFixtures(); }}
         />
       )}
     </div>

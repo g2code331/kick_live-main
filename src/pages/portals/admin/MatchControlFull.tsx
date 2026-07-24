@@ -23,6 +23,7 @@ export default function MatchControlFull({ match, onBack }: MatchControlFullProp
   const [isTimerRunning, setIsTimerRunning] = useState(false);
   const [matchStatus, setMatchStatus] = useState(match?.status || 'scheduled');
   const controlsDisabled = ['scheduled', 'waiting', 'cancelled', 'abandoned', 'postponed'].includes(matchStatus);
+  const [kickoffTime, setKickoffTime] = useState(match?.start_time ? new Date(match.start_time).toISOString().slice(0, 16) : '');
   const [matchToast, setMatchToast] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
 
   // Computed display values
@@ -131,12 +132,13 @@ export default function MatchControlFull({ match, onBack }: MatchControlFullProp
       // Fetch columns including timer anchor fields
       const { data: matchData } = await supabase
         .from('matches')
-        .select('id, home_team_id, away_team_id, home_score, away_score, status, minute, match_start_time, elapsed_seconds_before_pause, homeTeam:teams!home_team_id(id, name, short_name, primary_color, secondary_color), awayTeam:teams!away_team_id(id, name, short_name, primary_color, secondary_color)')
+        .select('id, home_team_id, away_team_id, home_score, away_score, status, minute, match_start_time, start_time, elapsed_seconds_before_pause, homeTeam:teams!home_team_id(id, name, short_name, primary_color, secondary_color), awayTeam:teams!away_team_id(id, name, short_name, primary_color, secondary_color)')
         .eq('id', match.id)
         .single();
       
       if (matchData) {
         setMatchStatus(matchData.status || 'scheduled');
+        if (matchData.start_time) setKickoffTime(new Date(matchData.start_time).toISOString().slice(0, 16));
         setHomeTeam(matchData.homeTeam);
         setAwayTeam(matchData.awayTeam);
         setHomeScore(matchData.home_score || 0);
@@ -186,6 +188,12 @@ export default function MatchControlFull({ match, onBack }: MatchControlFullProp
       console.error('Error loading match data:', err);
     }
   }
+
+  const saveKickoffTime = async () => {
+    if (!kickoffTime) return;
+    const { error } = await supabase.from('matches').update({ start_time: new Date(kickoffTime).toISOString() }).eq('id', match.id);
+    setMatchToast(error ? { type: 'error', msg: error.message } : { type: 'success', msg: 'Kickoff time saved and synced.' });
+  };
 
   const handleKickOff = async () => {
     setMatchStatus(period);
@@ -515,6 +523,17 @@ export default function MatchControlFull({ match, onBack }: MatchControlFullProp
               </div>
             </div>
           </div>
+
+          {controlsDisabled && (
+            <div className="mt-8 mx-auto max-w-xl rounded-2xl border border-brand-blue/30 bg-brand-blue/10 p-5">
+              <label className="block text-xs font-black uppercase tracking-widest text-white/60">Scheduled kickoff</label>
+              <div className="mt-3 flex flex-col sm:flex-row gap-3">
+                <input type="datetime-local" value={kickoffTime} onChange={e => setKickoffTime(e.target.value)} className="flex-1 rounded-xl border border-white/10 bg-white/5 p-3" />
+                <button onClick={saveKickoffTime} className="rounded-xl bg-brand-blue px-5 py-3 text-xs font-black uppercase text-black">Save time</button>
+              </div>
+              <p className="mt-2 text-[10px] text-white/40">This updates the tournament fixture and fan-facing kickoff time.</p>
+            </div>
+          )}
 
           {/* Match Controls */}
           <div className="flex flex-wrap gap-4 mt-12 justify-center">
