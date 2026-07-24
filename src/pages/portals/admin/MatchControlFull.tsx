@@ -494,7 +494,7 @@ export default function MatchControlFull({ match, onBack }: MatchControlFullProp
                 </button>
                 <span className="text-6xl font-black text-brand-green w-32">{homeScore}</span>
                 <button 
-                  disabled={controlsDisabled} onClick={() => setHomeScore((s: number) => s + 1)}
+                  disabled={controlsDisabled} onClick={() => handleEventClick('goal')}
                   className="w-12 h-12 rounded-xl gradient-green text-black text-2xl font-bold flex items-center justify-center"
                 >
                   <Plus size={24} />
@@ -534,7 +534,7 @@ export default function MatchControlFull({ match, onBack }: MatchControlFullProp
                 </button>
                 <span className="text-6xl font-black text-brand-green w-32">{awayScore}</span>
                 <button 
-                  disabled={controlsDisabled} onClick={() => setAwayScore((s: number) => s + 1)}
+                  disabled={controlsDisabled} onClick={() => handleEventClick('goal')}
                   className="w-12 h-12 rounded-xl gradient-green text-black text-2xl font-bold flex items-center justify-center"
                 >
                   <Plus size={24} />
