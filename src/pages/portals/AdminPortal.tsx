@@ -474,7 +474,17 @@ export default function AdminPortal({ onNavigate }: { onNavigate: (page: string)
 
       {/* Modals & Wizards */}
       {isCompetitionWizardOpen && <CompetitionWizard isOpen={isCompetitionWizardOpen} onClose={() => setIsCompetitionWizardOpen(false)} />}
-      {isCompetitionEditorOpen && <CompetitionEditor competition={selectedCompetition} isOpen={isCompetitionEditorOpen} onClose={() => setIsCompetitionEditorOpen(false)} onUpdate={() => {}} />}
+      {isCompetitionEditorOpen && <CompetitionEditor
+        competition={selectedCompetition}
+        isOpen={isCompetitionEditorOpen}
+        onClose={() => setIsCompetitionEditorOpen(false)}
+        onUpdate={async () => {
+          const { data } = await supabase.from('competitions').select('id, name, type, format, season, status, start_date, end_date, settings, created_at').order('created_at', { ascending: false }).limit(20);
+          setCompetitionsList(data || []);
+          const refreshed = (data || []).find((item: any) => item.id === selectedCompetition?.id);
+          if (refreshed) setSelectedCompetition(refreshed);
+        }}
+      />}
       {isFixturesViewerOpen && <FixturesViewer competition={selectedCompetition} isOpen={isFixturesViewerOpen} onClose={() => setIsFixturesViewerOpen(false)} onOpenMatchQueue={() => setActiveTab('matches')} />}
       {isPlayerCreatorOpen && <PlayerCreator isOpen={isPlayerCreatorOpen} onClose={() => setIsPlayerCreatorOpen(false)} />}
       {isMediaPublisherOpen && <MediaPublisher isOpen={isMediaPublisherOpen} onClose={() => setIsMediaPublisherOpen(false)} />}

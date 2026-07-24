@@ -110,7 +110,7 @@ export default function MatchDetails() {
     );
   }
 
-  const isLive = match.status === 'first_half' || match.status === 'second_half' || match.status === 'extra_time' || match.status === 'live';
+  const isLive = ['first_half', 'half_time', 'second_half', 'extra_time', 'penalty_shootout', 'live'].includes(match.status);
 
   return (
     <div className="min-h-screen pb-20">
