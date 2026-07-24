@@ -138,3 +138,9 @@ CREATE POLICY "Team managers can manage their players"
 
 -- Competition editor persistence: schedule, format, and match rules.
 ALTER TABLE public.competitions ADD COLUMN IF NOT EXISTS settings JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+-- Allow the Friendly tournament format.
+DO $$ BEGIN
+  ALTER TABLE public.competitions DROP CONSTRAINT IF EXISTS competitions_type_check;
+  ALTER TABLE public.competitions ADD CONSTRAINT competitions_type_check CHECK (type IN ('league', 'cup', 'knockout', 'friendly'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;

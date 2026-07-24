@@ -51,7 +51,7 @@ export default function AdminPortal({ onNavigate }: { onNavigate: (page: string)
           supabase.from('teams').select('id, name, short_name, city, primary_color, secondary_color'),
           supabase.from('matches').select('id, home_team_id, away_team_id, home_score, away_score, status, start_time, competition_id').limit(50),
           supabase.from('profiles').select('id, email, username, role, created_at').limit(50),
-          supabase.from('competitions').select('id, name, type, season, status, created_at').order('created_at', { ascending: false }).limit(20),
+          supabase.from('competitions').select('id, name, type, format, season, status, start_date, end_date, settings, created_at').order('created_at', { ascending: false }).limit(20),
           supabase.from('teams').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
         ]);
         
@@ -118,7 +118,7 @@ export default function AdminPortal({ onNavigate }: { onNavigate: (page: string)
       const { error } = await supabase.from('competitions').delete().eq('id', compId);
       if (error) throw error;
       setAdminMsg({ type: 'success', text: 'Tournament deleted successfully!' });
-      const { data } = await supabase.from('competitions').select('id, name, type, season, status, created_at').order('created_at', { ascending: false }).limit(20);
+      const { data } = await supabase.from('competitions').select('id, name, type, format, season, status, start_date, end_date, settings, created_at').order('created_at', { ascending: false }).limit(20);
       setCompetitionsList(data || []);
       await logActivity('Competition Deleted', 'competition', compId, compName);
     } catch (err: any) {

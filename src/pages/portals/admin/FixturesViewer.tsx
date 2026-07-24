@@ -127,6 +127,19 @@ export default function FixturesViewer({ competition, isOpen, onClose }: Fixture
     }
   };
 
+  const handleMatchStatus = async (match: any, nextStatus: string) => {
+    const password = window.prompt('Enter match management password');
+    if (password !== 'jojOjo') { if (password !== null) alert('Incorrect password'); return; }
+    const payload: any = { status: nextStatus };
+    if (nextStatus === 'first_half') {
+      payload.match_start_time = new Date().toISOString();
+      payload.elapsed_seconds_before_pause = 0;
+    }
+    const { error } = await supabase.from('matches').update(payload).eq('id', match.id);
+    if (error) { alert('Could not update match: ' + error.message); return; }
+    loadFixtures();
+  };
+
   const handleEditMatch = (match: any) => {
     const password = window.prompt('Enter pairing management password');
     if (password !== 'jojOjo') { if (password !== null) alert('Incorrect password'); return; }
@@ -237,6 +250,8 @@ export default function FixturesViewer({ competition, isOpen, onClose }: Fixture
                         <p className="text-[10px] font-black text-white/20 uppercase tracking-widest flex items-center gap-1"><MapPin size={10}/> {match.venue || 'TBD'}</p>
                         <p className="text-[10px] font-black text-white/40 uppercase tracking-widest mt-1">{new Date(match.start_time).toLocaleDateString()}</p>
                       </div>
+                      {['scheduled', 'waiting', 'postponed'].includes(match.status) && <button onClick={() => handleMatchStatus(match, 'first_half')} title="Kick off match" className="px-3 h-10 rounded-xl bg-brand-green/10 text-brand-green text-[10px] font-black uppercase hover:bg-brand-green hover:text-black transition-all">Kick Off</button>}
+                      {!['full_time', 'completed', 'cancelled'].includes(match.status) && <button onClick={() => handleMatchStatus(match, 'cancelled')} title="Remove from schedule" className="px-3 h-10 rounded-xl bg-red-500/10 text-red-400 text-[10px] font-black uppercase hover:bg-red-500 hover:text-white transition-all">Cancel</button>}
                       <button
                         onClick={() => handleEditMatch(match)}
                         aria-label="Edit pairing"
