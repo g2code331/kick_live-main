@@ -144,3 +144,7 @@ DO $$ BEGIN
   ALTER TABLE public.competitions DROP CONSTRAINT IF EXISTS competitions_type_check;
   ALTER TABLE public.competitions ADD CONSTRAINT competitions_type_check CHECK (type IN ('league', 'cup', 'knockout', 'friendly'));
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- Team manager starting XI used by the fan/team profile pitch.
+ALTER TABLE public.teams ADD COLUMN IF NOT EXISTS lineup JSONB;
+NOTIFY pgrst, 'reload schema';

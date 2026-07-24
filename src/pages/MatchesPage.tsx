@@ -42,7 +42,7 @@ export default function MatchesPage() {
         .order('start_time', { ascending: false });
       
       if (filter === 'live') {
-        query = query.in('status', ['first_half', 'second_half', 'extra_time', 'live']);
+        query = query.in('status', ['first_half', 'half_time', 'second_half', 'extra_time', 'penalty_shootout', 'live']);
       } else if (filter === 'scheduled') {
         query = query.eq('status', 'scheduled');
       } else if (filter === 'finished') {
@@ -98,9 +98,9 @@ export default function MatchesPage() {
               <div className="flex items-center justify-between mb-2">
                 <span className="text-[10px] text-white/40 uppercase truncate">{match.competitions?.[0]?.name || 'Competition'}</span>
                 <span className={`text-[10px] font-bold ${
-                  match.status === 'live' || match.status === 'first_half' || match.status === 'second_half' ? 'text-brand-green' : 'text-white/40'
+                  ['live', 'first_half', 'half_time', 'second_half', 'extra_time', 'penalty_shootout'].includes(match.status) ? 'text-brand-green' : 'text-white/40'
                 }`}>
-                  {match.status === 'live' || match.status === 'first_half' || match.status === 'second_half' ? `${match.minute || 0}'` : 
+                  {['live', 'first_half', 'half_time', 'second_half', 'extra_time', 'penalty_shootout'].includes(match.status) ? `${match.minute || 0}'` : 
                    match.status === 'finished' || match.status === 'full_time' || match.status === 'completed' ? 'FT' : 
                    new Date(match.start_time).toLocaleDateString()}
                 </span>

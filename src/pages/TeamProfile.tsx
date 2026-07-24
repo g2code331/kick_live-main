@@ -122,7 +122,7 @@ export default function TeamProfile() {
   }
 
   const upcomingMatches = matches.filter(m => m.status === 'scheduled' || m.status === 'waiting');
-  const liveMatches = matches.filter(m => ['first_half', 'second_half', 'extra_time', 'live'].includes(m.status));
+  const liveMatches = matches.filter(m => ['first_half', 'half_time', 'second_half', 'extra_time', 'penalty_shootout', 'live'].includes(m.status));
   const finishedMatches = matches.filter(m => ['completed', 'full_time', 'finished'].includes(m.status));
 
   // Parse lineup (from DB or localStorage fallback)
@@ -211,7 +211,7 @@ export default function TeamProfile() {
             </div>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Mini pitch */}
-              <div className="relative rounded-2xl overflow-hidden" style={{ background: 'linear-gradient(180deg, #1a4a1a 0%, #1d5c1d 50%, #1a4a1a 100%)', paddingBottom: '120%' }}>
+              <div className="relative rounded-2xl overflow-hidden" style={{ background: 'linear-gradient(180deg, #1a4a1a 0%, #1d5c1d 50%, #1a4a1a 100%)', paddingBottom: '130%' }}>
                 {/* Pitch markings */}
                 <div className="absolute inset-0 pointer-events-none">
                   <div className="absolute top-1/2 left-[15%] right-[15%] h-px bg-white/10 -translate-y-1/2" />
@@ -224,7 +224,7 @@ export default function TeamProfile() {
                   return (
                     <div key={i} className="absolute -translate-x-1/2 -translate-y-1/2" style={{ left: `${slot.x}%`, top: `${slot.y}%` }}>
                       <div className="flex flex-col items-center gap-0.5">
-                        <div className="w-9 h-9 rounded-full flex items-center justify-center font-black text-xs border-2 shadow-lg"
+                        <div className="w-10 h-10 rounded-full flex items-center justify-center font-black text-xs border-2 shadow-lg"
                           style={player ? {
                             background: `linear-gradient(135deg, ${team.primary_color || '#39FF14'}, ${team.secondary_color || '#000'})`,
                             borderColor: team.primary_color || '#39FF14',
