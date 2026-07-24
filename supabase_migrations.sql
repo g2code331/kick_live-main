@@ -148,3 +148,7 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 -- Team manager starting XI used by the fan/team profile pitch.
 ALTER TABLE public.teams ADD COLUMN IF NOT EXISTS lineup JSONB;
 NOTIFY pgrst, 'reload schema';
+
+-- Persist per-match timer choices selected at kickoff.
+ALTER TABLE public.matches ADD COLUMN IF NOT EXISTS timer_config JSONB NOT NULL DEFAULT '{}'::jsonb;
+NOTIFY pgrst, 'reload schema';

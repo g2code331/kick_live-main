@@ -2,6 +2,18 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Calendar, Users, MessageSquare, Activity, TrendingUp, Clock } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { FORMATIONS } from '../lib/formations';
+
+function FanLineupPitch({ team, lineup, accent }: { team: any; lineup: { formation: string; players: any[] }; accent: string }) {
+  const slots = FORMATIONS[lineup.formation] || FORMATIONS['4-3-3'];
+  return <div className="space-y-2">
+    <div className="flex items-center justify-between"><h3 className="text-sm font-black uppercase text-white/50">{team?.name}</h3><span className="text-sm font-black" style={{ color: accent }}>{lineup.formation}</span></div>
+    <div className="relative w-full overflow-hidden rounded-2xl border border-white/10" style={{ background: 'linear-gradient(180deg,#1a4a1a 0%,#1d5c1d 50%,#1a4a1a 100%)', paddingBottom: '130%' }}>
+      <div className="absolute inset-0 pointer-events-none"><div className="absolute top-1/2 left-[12%] right-[12%] h-px bg-white/15" /><div className="absolute top-1/2 left-1/2 w-[25%] h-[12%] -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/15" /><div className="absolute top-0 left-[28%] right-[28%] h-[12%] border border-white/15 border-t-0" /><div className="absolute bottom-0 left-[28%] right-[28%] h-[12%] border border-white/15 border-b-0" /></div>
+      {slots.map((slot, i) => { const player = lineup.players[i]; return <div key={i} className="absolute -translate-x-1/2 -translate-y-1/2" style={{ left: `${slot.x}%`, top: `${slot.y}%` }}><div className="flex flex-col items-center"><div className="flex h-9 w-9 items-center justify-center rounded-full border-2 text-[10px] font-black shadow-lg" style={player ? { background: `linear-gradient(135deg, ${team?.primary_color || accent}, ${team?.secondary_color || '#000'})`, borderColor: accent } : { background: 'rgba(0,0,0,.45)', borderColor: 'rgba(255,255,255,.2)' }}>{player ? (player.name?.[0] || '?') : '+'}</div><span className="mt-1 max-w-16 truncate text-center text-[9px] font-black text-white drop-shadow">{player ? player.name?.split(' ').pop() : slot.pos}</span></div></div>; })}
+    </div>
+  </div>;
+}
 
 export default function MatchDetails() {
   const { matchId } = useParams<{ matchId: string }>();
@@ -218,35 +230,9 @@ export default function MatchDetails() {
                 <Users size={24} className="text-brand-green" />
                 <h2 className="text-2xl font-black uppercase">Lineups</h2>
               </div>
-              <div className="space-y-6">
-                <div>
-                  <h3 className="text-sm font-black uppercase text-white/40 mb-3">{match.homeTeam?.name} <span className="text-brand-green ml-2">{lineups.home.formation}</span></h3>
-                  <div className="space-y-2">
-                    {lineups.home.players.map((player: any) => (
-                      <div key={player.id} className="flex items-center gap-3 p-2 rounded-lg bg-white/5"
-                        onClick={() => navigate(`/player/${player.id}`)}
-                        style={{ cursor: 'pointer' }}>
-                        <span className="text-sm font-black text-brand-green w-8">{player.number}</span>
-                        <span className="text-sm">{player.name}</span>
-                        <span className="text-xs text-white/40 ml-auto">{player.position}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <h3 className="text-sm font-black uppercase text-white/40 mb-3">{match.awayTeam?.name} <span className="text-brand-blue ml-2">{lineups.away.formation}</span></h3>
-                  <div className="space-y-2">
-                    {lineups.away.players.map((player: any) => (
-                      <div key={player.id} className="flex items-center gap-3 p-2 rounded-lg bg-white/5"
-                        onClick={() => navigate(`/player/${player.id}`)}
-                        style={{ cursor: 'pointer' }}>
-                        <span className="text-sm font-black text-brand-blue w-8">{player.number}</span>
-                        <span className="text-sm">{player.name}</span>
-                        <span className="text-xs text-white/40 ml-auto">{player.position}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+              <div className="grid grid-cols-1 gap-6">
+                <FanLineupPitch team={match.homeTeam} lineup={lineups.home} accent="#39FF14" />
+                <FanLineupPitch team={match.awayTeam} lineup={lineups.away} accent="#00D4FF" />
               </div>
             </div>
 

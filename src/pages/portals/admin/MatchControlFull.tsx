@@ -133,13 +133,14 @@ export default function MatchControlFull({ match, onBack }: MatchControlFullProp
       // Fetch columns including timer anchor fields
       const { data: matchData } = await supabase
         .from('matches')
-        .select('id, home_team_id, away_team_id, home_score, away_score, status, minute, match_start_time, start_time, elapsed_seconds_before_pause, homeTeam:teams!home_team_id(id, name, short_name, primary_color, secondary_color), awayTeam:teams!away_team_id(id, name, short_name, primary_color, secondary_color)')
+        .select('id, home_team_id, away_team_id, home_score, away_score, status, minute, match_start_time, start_time, timer_config, elapsed_seconds_before_pause, homeTeam:teams!home_team_id(id, name, short_name, primary_color, secondary_color), awayTeam:teams!away_team_id(id, name, short_name, primary_color, secondary_color)')
         .eq('id', match.id)
         .single();
       
       if (matchData) {
         setMatchStatus(matchData.status || 'scheduled');
         if (matchData.start_time) setKickoffTime(new Date(matchData.start_time).toISOString().slice(0, 16));
+        if (matchData.timer_config) setKickoffSettings((prev: any) => ({ ...prev, ...matchData.timer_config }));
         setHomeTeam(matchData.homeTeam);
         setAwayTeam(matchData.awayTeam);
         const { data: playersData } = await supabase.from('players')
@@ -217,7 +218,8 @@ export default function MatchControlFull({ match, onBack }: MatchControlFullProp
       status: 'first_half',
       minute: 0,
       match_start_time: now.toISOString(),
-      elapsed_seconds_before_pause: 0
+      elapsed_seconds_before_pause: 0,
+      timer_config: kickoffSettings
     }).eq('id', match.id);
     await addEvent('kickoff', 0);
   };
