@@ -23,6 +23,7 @@ export default function MatchDetails() {
   const [commentary, setCommentary] = useState<any[]>([]);
   const [stats, setStats] = useState<any>(null);
   const [lineups, setLineups] = useState<any>({ home: { players: [], formation: '4-3-3' }, away: { players: [], formation: '4-3-3' } });
+  const [activeLineup, setActiveLineup] = useState<'home' | 'away'>('home');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -146,8 +147,7 @@ export default function MatchDetails() {
                 <p className="text-4xl font-black text-brand-green">{match.home_score} - {match.away_score}</p>
                 {isLive && (
                   <p className="text-xs text-brand-green flex items-center justify-center gap-1">
-                    <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
-                    {match.minute}' LIVE
+                    {match.status === 'half_time' ? 'HALF TIME' : <><span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>{match.minute}' LIVE</>}
                   </p>
                 )}
                 {!isLive && (
@@ -230,10 +230,15 @@ export default function MatchDetails() {
                 <Users size={24} className="text-brand-green" />
                 <h2 className="text-2xl font-black uppercase">Lineups</h2>
               </div>
-              <div className="grid grid-cols-1 gap-6">
-                <FanLineupPitch team={match.homeTeam} lineup={lineups.home} accent="#39FF14" />
-                <FanLineupPitch team={match.awayTeam} lineup={lineups.away} accent="#00D4FF" />
+              <div className="flex gap-2 rounded-xl bg-white/5 p-1 mb-4">
+                <button onClick={() => setActiveLineup('home')} className={`flex-1 rounded-lg px-3 py-2 text-xs font-black uppercase transition-colors ${activeLineup === 'home' ? 'bg-brand-green text-black' : 'text-white/40 hover:text-white'}`}>{match.homeTeam?.short_name || match.homeTeam?.name}</button>
+                <button onClick={() => setActiveLineup('away')} className={`flex-1 rounded-lg px-3 py-2 text-xs font-black uppercase transition-colors ${activeLineup === 'away' ? 'bg-brand-blue text-black' : 'text-white/40 hover:text-white'}`}>{match.awayTeam?.short_name || match.awayTeam?.name}</button>
               </div>
+              <FanLineupPitch
+                team={activeLineup === 'home' ? match.homeTeam : match.awayTeam}
+                lineup={activeLineup === 'home' ? lineups.home : lineups.away}
+                accent={activeLineup === 'home' ? '#39FF14' : '#00D4FF'}
+              />
             </div>
 
             {/* Statistics */}
