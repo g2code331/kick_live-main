@@ -10,7 +10,7 @@ export default function MatchDetails() {
   const [events, setEvents] = useState<any[]>([]);
   const [commentary, setCommentary] = useState<any[]>([]);
   const [stats, setStats] = useState<any>(null);
-  const [lineups, setLineups] = useState<any>({ home: [], away: [] });
+  const [lineups, setLineups] = useState<any>({ home: { players: [], formation: '4-3-3' }, away: { players: [], formation: '4-3-3' } });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -31,8 +31,8 @@ export default function MatchDetails() {
         .from('matches')
         .select(`
           *,
-          homeTeam:teams!home_team_id(id, name, short_name, primary_color, secondary_color),
-          awayTeam:teams!away_team_id(id, name, short_name, primary_color, secondary_color),
+          homeTeam:teams!home_team_id(id, name, short_name, primary_color, secondary_color, lineup),
+          awayTeam:teams!away_team_id(id, name, short_name, primary_color, secondary_color, lineup),
           competitions(name)
         `)
         .eq('id', matchId)
@@ -70,9 +70,16 @@ export default function MatchDetails() {
           .select('id, name, number, position, team_id')
           .in('team_id', [matchData.home_team_id, matchData.away_team_id]);
         
-        const homeLineup = playersData?.filter((p: any) => p.team_id === matchData.home_team_id) || [];
-        const awayLineup = playersData?.filter((p: any) => p.team_id === matchData.away_team_id) || [];
-        setLineups({ home: homeLineup, away: awayLineup });
+        const fallbackHome = playersData?.filter((p: any) => p.team_id === matchData.home_team_id) || [];
+        const fallbackAway = playersData?.filter((p: any) => p.team_id === matchData.away_team_id) || [];
+        const readLineup = (team: any, fallback: any[]) => {
+          try {
+            const saved = typeof team?.lineup === 'string' ? JSON.parse(team.lineup) : team?.lineup;
+            const players = Array.isArray(saved?.players) ? saved.players.filter(Boolean) : fallback;
+            return { players: players.slice(0, 11), formation: saved?.formation || '4-3-3' };
+          } catch { return { players: fallback.slice(0, 11), formation: '4-3-3' }; }
+        };
+        setLineups({ home: readLineup(matchData.homeTeam, fallbackHome), away: readLineup(matchData.awayTeam, fallbackAway) });
       }
     } catch (err) {
       console.error('Error loading match data:', err);
@@ -213,9 +220,9 @@ export default function MatchDetails() {
               </div>
               <div className="space-y-6">
                 <div>
-                  <h3 className="text-sm font-black uppercase text-white/40 mb-3">{match.homeTeam?.name}</h3>
+                  <h3 className="text-sm font-black uppercase text-white/40 mb-3">{match.homeTeam?.name} <span className="text-brand-green ml-2">{lineups.home.formation}</span></h3>
                   <div className="space-y-2">
-                    {lineups.home.slice(0, 11).map((player: any) => (
+                    {lineups.home.players.map((player: any) => (
                       <div key={player.id} className="flex items-center gap-3 p-2 rounded-lg bg-white/5"
                         onClick={() => navigate(`/player/${player.id}`)}
                         style={{ cursor: 'pointer' }}>
@@ -227,9 +234,9 @@ export default function MatchDetails() {
                   </div>
                 </div>
                 <div>
-                  <h3 className="text-sm font-black uppercase text-white/40 mb-3">{match.awayTeam?.name}</h3>
+                  <h3 className="text-sm font-black uppercase text-white/40 mb-3">{match.awayTeam?.name} <span className="text-brand-blue ml-2">{lineups.away.formation}</span></h3>
                   <div className="space-y-2">
-                    {lineups.away.slice(0, 11).map((player: any) => (
+                    {lineups.away.players.map((player: any) => (
                       <div key={player.id} className="flex items-center gap-3 p-2 rounded-lg bg-white/5"
                         onClick={() => navigate(`/player/${player.id}`)}
                         style={{ cursor: 'pointer' }}>
