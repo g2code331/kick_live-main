@@ -42,6 +42,16 @@ export default defineConfig(() => {
       host: "0.0.0.0",
       port: 5000,
       allowedHosts: true as const,
+      // Phase 2: `/api` in the dev server means a local build talks to a *local* Worker
+      // (`npm run worker:dev`, wrangler on 8787) and can never reach production by accident.
+      // Relative URLs also keep working behind the preview host, which proxies by port, not by path.
+      proxy: {
+        "/api": {
+          target: process.env["KICKLIVE_WORKER_ORIGIN"] ?? "http://127.0.0.1:8787",
+          changeOrigin: false,
+          ws: false,
+        },
+      },
     },
     preview: {
       host: "0.0.0.0",

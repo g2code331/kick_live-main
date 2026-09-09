@@ -9,9 +9,9 @@
  * `action` values are namespaced (`user.role_media`, `match.finalize`) so the admin feed can filter
  * without parsing prose, and match the strings the Phase 1 hardening migration already writes.
  */
-import type { Env } from "../env";
-import { supabaseAdmin } from "../lib/supabase";
-import { logDebug } from "../lib/debug";
+import type { Env } from "../env.ts";
+import { supabaseAdmin } from "../services/supabase.ts";
+import { logDebug } from "../lib/debug.ts";
 
 export interface AuditEntry {
   /** Actor (the admin who acted), not the subject of the action. */

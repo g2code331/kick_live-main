@@ -3,6 +3,10 @@
 interface ImportMetaEnv {
   readonly VITE_SUPABASE_URL: string;
   readonly VITE_SUPABASE_ANON_KEY: string;
+  /** API Worker origin; "" (default) means same-origin `/api`. See src/lib/env.ts. */
+  readonly VITE_API_BASE_URL?: string;
+  /** Must be "1" for a dev build to point at a non-local API. */
+  readonly VITE_API_ALLOW_REMOTE?: string;
   readonly VITE_UPDATE_MANIFEST_URL?: string;
   readonly VITE_UPDATE_CHANNEL?: string;
   readonly BASE_URL: string;

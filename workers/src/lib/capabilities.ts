@@ -13,7 +13,7 @@
  *   - capability names are verbs in the domain language (`match_control.write`), not screen names
  *     (`admin.matchcontrol_page`), so the same capability can serve app, portal and CLI callers.
  */
-import type { AppRole } from "../env";
+import type { AppRole } from "../env.ts";
 
 export type Capability =
   // read
@@ -34,6 +34,7 @@ export type Capability =
   | "standings.recompute"
   // club data
   | "team.register"
+  | "team.read_own"
   | "team.update_own"
   | "player.manage_own_team"
   // publishing
@@ -74,6 +75,9 @@ const MATRIX: Record<Capability, readonly AppRole[]> = {
   "standings.recompute": ["admin"],
 
   "team.register": ALL_ROLES,
+  // Any authenticated caller may ask which clubs are theirs. A fan gets an empty list, which is the
+  // truthful answer, so this grants no data another role could not already read about itself.
+  "team.read_own": ALL_ROLES,
   "team.update_own": ["team_manager", "admin"],
   "player.manage_own_team": ["team_manager", "admin"],
 
@@ -102,4 +106,19 @@ export function roleHasCapability(role: AppRole | null, capability: Capability):
 /** For tests and the route review: every capability with the roles that hold it. */
 export function capabilityTable(): { capability: Capability; roles: readonly AppRole[] }[] {
   return (Object.keys(MATRIX) as Capability[]).map((capability) => ({ capability, roles: MATRIX[capability] }));
+}
+
+/**
+ * Everything a role holds. `/api/me` returns this so a client can grey out an action for the right
+ * reason; it is a display hint, and the same matrix rejects the request if the client ignores it.
+ */
+export function capabilitiesFor(role: AppRole | null): Capability[] {
+  return (Object.keys(MATRIX) as Capability[]).filter((capability) => roleHasCapability(role, capability));
+}
+
+/** Every capability name, so a typo in a route table entry fails loudly instead of meaning "public". */
+export const ALL_CAPABILITIES: readonly Capability[] = Object.keys(MATRIX) as readonly Capability[];
+
+export function isCapability(value: unknown): value is Capability {
+  return typeof value === "string" && (ALL_CAPABILITIES as readonly string[]).includes(value);
 }

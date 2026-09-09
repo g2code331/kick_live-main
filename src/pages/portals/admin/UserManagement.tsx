@@ -5,6 +5,10 @@ import type { UserRole } from '../../../lib/supabase';
 import { cancelMyAccessRequest, decideAccessRequest, listPendingAccessRequests, setUserRole } from '../../../lib/access';
 import type { AccessRequest } from '../../../lib/access';
 import { log } from '../../../lib/log';
+import { apiHealth, apiMe } from '../../../lib/api';
+import type { ApiResult } from '../../../lib/api';
+
+type ApiProbe = { health: ApiResult<unknown>; me: ApiResult<unknown> } | null;
 
 interface RowUser {
   id: string;
@@ -28,6 +32,22 @@ export default function UserManagement() {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
+
+  /**
+   * Phase 2 demonstration of the API boundary: the same identity question this screen already asks
+   * ("may this caller change roles?"), answered by the Worker instead of by this component. It is a
+   * diagnostic panel, not a dependency — nothing here blocks on it, and the tables below still use the
+   * direct Supabase path until their routes are implemented.
+   */
+  const [apiProbe, setApiProbe] = useState<ApiProbe>(null);
+  const [apiBusy, setApiBusy] = useState(false);
+
+  const runApiProbe = async () => {
+    setApiBusy(true);
+    const [health, me] = await Promise.all([apiHealth(), apiMe()]);
+    setApiProbe({ health, me });
+    setApiBusy(false);
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -107,6 +127,53 @@ export default function UserManagement() {
           {notice.text}
         </div>
       )}
+
+      <div className="glass rounded-[2rem] border border-white/5 overflow-hidden">
+        <div className="px-8 py-5 bg-white/5 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <Shield size={16} className="text-brand-green" />
+            <h3 className="text-[10px] font-black uppercase tracking-widest text-white/60">API boundary check</h3>
+          </div>
+          <button
+            onClick={runApiProbe}
+            disabled={apiBusy}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 text-[10px] font-black uppercase tracking-widest hover:bg-white/10 transition-colors disabled:opacity-40"
+          >
+            {apiBusy ? <Loader2 size={14} className="animate-spin" /> : <Shield size={14} />} Run check
+          </button>
+        </div>
+        <div className="px-8 py-5 text-[11px] text-white/45 space-y-2">
+          {!apiProbe && <p>Asks the Worker two questions it is now responsible for answering: is it alive, and what does the database say this account may do. The role below is read from your profile row by the API, never from this page.</p>}
+          {apiProbe?.health && (
+            <p>
+              <span className="uppercase tracking-widest font-black text-white/30 mr-2">worker</span>
+              {apiProbe.health.ok ? (
+                <span className="text-brand-green">
+                  reachable · {String((apiProbe.health.data as { version?: string } | undefined)?.version ?? '?')} ·{' '}
+                  {String((apiProbe.health.data as { environment?: string } | undefined)?.environment ?? '?')}
+                </span>
+              ) : (
+                <span className="text-brand-red">
+                  {apiProbe.health.status === 0 ? 'not reachable from this build' : `HTTP ${String(apiProbe.health.status)}`} · {apiProbe.health.code} · {apiProbe.health.message}
+                </span>
+              )}
+            </p>
+          )}
+          {apiProbe?.me && (
+            <p>
+              <span className="uppercase tracking-widest font-black text-white/30 mr-2">identity</span>
+              {apiProbe.me.ok ? (
+                <span className="text-brand-green">
+                  {String((apiProbe.me.data as { role?: string } | undefined)?.role ?? 'unknown')} ·{' '}
+                  {((apiProbe.me.data as { capabilities?: string[] } | undefined)?.capabilities ?? []).length} capabilities
+                </span>
+              ) : (
+                <span className="text-brand-red">{apiProbe.me.code} · {apiProbe.me.message}</span>
+              )}
+            </p>
+          )}
+        </div>
+      </div>
 
       {/* Pending access requests */}
       <div className="glass rounded-[2rem] border border-white/5 overflow-hidden">

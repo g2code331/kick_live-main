@@ -1,60 +1,47 @@
 /**
- * Where route handlers will live. In Phase 1 the table is empty on purpose.
+ * Route handlers and the single dispatch point.
  *
- * A route is added here in the same commit that moves the matching browser call site off the direct
- * Supabase path — never before, because a half-moved write is the worst state this product can be in
- * (two code paths, two validation rules, one of them unenforced). `workers/README.md` maps each route
- * to its phase; `docs/PRODUCTION_MIGRATION_PLAN.md` says what the SPA stops doing in that phase.
+ * `router.ts` declares the surface; this file implements what exists and answers 501 for everything
+ * else. Keeping both in one dispatcher is deliberate: an undeclared path cannot be reached, and a
+ * declared path cannot silently 404 — the two ways an API drifts away from its documentation.
  *
- * Contracts worth freezing now, because they are the ones the SPA has to code against:
- *
- * POST /v1/matches/:matchId/events
- *   in : { client_event_id: string(uuid, idempotency key), event_type, minute, extra_minute?,
- *          team_id?, player_id?, assist_player_id?, description?, goal_type?, card_reason? }
- *   out: { event: {...}, match: { home_score, away_score, minute, status } }
- *   rules: `event_type` must be in the profile's CHECK list; `minute` 0..(90 + added, or 120 for
- *          extra time) — an event after full time is a data-entry bug and is refused, not clamped;
- *          a goal event *derives* the score change server-side instead of trusting a score in the
- *          body; replays of the same client_event_id return the original row (200, not 201).
- *
- * PUT /v1/matches/:matchId/state
- *   in : { status: 'scheduled'|'live'|'half_time'|'finished'|'abandoned'|'postponed', minute?, clock_action?: 'start'|'stop'|'reset' }
- *   out: { match: {...}, allowed: true }
- *   rules: illegal transitions (finished → live) are 409 unless the caller holds match_control.lock;
- *          writes to a locked match are 409 with the lock reason so the UI can explain itself.
- *
- * POST /v1/auth/access-requests
- *   in : { requested_role: 'team_manager'|'media', reason: string(10..1000) }
- *   out: { request: { id, status: 'pending', created_at } }
- *   rules: the RPC owns validation; the Worker only adds Turnstile + rate limit + the audit row.
- *
- * All handlers share these rules: parse the body into a typed shape before touching the database;
- * never accept a role, an author id, or an owner id from the body; write the audit row for anything
- * privileged; return `400 bad_request` with a per-field `detail` in non-production only.
+ * A route becomes real by (1) adding `implemented: true` and `handler` to its entry in `router.ts` and
+ * (2) adding one line to `HANDLERS` below. Everything before those two lines — authentication,
+ * capability check, rate limit, CORS, error envelope — already applies to it.
  */
-import type { RouteDef } from "../router";
-import type { Env } from "../env";
-import type { Principal } from "../middleware/auth";
-import type { RateLimiter } from "../middleware/ratelimit";
-import { notImplemented } from "../lib/response";
+import type { Env } from "../env.ts";
+import { notImplemented } from "../lib/response.ts";
+import type { Matched } from "../router.ts";
+import type { Principal } from "../middleware/auth.ts";
+import { handleHealth } from "./health.ts";
+import { handleMe } from "./me.ts";
+import { handleMyTeams } from "./teams.ts";
 
 export interface HandlerContext {
-  request: Request;
-  env: Env;
-  principal: Principal;
-  params: Record<string, string>;
-  requestId: string;
-  limiter: RateLimiter;
-  route: RouteDef;
+  readonly request: Request;
+  readonly env: Env;
+  readonly ctx: ExecutionContext;
+  readonly url: URL;
+  readonly params: Record<string, string>;
+  readonly principal: Principal;
+  readonly requestId: string;
+  readonly clientAddress: string;
 }
 
-export type Handler = (ctx: HandlerContext) => Promise<Response>;
+export type RouteHandler = (ctx: HandlerContext) => Promise<Response>;
 
-/** Filled in Phase 2+, keyed by the exact `RouteDef.pattern`. */
-export const HANDLERS: Readonly<Record<string, Handler>> = {};
+/** Keyed by the same `pattern` strings used in `router.ts`. */
+export const HANDLERS: Record<string, RouteHandler> = {
+  "/health": handleHealth,
+  "/me": handleMe,
+  "/teams/mine": handleMyTeams,
+};
 
-export async function dispatchRoute(ctx: HandlerContext): Promise<Response> {
-  const handler = HANDLERS[ctx.route.pattern] as Handler | undefined;
-  if (handler) return handler(ctx);
-  throw notImplemented(`${ctx.route.method} /v1${ctx.route.pattern}`, ctx.route.phase, `${ctx.route.summary}${ctx.route.invariants ? ` — invariants: ${ctx.route.invariants}` : ""}`);
+export async function dispatchRoute(ctx: HandlerContext, match: Matched): Promise<Response> {
+  const handler = HANDLERS[match.route.pattern];
+  if (!handler || !match.route.implemented) {
+    // Thrown rather than returned so the entry point's catch applies CORS + security headers to it too.
+    throw notImplemented(match.route.summary, match.route.phase, "The route is declared in router.ts; its handler is not written yet.");
+  }
+  return handler(ctx);
 }

@@ -40,15 +40,23 @@ Numbers, measured rather than estimated: 15 business tables in one authoritative
   browser / PWA /       │  Pages: static SPA (web + PWA shells, same bundle as today)          │
   desktop renderer ─────▶  WAF rules · Turnstile · cache rules · rate limits · custom hostnames │
                         └───────────────┬───────────────────────────────┬──────────────────────┘
-                                        │ /v1/*  (JWT bearer)           │ media (signed URLs)
+                                        │ /api/* (JWT bearer;           │ media (signed URLs)
+                                        │  /v1/* alias)  LIVE           │ planned, Phase 4
                                         ▼                               ▼
                         ┌─────────────────────────── Cloudflare Workers ──────────────────────┐
-                        │  kicklive-api            (validation, authz, audit, orchestration)   │
+                        │  kicklive-api  ✅ LIVE (Phase 2)                                       │
+                        │    · pipeline: cors → match → authenticate → authorize → limit → route │
+                        │    · live routes: GET /health, /me, /teams/mine                        │
+                        │    · declared routes answer 501 *after* authn + authz (32 total)      │
+                        │    · validation library, capability matrix, error envelope, audit hook │
                         │  MatchRoom Durable Object(s)   one per match_id: clock + event stream  │
+                        │    ⏳ Phase 3 — NOT configured in wrangler.toml yet                     │
                         │  Queues  kicklive-jobs         standings, fan-out, media optimize      │
-                        │  KV      rate-limit counters, idempotency keys                        │
+                        │    ⏳ Phase 4 — NOT configured                                         │
+                        │  KV      rate-limit counters (optional: dev falls back to per-isolate) │
                         └───────┬───────────────────────────────┬───────────────────────────────┘
-                                │ service_role (RLS still on for anon paths)
+                                │ caller's JWT where RLS suffices;│
+                                │ service_role only for cross-row  │
                                 ▼                               ▼
                    ┌───────────────────────────┐    ┌──────────────────────┐   ┌──────────────────┐
                    │ Supabase Postgres (truth)  │    │ Supabase Auth        │   │ R2 bucket        │
@@ -71,16 +79,17 @@ Fixed decisions, so they stop being renegotiated per feature:
 
 ## 3. Component boundaries
 
-| Layer              | Owns                                                                                  | Must not own                                                              |
-| ------------------ | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| React SPA (`src/`) | rendering, forms, optimistic UI, route UX guards                                      | authorisation decisions, credentials, aggregate math that must be trusted |
-| Cloudflare edge    | TLS, WAF, cache, Turnstile, limits per IP/route                                       | business rules                                                            |
-| Worker API         | input validation, identity→capability check, orchestration, audit writes, idempotency | storing a second copy of match state                                      |
-| Durable Object     | the live room: clock, sequence, presence, fan-out                                     | durable record of results (that is Postgres)                              |
-| Supabase Postgres  | all business data, RLS, definer functions, constraints, triggers                      | trusting a client-provided role                                           |
-| Supabase Auth      | credentials, sessions, email flows, password policy                                   | the application role (it lives in `profiles.role`)                        |
-| R2                 | bytes                                                                                 | metadata that belongs in `media`/`players` rows                           |
-| Queues             | anything that must outlive the click                                                  | the write the user is waiting on                                          |
+| Layer                 | Owns                                                                         | Must not own                                                              |
+| --------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| React SPA (`src/`)    | rendering, forms, optimistic UI, route UX guards                             | authorisation decisions, credentials, aggregate math that must be trusted |
+| `src/lib/api/` (LIVE) | base URL, bearer token, JSON, error envelope, timeouts for Worker calls      | caching, retry loops, authorisation logic, a second auth implementation   |
+| Cloudflare edge       | TLS, WAF, cache, Turnstile, limits per IP/route                              | business rules                                                            |
+| Worker API (LIVE)     | identity→capability→ownership, input validation, orchestration, audit writes | storing a second copy of match state; a role claim from the client        |
+| Durable Object        | the live room: clock, sequence, presence, fan-out                            | durable record of results (that is Postgres)                              |
+| Supabase Postgres     | all business data, RLS, definer functions, constraints, triggers             | trusting a client-provided role                                           |
+| Supabase Auth         | credentials, sessions, email flows, password policy                          | the application role (it lives in `profiles.role`)                        |
+| R2                    | bytes                                                                        | metadata that belongs in `media`/`players` rows                           |
+| Queues                | anything that must outlive the click                                         | the write the user is waiting on                                          |
 
 One rule sits on top: a browser is an _untrusted_ caller. It asserts nothing about itself; identity
 comes from a verified token, capability from the table in `workers/src/lib/capabilities.ts`, and the
@@ -121,6 +130,13 @@ Roles (`public.profiles.role`, CHECK-constrained to exactly these four):
 Requests are queued in `access_requests` (one open per user, enforced by a partial unique index);
 `admin` is excluded by a CHECK constraint, so it is not "hidden in the UI" but impossible.
 
+**The Worker verifies the same credentials, independently of React** (`workers/src/middleware/auth.ts`,
+live in Phase 2): HS256 signature against `SUPABASE_JWT_SECRET`, then `exp`/`iat` skew, then `aud`,
+then a read of `profiles.role` by `sub` — with the caller's own token, so RLS applies to the identity
+read. A valid token whose profile row is gone is a 401, not an anonymous fallback. No endpoint accepts
+a role from a body, query string or cookie, and the JWT's own `role` claim (the Postgres role) is never
+treated as the application role.
+
 What the client may assert about itself: `username`, `phone`, avatar. Nothing else. The previous
 design — a `rolePasswords` map in `SignupPage.tsx` and `options.data.role` at signup — is gone (audit
 F-02/F-04). Password policy: 8 characters minimum at signup; the Supabase dashboard's own
@@ -134,12 +150,16 @@ Three rings, and each must be able to fail alone without opening the others:
    roles at all; `anon` has no DML anywhere (revoked, plus default-privileges for future tables).
 2. **RLS policies** — row level, `TO authenticated` on every write policy, `WITH CHECK` explicit, and
    every role test going through `SECURITY DEFINER` helpers with a pinned `search_path`.
-3. **The Worker** (Phase 2) — capability check per route (`lib/capabilities.ts`), body validation,
-   ownership predicates that RLS cannot express well (e.g. "you may only write events for a match
-   assigned to you"), and the audit row.
+3. **The Worker** (live since Phase 2) — capability check per route (`workers/src/lib/capabilities.ts`
+   via `middleware/authorization.ts`), body validation (`lib/validation.ts`), ownership predicates that
+   RLS cannot express well (`services/teamAccess.ts`), and the audit row (`middleware/audit.ts`).
 
-Today rings 1–2 are the only ones that exist, which is why Phase 1 hardened them before any endpoint
-work. The capability matrix is intentionally not a hierarchy (`admin ⊃ media ⊃ …`): each capability
+Rings 1–2 are what protects every feature that has **not** moved behind a route yet — which is still
+almost all of them. Ring 3 currently guards the three implemented routes, and guards the other 29
+_declared_ routes too: authentication and authorization run before the `501` stub, so a fan already
+gets 403 on `POST /api/admin/users/:userId/role` even though nothing there is writable yet. That
+ordering is why Phase 1 hardened rings 1–2 first: a route table is not enforcement, a route handler
+behind the checks is. The capability matrix is intentionally not a hierarchy (`admin ⊃ media ⊃ …`): each capability
 names the roles that hold it, so adding a role cannot inherit silently. `team_manager` is absent from
 row-scoped capabilities on purpose — ownership is a join (`teams.owner_id = auth.uid()`), not a role.
 
@@ -172,6 +192,14 @@ Safe removal path, in order (each step independently shippable, nothing to "big 
 
 `db.ts` (column-named, `limit()`-bounded, `log.error` on failure, mock data dev-only) is the shape the
 helpers converge on; it is deliberately not renamed or merged, so the diff stays reviewable.
+
+**Phase 2 addition.** `src/lib/api/` is now a second, narrow door next to the ones above: one client
+(base URL from `src/lib/env.ts`, the bearer token via a lazy `import("../supabase")` so the module stays
+importable from `node --test` and never imports the React tree, the JSON envelope, `ApiResult` instead of
+thrown HTTP errors, and an abort on timeout). It exists to be _used by the
+routes that move_, not to be adopted wholesale: `db.ts`, `DataLoader` and the per-page Supabase calls are
+untouched, and the only caller changed in this phase is the diagnostic panel in
+`src/pages/portals/admin/UserManagement.tsx`.
 
 ## 8. Database: schema, RLS, migrations
 
@@ -332,13 +360,23 @@ Also absent. It is a _rights_ domain, not a delivery domain, and merging the two
 **Env vars (browser).** `.env.example` is the template; `src/lib/env.ts` is the only reader; nothing is
 defaulted. `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (required — a missing one is a boot error, not
 a fallback), `VITE_UPDATE_MANIFEST_URL`, `VITE_UPDATE_CHANNEL` (optional, desktop/PWA feed).
+Since Phase 2 also: `VITE_API_BASE_URL` (**empty by default** = same-origin `/api`, which the Vite dev
+server proxies to `wrangler dev` on 127.0.0.1:8787) and `VITE_API_ALLOW_REMOTE=1` (the only way a dev
+build may name a remote API). `resolveApiBaseUrl()` refuses dev→remote and prod→localhost, which is
+what makes "local development cannot touch production data" a check rather than a convention.
 `.replit` carries the project's public URL + anon key so the Replit environment boots; that pair is
 what the bundle ships anyway, so it is not a secret — but nothing else may be added there.
 
 **Env vars (server).** Documented in `.env.example` and `workers/.dev.vars.example`; consumed by
-`workers/src/env.ts`: `SUPABASE_URL`, `SUPABASE_ANON_KEY` as `[vars]`, and
-`SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET`, `TURNSTILE_SECRET_KEY` as `wrangler secret put`
-only. `ALLOWED_ORIGINS` is an exact-origin list; `*` is rejected by `allowedOrigins()`.
+`workers/src/env.ts`: `APP_ENV`, `SUPABASE_URL`, `SUPABASE_PROJECT_REF`, `SUPABASE_ANON_KEY`,
+`ALLOWED_ORIGINS` as `[vars]` (all three environments declared in `workers/wrangler.toml`:
+development at the top level, `[env.staging]`, `[env.production]`), and `SUPABASE_SERVICE_ROLE_KEY`,
+`SUPABASE_JWT_SECRET`, `TURNSTILE_SECRET_KEY` as `wrangler secret put … --env <name>` only.
+`ALLOWED_ORIGINS` is an exact-origin list; `*` is rejected by `allowedOrigins()`, and an unset list
+means "no cross-origin access at all". `SUPABASE_PROJECT_REF` is not a secret: it pins which project ref
+the environment may address, and `assertSupabaseUrl()` fails the request (500, loudly) if
+`SUPABASE_URL` disagrees — the failure mode the SPA had in Phase 1 (a silent fallback to another
+project) is not repeated server-side.
 
 **Secrets already in history.** The anon key + project URL appear in `repomix-output.xml` (a stale
 1.9 MB dump of the whole tree) and in git history of the deployment guides; both were public-by-design
@@ -362,9 +400,13 @@ load test a production write, so a project per environment is a prerequisite for
 
 1. The hardening migration is **prepared, not applied**. Until it runs, F-01/F-05/F-06/F-07/F-08 are
    open in production regardless of the app changes.
-2. Direct browser writes (F-10) mean any future policy mistake is directly exploitable; only the
-   Phase 2 route moves close that gap.
-3. No rate limiting or bot gate on `signup`/`forgot-password`/`/rest/v1/rpc/*` (F-15).
+2. Direct browser writes (F-10) mean any future policy mistake is directly exploitable; the Phase 2
+   route table and client (`src/lib/api/`) now exist, but **no write route is implemented**, so this gap
+   is still open until each table's route is built and its callers moved.
+3. No rate limiting or bot gate on `signup`/`forgot-password`/`/rest/v1/rpc/*` (F-15) **as long as those
+   calls go straight to Supabase**. The Worker's budget classes (`middleware/ratelimit.ts`) and Turnstile
+   verification exist and are tested, and every declared write route names a class — but they can only
+   protect traffic that actually goes through the Worker.
 4. Live state depends on an operator's tab (§9): a closed tab silently freezes a match.
 5. Standings can be recomputed by whoever clicks finalize (§11), with errors swallowed.
 6. `profiles.email` is still readable by any authenticated user (`profiles: authenticated read`) —
@@ -373,3 +415,78 @@ load test a production write, so a project per environment is a prerequisite for
 profiles(username)`) depend on it today.
 7. Predictions are browser-local (F-21): the feature is demonstrably "working" and is not.
 8. The 10 Match Control variants (§10) keep diverging while all 10 remain in the tree.
+
+## 16. The API boundary as built (Phase 2)
+
+Sections 2–15 describe the target; this section records what is now in the tree, so "planned" and
+"implemented" stay distinguishable. Operational detail (every flag, the route map, the add-a-route
+checklist) lives in `workers/README.md`; this section is the architecture view.
+
+### 16.1 Two paths, one rule
+
+```
+                         read (public, cacheable)             privileged mutation / per-user read
+                        ┌──────────────────────────┐        ┌──────────────────────────────────────┐
+  React page ── Supabase SDK ─▶ Supabase (RLS)      │        │ page ─▶ src/lib/api ─▶ Worker ─▶ Postgres │
+                        └──────────────────────────┘        └──────────────────────────────────────┘
+                              unchanged today                    LIVE for /health, /me, /teams/mine;
+                                                                 declared (501) for the other 29
+```
+
+The rule that decides which side a call belongs on is not "sensitive or sensitive-looking" — it is
+**who must be trusted to make it**:
+
+| Call                                                               | Path                                                         | Why                                                                           |
+| ------------------------------------------------------------------ | ------------------------------------------------------------ | ----------------------------------------------------------------------------- |
+| fixture list, standings, published articles                        | browser → Supabase (RLS)                                     | `anon` + `public.read`; a Worker hop adds latency and no trust                |
+| my own profile fields                                              | browser → Supabase today                                     | RLS `USING (auth.uid() = id)` already restricts it correctly                  |
+| who I am, per the API (`GET /api/me`, `GET /api/teams/mine`)       | **Worker**                                                   | needs capability + ownership resolution, and is the probe for the whole chain |
+| role change, access-request decision, match event, publish, lineup | browser → Supabase **today**; Worker when the route is built | ring 3 must be in place before the client stops being the authority           |
+
+Moving a call behind the Worker is a per-route decision with a per-route migration in
+`docs/PRODUCTION_MIGRATION_PLAN.md` §Phase 2; it is not a bulk rewrite, and it is not "everything must
+now go through the Worker" — public reads through an API tier would add a failure domain for nothing.
+
+### 16.2 Request flows, as implemented
+
+```
+GET /api/health                     (no token, no DB)
+  matchRoute → capability: null → rate class "public" → routes/health.ts
+  200 { success:true, data:{ service, status, version, environment, routes, time } }
+      cache-control: public, max-age=30, s-maxage=60     ← the only edge-cacheable per-deployment route
+
+GET /api/me                         (token, one primary-key read)
+  authenticate(): HS256 verify → sub → profiles read WITH THE CALLER'S TOKEN → role
+  authorizeForRoute("profile.read_own")
+  200 { data:{ userId, email, username, role, capabilities[] } }   ← capabilities are a display hint,
+      never a grant; cache-control: no-store (a per-user response at the edge is a cross-account leak)
+
+GET /api/teams/mine                 (token, role predicate + row predicate)
+  authorizeForRoute("team.read_own")
+  role gate in the handler → owner_id filter in SQL → read issued with the caller's token
+  200 { data:{ teams[], reason } }   ← a fan gets [] with reason "role_has_no_clubs", not an error
+
+POST /api/admin/users/:userId/role  (declared, not built)
+  authenticate → authorizeForRoute("identity.grant_role")
+    fan / media / team_manager → 403 FORBIDDEN            (never reaches the stub)
+    no token                   → 401 UNAUTHENTICATED      (never reaches the stub)
+    admin                      → 501 NOT_IMPLEMENTED "…planned for phase 2"
+```
+
+Every response — including errors and including the 501 — carries the same envelope, `x-request-id`,
+`no-store` unless the route is declared edge-cacheable, the security header set, and a CORS echo only
+for an exact origin in `ALLOWED_ORIGINS`.
+
+### 16.3 What Phase 2 did **not** do
+
+Honesty list, because each line below is a thing a reader might otherwise assume exists:
+
+- No write route is implemented. The validation library is tested on its own, not through a route.
+- No auth route (`/api/auth/*`), so signup and login still run in the browser against Supabase.
+- No FCM/APNs code, no Firebase dependency, no push table.
+- No Durable Object, Queue, R2 or D1 binding in `wrangler.toml` (only the KV one, and it is optional).
+- Nothing was deleted: the 8 Match Control variants, `TeamPortal`, `DataLoader`, the mock screens and the
+  27 files that write from the browser are all still in place and still how the app works.
+- The Worker has not been executed against Cloudflare from this working session: `wrangler` is not
+  installed here, so `GET /api/health` has been proven against the real handler in tests, not against a
+  deployed Worker. Treat "deployed and probed" as a Phase 2 exit task, not as done.

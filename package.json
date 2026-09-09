@@ -40,7 +40,12 @@
     "verify:full": "node scripts/verify-packaging.mjs --require-full",
     "ci:install": "node scripts/install-ci.mjs",
     "ci:check": "node scripts/install-ci.mjs --check",
-    "package:linux:dir": "node scripts/package-linux.mjs --dir"
+    "package:linux:dir": "node scripts/package-linux.mjs --dir",
+    "worker:dev": "wrangler dev --config workers/wrangler.toml --port 8787 --inspector-port 0",
+    "worker:local": "node scripts/worker-local.mjs",
+    "worker:deploy:staging": "wrangler deploy --config workers/wrangler.toml --env staging",
+    "worker:deploy:production": "wrangler deploy --config workers/wrangler.toml --env production",
+    "worker:routes": "node scripts/worker-routes.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.109.0",

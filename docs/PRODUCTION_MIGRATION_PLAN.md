@@ -57,6 +57,24 @@ the column grants deliberately, so treat it as incident handling, not a retry bu
 **Goal:** the browser stops being able to write anything it is not entitled to write, and the
 entitlement is evaluated server-side.
 
+> **Progress (Phase 2, first increment — this is a status note, not a completion note).**
+>
+> Done and tested in the tree: one `kicklive-api` Worker with the route/middleware/service/lib split;
+> `GET /api/health`, `GET /api/me` and `GET /api/teams/mine`; JWT verification with the authoritative
+> role read from `profiles`; the capability matrix with `requireAuth`/`authorizeForRoute`;
+> resource-level ownership (`services/teamAccess.ts`); the dependency-free validation library; the
+> `{ success, data | error }` envelope with production sanitisation; exact-origin CORS; named
+> rate-limit budget classes wired into the pipeline for every declared route; the route table for the
+> remaining 29 endpoints, answering `501` **after** authentication and authorization; `src/lib/api/` as
+> the frontend client; env separation enforced on both sides; `workers/wrangler.toml` with
+> development/staging/production blocks and no committed secrets.
+>
+> Not done, and still the content of this phase: **every write route below**, the caller migrations,
+> the auth routes, the KV namespace, the CI Postgres job, and any actual deployment (no `wrangler`
+> binary was installed and no Cloudflare account was touched in the increment that produced the above).
+> Paths below are spelled `/v1/…`; they are implemented and matched under `/api/…` with `/v1` kept as an
+> alias, so read them interchangeably until the docs are consolidated.
+
 - Deploy `kicklive-api` with `GET /v1/health` and implement, in this order: `auth/sign-up` (Turnstile),
   `auth/access-requests`, `admin/access-requests*`, `admin/users/:id/role`, `media` create/publish,
   `matches/:id/events`, `matches/:id/state`, `matches/:id/finalize`, `teams/:id`, `players`.

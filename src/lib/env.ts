@@ -99,6 +99,62 @@ export function isSupabaseConfigured(): boolean {
   return read("VITE_SUPABASE_URL").length > 0 && read("VITE_SUPABASE_ANON_KEY").length > 0;
 }
 
+/**
+ * The API origin, or "" for same-origin.
+ *
+ * Rules, in order of how much trouble they prevent:
+ *   - a **dev** build may not point at a non-local API unless `VITE_API_ALLOW_REMOTE=1` is also set.
+ *     Without it, `npm run dev` against a production Worker turns every local experiment into a real
+ *     write; with it, the intent is explicit and reviewable in the shell history;
+ *   - a **production** build may not point at localhost — that bundle has no API and would fail only
+ *     when somebody clicks something;
+ *   - empty means same-origin `/api`, which is what the Cloudflare custom-domain and the Vite dev
+ *     proxy both set up, so nobody has to configure anything for the common case.
+ */
+export interface ApiBaseUrlRules {
+  raw: string;
+  dev: boolean;
+  prod: boolean;
+  allowRemote: boolean;
+}
+
+/**
+ * Pure half of `getApiBaseUrl`, exported so the guards are testable without a Vite environment: the
+ * rules below are the only thing standing between `npm run dev` and production data, and a rule that
+ * cannot be tested is a rule that will be quietly edited out later.
+ */
+export function resolveApiBaseUrl(rules: ApiBaseUrlRules): string {
+  const raw = rules.raw.replace(/\/+$/, "");
+  if (!raw) return "";
+
+  if (!/^https?:\/\/[a-z0-9.:-]+$/i.test(raw)) {
+    throw new ConfigError(`VITE_API_BASE_URL must be an origin with no path (e.g. https://api.kicklive.football), got "${raw.slice(0, 80)}". API paths are appended by src/lib/api/client.ts.`);
+  }
+
+  const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(raw);
+  if (rules.dev && !isLocal && !rules.allowRemote) {
+    throw new ConfigError(
+      `Refusing to run the dev server against a remote API (${raw}).\n` +
+        `That is how a local experiment writes production data. Start the Worker locally (npm run worker:dev)\n` +
+        `or set VITE_API_BASE_URL + VITE_API_ALLOW_REMOTE=1 if you really mean it.`,
+    );
+  }
+  if (rules.prod && isLocal) {
+    throw new ConfigError(`A production build cannot point at a localhost API (${raw}). Set VITE_API_BASE_URL to the deployed Worker origin.`);
+  }
+  return raw;
+}
+
+export function getApiBaseUrl(): string {
+  const env = (import.meta as unknown as { env?: Record<string, string | boolean | undefined> }).env ?? {};
+  return resolveApiBaseUrl({
+    raw: read("VITE_API_BASE_URL"),
+    dev: env.DEV === true,
+    prod: env.PROD === true,
+    allowRemote: read("VITE_API_ALLOW_REMOTE") === "1",
+  });
+}
+
 /** Optional: where the desktop/PWA update manifest is published (see docs/RELEASE-PIPELINE.md). */
 export const updateManifestUrl: string = read("VITE_UPDATE_MANIFEST_URL");
 

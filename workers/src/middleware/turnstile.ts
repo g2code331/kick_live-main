@@ -6,9 +6,9 @@
  * `turnstile-token` header or it does not, and that has to be decided before the client is written.
  * In development the check is skipped when no secret is configured, so `wrangler dev` stays usable.
  */
-import type { Env } from "../env";
-import { isProduction } from "../env";
-import { ApiError } from "../lib/response";
+import type { Env } from "../env.ts";
+import { isProduction } from "../env.ts";
+import { ApiError } from "../lib/response.ts";
 
 const SITEVERIFY = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 
@@ -25,12 +25,12 @@ export async function verifyTurnstile(env: Env, token: string | null, remoteIp: 
   const secret = env.TURNSTILE_SECRET_KEY;
 
   if (!token) {
-    if (isProduction(env)) throw new ApiError("forbidden", 403, "This action needs a Turnstile challenge.");
+    if (isProduction(env)) throw new ApiError("BOT_CHECK_FAILED", 403, "This action needs a Turnstile challenge.");
     return;
   }
   if (!secret) {
     if (isProduction(env)) {
-      throw new ApiError("internal_error", 500, "TURNSTILE_SECRET_KEY is not configured on this deployment.");
+      throw new ApiError("INTERNAL_ERROR", 500, "TURNSTILE_SECRET_KEY is not configured on this deployment.");
     }
     return;
   }
@@ -46,16 +46,16 @@ export async function verifyTurnstile(env: Env, token: string | null, remoteIp: 
     // A siteverify outage must not lock the product shut; in production it must, because the
     // alternative is "the bot gate can be taken down for free". Fail closed in prod, open in dev.
     if (isProduction(env)) {
-      throw new ApiError("dependency_failed", 503, "The bot check is unavailable. Try again shortly.", err instanceof Error ? err.message : String(err));
+      throw new ApiError("DEPENDENCY_FAILED", 503, "The bot check is unavailable. Try again shortly.", { detail: err instanceof Error ? err.message : String(err) });
     }
     return;
   }
 
   if (!result.success) {
-    throw new ApiError("forbidden", 403, "The bot check failed.", (result["error-codes"] ?? []).join(","));
+    throw new ApiError("BOT_CHECK_FAILED", 403, "The bot check failed.", { detail: (result["error-codes"] ?? []).join(",") });
   }
   if (expectedAction && result.action && result.action !== expectedAction) {
-    throw new ApiError("forbidden", 403, "The bot check was issued for a different action.");
+    throw new ApiError("BOT_CHECK_FAILED", 403, "The bot check was issued for a different action.");
   }
 }
 

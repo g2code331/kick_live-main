@@ -1,112 +1,268 @@
-# `workers/` — the API layer that is planned, not yet running
+# `workers/` — the API boundary
 
-**Status: Phase 1 architecture only.** This directory defines boundaries, the route map, config
-shape and the authorisation model. Every route returns `501 Not Implemented` with a pointer to the
-phase that fills it in. Nothing in `src/` calls this Worker yet; the app still talks to Supabase
-directly and that is still how production works today.
+**Status: Phase 2 is live.** Three routes are implemented and tested (`GET /health`, `GET /me`,
+`GET /teams/mine`); the rest of the surface is _declared_ in `src/router.ts` and answers
+`501 NOT_IMPLEMENTED` after authentication and authorization have already been enforced. The app
+still reads and writes Supabase directly for every existing feature — that is the migration this
+layer exists to serve, route by route, and it is deliberately not done in one pass.
 
-The point of writing it now is that the _contract_ gets reviewed before the endpoints do: what the
-browser is allowed to send, what the Worker is allowed to trust, and where a decision is made.
+What "live" means here, precisely: the code compiles under the repo's strict `tsconfig.workers.json`,
+44 unit/integration assertions in `tests/unit/phase2-api-boundary.test.ts` run against the real
+`fetch` handler, and the frontend client in `src/lib/api/` calls it. It does **not** mean deployed —
+no `wrangler` binary was installed and no Cloudflare account was touched in this working session (see
+_Running it_ below).
 
-## Where each responsibility lives
+## Layout — one concern per directory
 
-| Concern                                                                 | Lives in                                                                    | Explicitly not in                                                            |
-| ----------------------------------------------------------------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| UI, routing, forms, optimistic state                                    | `src/` (Vite SPA → Cloudflare Pages; also the Electron renderer)            | —                                                                            |
-| Auth _provider_                                                         | Supabase Auth (unchanged: same JWTs the SPA already holds)                  | a second user system, a session cookie store                                 |
-| Authorisation (who may read/write which row)                            | **Postgres RLS**, then the Worker on top of it                              | the browser (`profile.role` is UX only), a client-side password map          |
-| Writes that need a business rule (match control, approvals, publishing) | Worker route → Postgres, service-role client                                | direct `supabase.from(...).update(...)` from a browser                       |
-| Live match state (per-match clock, event stream, multi-operator room)   | Durable Object, one instance per `match_id`, Phase 3                        | polling `setInterval` in every open tab (today's 19 call sites)              |
-| Background jobs (standings recompute, notification fan-out, imports)    | Workers Queues consumer, Phase 4                                            | `src/lib/MatchAutomation.ts` running in a browser tab                        |
-| Push                                                                    | FCM/APNs behind one Worker route, Phase 5                                   | — (not implemented; `notifications` rows are today's only channel)           |
-| Media files, thumbnails, signed uploads                                 | R2 + signed URLs, Phase 4                                                   | Supabase Storage (not used at all today), the repo (`public/` is icons only) |
-| Relational truth (all 15 business tables)                               | **Supabase Postgres**                                                       | **D1** — see below                                                           |
-| Edge protection                                                         | WAF rules, Turnstile (signup + writes), Cloudflare cache rules, rate limits | CORS as a security control                                                   |
+| Path                              | Owns                                                                  | Must never contain                             |
+| --------------------------------- | --------------------------------------------------------------------- | ---------------------------------------------- |
+| `src/index.ts`                    | the request pipeline and its order                                    | business rules, SQL                            |
+| `src/router.ts`                   | the route table: path → capability → cache class → rate class → phase | any handler code                               |
+| `src/routes/*.ts`                 | handlers: read body → validate → call a service → shape the response  | raw `fetch` to Supabase, role comparisons      |
+| `src/middleware/auth.ts`          | _who_ is calling (JWT verify → authoritative role from `profiles`)    | authorization decisions                        |
+| `src/middleware/authorization.ts` | _whether_ this caller may attempt this action                         | SQL, row filters                               |
+| `src/services/teamAccess.ts`      | _this row_: ownership of a team/match (resource-level authorization)  | role checks used as a substitute for ownership |
+| `src/middleware/cors.ts`          | the origin allow-list, preflight, exposed headers                     | `"*"`, `allow-credentials`                     |
+| `src/middleware/ratelimit.ts`     | budget classes and the counter store (KV, or memory in dev)           | a security boundary claim                      |
+| `src/middleware/turnstile.ts`     | bot check for credential exchange and anonymous writes                | a fallback "pass when missing" in production   |
+| `src/middleware/audit.ts`         | the `audit_log` write for privileged actions                          | PII beyond what the audit table already keeps  |
+| `src/lib/validation.ts`           | field readers, the schema-derived enum lists, body size bound         | per-route bespoke parsing                      |
+| `src/lib/response.ts`             | the single envelope + `ApiError`                                      | upstream error text in a production body       |
+| `src/lib/capabilities.ts`         | role → capability matrix                                              | a role inferred from a client                  |
+| `src/services/supabase.ts`        | the only PostgREST transport; the three clients                       | a key read from anywhere but `env`             |
+| `src/services/profiles.ts`        | the safe `profiles` projection                                        | extra columns "while we are here"              |
+| `src/types/api.ts`                | the wire contract of the implemented routes                           | a duplicate of the row shape                   |
 
-### Why there is no `[[d1_databases]]`
-
-D1 is a second Postgres. Putting match/standings data in D1 "because the Worker has it nearby" would
-give the product two sources of truth and a sync job nobody can debug, and every future bug report
-starts with "which one did you read?". Supabase stays authoritative; D1 is only appropriate later for
-Worker-owned ephemeral state (rate-limit counters, idempotency keys, job status), and that would be a
-separate, reviewed decision — not a mirror of `matches`.
-
-`wrangler.toml` therefore ships with the D1 block commented out and a note on what it would be for.
-
-## Request flow, once Phase 2 turns this on
+## The pipeline (this order is the security model)
 
 ```
-browser (Supabase JWT in Authorization header)
+browser (Supabase access token in `Authorization: Bearer`)
   │
-  ├─ Cloudflare edge: TLS, WAF, cache rules, Turnstile challenge on /v1/auth + /v1/match-control
+  ├─ Cloudflare edge — TLS, WAF, cache rules for `cache: "edge"` routes
   │
-  ├─ Worker fetch
-  │     1. request id, security headers, CORS allow-list (env, never *)
-  │     2. rate limit (KV) — key = userId + route class, then IP
-  │     3. auth.verifyAccessToken() → { userId, role }   ← signature + exp + iss/aud
-  │     4. capabilities.require(role, capability)         ← the table in src/lib/capabilities.ts
-  │     5. Turnstile token for destructive/anonymous routes
-  │     6. handler: validate body → PostgREST/RLS as service_role → audit row
-  │
-  └─ Postgres (RLS still applies for service_role? No: service_role bypasses RLS, which is
-     exactly why steps 3–4 and the audit insert exist in the Worker, and why the RLS hardening in
-     supabase/migrations was done *first* — the direct-from-browser path stays safe while the
-     Worker is being built.)
+  └─ Worker `fetch`
+       1. x-request-id            every response carries one; the log line carries the same id
+       2. CORS                    exact-origin allow-list from ALLOWED_ORIGINS; OPTIONS → 204
+       3. matchRoute()            unknown path → 404 NOT_FOUND; known path, wrong verb → 405
+       4. authenticate()          verifyAccessToken() (HS256, exp/iat/aud) → role from `profiles`
+       5. authorizeForRoute()     capability matrix decides everything: `public.read` is held by
+                                  anonymous callers (so declared public routes 501, not 401), any other
+                                  capability is 401 without a session and 403 with the wrong role
+       6. limitRequest()          BUDGETS[route.rateLimit], bucketed by userId, else by IP
+       7. handler                 readJsonBody()/readQuery() → services → Supabase
+       8. finalise()              cache class, security headers, rate headers, CORS echo — on success AND on error
 ```
 
-Two rules that survive every phase:
+Steps 4–6 run **before** the 501 stub, so a fan probing `POST /api/admin/users/:userId/role` gets 403
+today, and the day someone implements it the check is already in place. That is the whole reason the
+route table exists before the handlers do.
 
-1. **The Worker re-derives identity from the JWT, never from a body field or a cookie.** A request
-   claiming `"role": "admin"` in JSON is a client bug or an attack, and both get the same answer.
-2. **RLS stays on.** A Worker bug then fails closed instead of exposing the table.
+## Identity, roles and ownership
+
+- A role in a request body, query string or cookie is **never** read. `authenticate()` takes `sub` from
+  a verified token and then reads `profiles.role` from Postgres, per request.
+- Supabase's JWT `role` claim is the Postgres role (`anon` / `authenticated`), not the application
+  role. Confusing the two would look like a control and be a bug, so the claim is ignored.
+- A valid token with no profile row is a 401, not a fallback to "fan": fail closed.
+- The capability matrix answers "may this role attempt this action". `services/teamAccess.ts` answers
+  "is this row yours". `/api/teams/mine` implements both: it filters on `owner_id` **and** issues its
+  read with the caller's own token, so RLS enforces the same predicate a second time. A bug in the
+  Worker then cannot exceed what the caller could already do.
+- `supabaseAdmin()` (service role, RLS bypassed) exists for the few cross-row operations that need it
+  and is deliberately unusable by handlers: `grep -rn "supabaseAdmin(" workers/src` should stay a
+  two-line answer (the transport and `middleware/audit.ts`).
+
+## Response contract
+
+```jsonc
+// 200
+{ "success": true, "data": { … }, "requestId": "01J…" }
+
+// 4xx / 5xx
+{
+  "success": false,
+  "error": {
+    "code": "VALIDATION_FAILED",          // stable machine-readable code
+    "message": "2 field(s) in the request are not valid.",  // safe to render
+    "fields": [{ "field": "minute", "message": "must be 130 or less" }],
+    "detail": "…PostgREST text…"          // ONLY when APP_ENV != production
+  },
+  "requestId": "01J…"
+}
+```
+
+Codes: `BAD_REQUEST`, `VALIDATION_FAILED`, `UNAUTHENTICATED`, `FORBIDDEN`, `NOT_FOUND`,
+`METHOD_NOT_ALLOWED`, `CONFLICT`, `RATE_LIMITED`, `PAYLOAD_TOO_LARGE`, `BOT_CHECK_FAILED`,
+`NOT_IMPLEMENTED`, `DEPENDENCY_FAILED`, `INTERNAL_ERROR`. A Postgres message, a constraint name, a
+column list or a stack frame never reaches a browser: `fail()` keeps them in `detail` (non-production
+only) and in the log line. Upstream failures are `502 DEPENDENCY_FAILED`, not 500 — the difference is
+what an on-call operator should look for.
+
+## CORS, as a policy
+
+- `ALLOWED_ORIGINS` is an exact, comma-separated list **per environment**; `*` is rejected by
+  `src/env.ts` and an unset list means no cross-origin access at all.
+- Preflight echoes the origin, `allow-methods`, `allow-headers` (`authorization, content-type,
+x-request-id, turnstile-token, last-event-id`) and `max-age: 600`. A disallowed origin gets a 204
+  with **no** CORS headers rather than a 403 — a distinct answer on `OPTIONS` is an origin oracle.
+- `Origin: null` (sandboxed iframe, `file://`) is refused, not echoed.
+- No response ever sets `Access-Control-Allow-Credentials`: this API is bearer-token authenticated, and
+  a wildcard plus credentials is a cross-site read primitive.
+- CORS is a browser contract, not the access control: the token check is what protects a mutation.
+
+## Rate limits
+
+No distributed system this phase — one table of named budgets and one enforcement point, so adding an
+endpoint is one word in the route table instead of a decision someone has to remember:
+
+| Class           | Budget     | Who gets it                                                     |
+| --------------- | ---------- | --------------------------------------------------------------- |
+| `public`        | 600 / 60 s | unauthenticated reads, `GET /health`                            |
+| `authenticated` | 240 / 60 s | per-user reads, incl. the SPA's 15 s poll loops                 |
+| `mutation`      | 60 / 60 s  | every write route                                               |
+| `auth-exchange` | 5 / 900 s  | `POST /auth/sign-up`, `/auth/access-requests`, admin decisions  |
+| `admin-blast`   | 10 / 60 s  | fan-out from one action (`POST /admin/notifications/broadcast`) |
+
+Bucket key = `class:route:userId`, or `class:route:ip:<ip>` when anonymous. `RATE_LIMIT_KV` is the
+shared store; without it the counter is per-isolate and the response says so
+(`x-ratelimit-store: memory`) instead of pretending to be a defence. Turnstile and Supabase's own
+quotas remain the real barrier for credential exchange until KV is provisioned.
+
+## Environment and configuration
+
+| Variable                    | Kind    | Development         | Staging           | Production         | Notes                                                                    |
+| --------------------------- | ------- | ------------------- | ----------------- | ------------------ | ------------------------------------------------------------------------ |
+| `APP_ENV`                   | var     | `development`       | `staging`         | `production`       | error `detail`, log verbosity, Turnstile enforcement                     |
+| `SUPABASE_URL`              | var     | staging project     | staging project   | production project | must agree with the ref below                                            |
+| `SUPABASE_PROJECT_REF`      | var     | staging ref         | staging ref       | production ref     | `assertSupabaseUrl()` 500s on a mismatch: no silent wrong-project writes |
+| `SUPABASE_ANON_KEY`         | var     | staging key         | staging key       | production key     | public by design; RLS still applies                                      |
+| `ALLOWED_ORIGINS`           | var     | localhost SPA ports | staging SPA       | app + desktop      | exact list, never `*`                                                    |
+| `SUPABASE_JWT_SECRET`       | secret  | `.dev.vars`         | `wrangler secret` | `wrangler secret`  | verifies the SPA's HS256 token                                           |
+| `SUPABASE_SERVICE_ROLE_KEY` | secret  | optional            | `wrangler secret` | `wrangler secret`  | only `supabaseAdmin()`; absent = admin paths fail loudly                 |
+| `TURNSTILE_SECRET_KEY`      | secret  | blank (skipped)     | `wrangler secret` | `wrangler secret`  | required in production by `verifyTurnstile()`                            |
+| `RATE_LIMIT_KV`             | binding | unbound (memory)    | KV namespace      | KV namespace       | created per environment                                                  |
+
+The frontend side has exactly one new variable, `VITE_API_BASE_URL`, and its default is **empty**,
+which means same-origin `/api`. `src/lib/env.ts` refuses a dev build that names a non-local API (unless
+`VITE_API_ALLOW_REMOTE=1`) and refuses a production build that names `localhost`; the Vite dev server
+proxies `/api` to `127.0.0.1:8787`. Local development therefore cannot reach production data by
+accident, in either direction.
+
+## Adding a route (the checklist)
+
+1. `src/router.ts` — one entry: method, pattern, `capability`, `cache`, `rateLimit`, `phase`,
+   `summary`, and the `invariants` the handler must enforce. Mark `implemented: true` only with the
+   handler in the same commit.
+2. `src/routes/<area>.ts` — read the body with `readJsonBody(request, DECLARED_KEYS)`, validate every
+   field, call a `services/*` function, return `ok(data, { requestId })`. No `fetch` here.
+3. Authorization at the top: `requireCapability(...)` / `requireRole(...)`, then the row check
+   (`requireManagedTeam`) when the path names somebody's resource.
+4. A privileged write also writes the audit row (`middleware/audit.ts`).
+5. Frontend: add the typed call next to `apiMe()` in `src/lib/api/index.ts` and the mirrored types in
+   `src/lib/api/types.ts` (a test pins the field lists against the Worker's).
+6. Tests: 200 path, 401 (anonymous), 403 (wrong role), 400 (malformed body), and the resource-level
+   refusal — a manager acting on somebody else's row.
+7. `node scripts/worker-routes.mjs --check` then `npm run typecheck && npm test`.
+
+## Testing without Cloudflare
+
+`tests/unit/phase2-api-boundary.test.ts` imports the real handler and stubs only `globalThis.fetch`
+(the Worker's route to Supabase), signing genuine HS256 tokens with `crypto.subtle`. It covers: health
+(3 path spellings, payload content, cache class), `/me` unauthenticated / authenticated / tampered
+signature / `alg: none` / expired / wrong audience / missing profile row / "read as the caller, not as
+service role", authorization-before-501 for both fan and admin, the validation library (unknown keys,
+types, enums, ids, scores, minutes, timestamps, 64 KB bound), the schema-mirror of every enum list,
+CORS (allow, deny, `null` origin, `*` rejected, no credentials), rate-limit budgets and bucket keys,
+production error sanitisation (no `42703`, no column names, no sentinel key), `SUPABASE_URL`/ref
+mismatch, the three route-table invariants, and the frontend client (envelope, field errors, HTML 502,
+401 retry, timeout, abort).
+
+What this cannot prove, and what needs a real deployment: KV behaviour across isolates, the
+`routes = [...]` custom domain, Turnstile's live `siteverify`, and latency of the per-request profile
+read. Those are checked by the probe list in `docs/PRODUCTION_MIGRATION_PLAN.md` §Phase 2.
+
+## Running it
+
+```bash
+npm i -D wrangler@latest                     # not installed in this repo today, on purpose
+cp workers/.dev.vars.example workers/.dev.vars   # git-ignored; fill in the STAGING project
+npm run worker:dev                               # wrangler dev on http://localhost:8787
+curl -s localhost:8787/api/health | jq            # 200 before you touch the SPA
+npm run worker:routes -- --check                  # README and router.ts agree
+```
+
+Then, in another terminal, `npm run dev` and open the admin "User Control" screen: its _API boundary
+check_ panel calls `/api/health` and `/api/me` through the frontend client.
+
+```bash
+npx wrangler secret put SUPABASE_JWT_SECRET     --env staging
+npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY --env staging
+npm run worker:deploy:staging
+npm run worker:deploy:production
+```
+
+## What is deliberately **not** here
+
+- **No D1 database.** Supabase Postgres is the only source of truth; a second copy of match data with a
+  sync job in the middle is how "which one did you read?" becomes the first question in every bug
+  report. The `[[d1_databases]]` block stays commented in `wrangler.toml` with that note.
+- **No R2, Durable Object or Queue bindings.** They are declared in the plan, not in the config,
+  because a binding with no code behind it looks deployed and is not. Phase 3 (match rooms), Phase 4
+  (media, jobs) and Phase 5 (push) add each one with its first real route.
+- **No FCM/Firebase dependency and no push implementation.** `POST /admin/notifications/broadcast` is a
+  row in the route table, and that is all it is.
+- **No advertising or sponsorship endpoints** beyond the declared route map; the two concepts stay
+  separate on purpose (an advertiser buys scheduled placements with impression events; a sponsor buys a
+  season of rights).
+- **No validation of a route that does not exist.** `lib/validation.ts` is complete and tested as a
+  library; the first mutation route wires it. Nothing pretends a write path is live.
+- **No live match engine, WebSockets or offline sync**, and no migration of the 27 files that still
+  write to Supabase from the browser. `src/lib/api/` is the door; each table above walks through it in
+  its own change.
 
 ## Route map
 
-Implemented by the phase named in the right column; `routes/index.ts` is where each one gets wired.
+Generated from `src/router.ts` — `node scripts/worker-routes.mjs` regenerates this block, and
+`tests/unit/phase2-api-boundary.test.ts` fails if the two drift apart. Paths are matched under
+`/api` (canonical) and `/v1` (the alias the Phase 1 documents use); they are the same handlers, never
+two implementations. `Live` means a handler exists; everything else answers `501 NOT_IMPLEMENTED`
+_after_ authentication and authorization.
 
-| Route                                                                         | Capability                 | Purpose                                                                                 | Phase            |
-| ----------------------------------------------------------------------------- | -------------------------- | --------------------------------------------------------------------------------------- | ---------------- |
-| `GET /v1/health`                                                              | —                          | liveness + build version, cached at the edge 60 s                                       | 2 (kept working) |
-| `POST /v1/auth/sign-up`                                                       | —                          | replaces `supabase.auth.signUp` from the browser; Turnstile; always fan                 | 2                |
-| `POST /v1/auth/access-requests`                                               | fan                        | queue a manager/media request (moves the RPC call server-side)                          | 2                |
-| `GET /v1/matches?from&to&competition`                                         | public                     | cacheable fixture/score list, ETag, one row shape for all public pages                  | 2                |
-| `GET /v1/matches/:id/stream`                                                  | public                     | SSE/WebSocket handoff to the match's Durable Object (replaces 19 poll loops)            | 3                |
-| `POST /v1/matches/:id/events`                                                 | match_control              | one match event: validated, idempotent (`client_event_id`), ordered, audited            | 2                |
-| `PUT /v1/matches/:id/state`                                                   | match_control              | clock/status/score transition, rejected when `is_locked`                                | 2                |
-| `POST /v1/matches/:id/finalize`                                               | match_control              | locks the row, enqueues standings + notifications                                       | 2                |
-| `GET /v1/teams/mine`                                                          | team_manager               | the caller's own club, resolved in SQL by `owner_id`                                    | 2                |
-| `PATCH /v1/teams/:id`                                                         | team_manager\|admin        | profile/lineup/gallery, owner-checked server-side                                       | 2                |
-| `POST /v1/players`                                                            | team_manager\|admin        | squad add                                                                               | 2                |
-| `POST /v1/media` `PATCH /v1/media/:id` `POST /v1/media/:id/publish`           | media\|admin               | publishing with author set server-side (today `author_id` is never set)                 | 2                |
-| `GET /v1/media/feed`                                                          | public                     | the home/news feed, cacheable, replacing whole-table `media` reads                      | 2                |
-| `POST /v1/uploads/sign`                                                       | media\|team_manager\|admin | R2 signed PUT, size/MIME bounds                                                         | 4                |
-| `GET /v1/uploads/:key`                                                        | public                     | R2 read-through with image resizing                                                     | 4                |
-| `POST /v1/notifications/subscriptions`                                        | authenticated              | device-token registration (FCM phase 5)                                                 | 5                |
-| `GET /v1/admin/access-requests` `POST /v1/admin/access-requests/:id/decision` | admin                      | queue + approve/reject, i.e. the server half of User Control                            | 2                |
-| `POST /v1/admin/users/:id/role`                                               | admin                      | audited role change (same RPC the UI calls today)                                       | 2                |
-| `GET/POST /v1/advertising/*`                                                  | advertising                | advertisers, campaigns, placements, delivery events — separate tables, separate concept | 6                |
-| `GET/POST /v1/sponsorship/*`                                                  | sponsorship                | sponsor packages and sponsorships (rights, renewals), _not_ ad delivery                 | 6                |
-| `GET /v1/jobs/:id`                                                            | admin                      | queue job status for operators                                                          | 4                |
+| Route                                             | Capability              | Cache   | Rate budget   | Phase | Live    | Purpose                                                                                                                                                                                                                                                      |
+| ------------------------------------------------- | ----------------------- | ------- | ------------- | ----- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /health`                                     | _public_                | edge    | public        | 2     | **yes** | Liveness + build version. Implemented today so deploy wiring is provable.                                                                                                                                                                                    |
+| `GET /me`                                         | profile.read_own        | private | authenticated | 2     | **yes** | Who the caller is, per the database: role, email, username, capability hints. — _Role is read from `profiles` by the Worker; nothing in the request may name a role._                                                                                        |
+| `POST /auth/sign-up`                              | _public_                | none    | auth-exchange | 2     | —       | Create a fan account (Turnstile-gated). — _Role is never accepted from the request body; the created profile is always a fan._                                                                                                                               |
+| `POST /auth/access-requests`                      | identity.request_role   | none    | auth-exchange | 2     | —       | Queue a team_manager/media request for admin review. — _At most one open request per user; `admin` is not requestable._                                                                                                                                      |
+| `GET /matches`                                    | public.read             | edge    | public        | 2     | —       | Fixture + score list, filtered by competition/date/status, bounded page size. — _Replaces whole-table `matches` selects from 6+ components; max limit 100._                                                                                                  |
+| `GET /matches/:matchId`                           | public.read             | edge    | public        | 2     | —       | One match with events, commentary and statistics in a single round trip.                                                                                                                                                                                     |
+| `GET /media/feed`                                 | public.read             | edge    | public        | 2     | —       | Published articles, paginated; the only media read the public pages need.                                                                                                                                                                                    |
+| `GET /teams`                                      | public.read             | edge    | public        | 2     | —       | Active clubs with the columns the UI actually renders.                                                                                                                                                                                                       |
+| `GET /matches/:matchId/stream`                    | public.read             | none    | public        | 3     | —       | SSE handoff to the match Durable Object; replaces setInterval polling. — _Server assigns sequence numbers; clients resume with Last-Event-ID._                                                                                                               |
+| `POST /matches/:matchId/events`                   | match_control.write     | none    | mutation      | 2     | —       | Append one validated match event (goal, card, substitution…). — _Idempotent on client_event_id; event_type checked against the profile CHECK list; score/minute derived from events rather than trusted from the client; rejected when the match is locked._ |
+| `PUT /matches/:matchId/state`                     | match_control.write     | none    | mutation      | 2     | —       | Clock/status transition (kickoff, pause, half time, full time). — _Legal transitions only; the DO is the authority once Phase 3 lands._                                                                                                                      |
+| `POST /matches/:matchId/finalize`                 | match_control.finalize  | none    | mutation      | 2     | —       | Lock the result, enqueue standings recompute + notification fan-out. — _Sets is_locked + confirmed_at in one transaction; refuses if events disagree with the score._                                                                                        |
+| `POST /matches/:matchId/lock`                     | match_control.lock      | none    | mutation      | 2     | —       | Freeze a match for review (today the column exists but nothing writes it).                                                                                                                                                                                   |
+| `GET /teams/mine`                                 | team.read_own           | private | authenticated | 2     | **yes** | The caller’s own club(s), resolved by owner_id in SQL.                                                                                                                                                                                                       |
+| `PATCH /teams/:teamId`                            | team.update_own         | none    | mutation      | 2     | —       | Edit club profile, lineup, gallery. — _Owner-or-admin re-check inside the handler: the capability alone is not enough._                                                                                                                                      |
+| `POST /players`                                   | player.manage_own_team  | none    | mutation      | 2     | —       | Add a player to a squad the caller manages.                                                                                                                                                                                                                  |
+| `POST /media`                                     | media.publish           | none    | mutation      | 2     | —       | Create an article; author_id set from the JWT. — _Fixes today’s gap where MediaPublisher never writes author_id at all._                                                                                                                                     |
+| `POST /media/:mediaId/publish`                    | media.publish           | none    | mutation      | 2     | —       | Flip an article public, with the featured flag needing a separate capability.                                                                                                                                                                                |
+| `DELETE /media/:mediaId`                          | media.delete            | none    | mutation      | 2     | —       | Delete an article. Admin-only, unlike the current media-role policy.                                                                                                                                                                                         |
+| `POST /notifications/subscriptions`               | profile.read_own        | none    | mutation      | 5     | —       | Register an FCM/APNs device token for the caller. — _Tokens are per-user and per-device; never stored on profiles._                                                                                                                                          |
+| `POST /admin/notifications/broadcast`             | notifications.broadcast | none    | admin-blast   | 5     | —       | Fan-out push/notification to an audience; the only route allowed to write many rows per call. — _Audience size is capped and the send itself runs in a Queue (Phase 4+), never in the request._                                                              |
+| `GET /admin/access-requests`                      | identity.read_directory | private | authenticated | 2     | —       | The pending queue behind User Control.                                                                                                                                                                                                                       |
+| `POST /admin/access-requests/:requestId/decision` | identity.grant_role     | none    | auth-exchange | 2     | —       | Approve or reject a request; grants the role in the same transaction.                                                                                                                                                                                        |
+| `POST /admin/users/:userId/role`                  | identity.grant_role     | none    | mutation      | 2     | —       | Set a role, audited, last-admin-guarded (same RPC the SPA calls today).                                                                                                                                                                                      |
+| `GET /admin/audit`                                | admin.audit_read        | private | authenticated | 2     | —       | activity_logs, filtered, for the admin overview.                                                                                                                                                                                                             |
+| `POST /uploads/sign`                              | media.publish           | none    | mutation      | 4     | —       | Signed R2 PUT for an image/video upload with size and MIME bounds.                                                                                                                                                                                           |
+| `GET /uploads/:key`                               | public.read             | edge    | public        | 4     | —       | R2 read-through with image resizing + immutable cache keys.                                                                                                                                                                                                  |
+| `GET /advertising/campaigns/active`               | public.read             | edge    | public        | 6     | —       | Campaigns eligible to serve, by placement slot.                                                                                                                                                                                                              |
+| `POST /advertising/events`                        | placement_event.record  | none    | mutation      | 6     | —       | Impression/click events, deduplicated, written once and never aggregated in the browser.                                                                                                                                                                     |
+| `PATCH /advertising/campaigns/:id`                | campaign.manage         | none    | mutation      | 6     | —       | Start/pause/retarget a campaign.                                                                                                                                                                                                                             |
+| `GET /sponsorship/packages`                       | public.read             | edge    | public        | 6     | —       | Published rate card for a season.                                                                                                                                                                                                                            |
+| `PATCH /sponsorship/sponsorships/:id`             | sponsorship.manage      | none    | mutation      | 6     | —       | Renewals and rights changes; separate table from ad campaigns.                                                                                                                                                                                               |
 
 `advertising` and `sponsorship` stay apart on purpose: an advertiser buys scheduled placements with
-impression events; a sponsor buys a package of rights over a season. They overlap only in "shows up
-in the app", and merging them early is how you end up with one 30-column table.
-
-## Running it (not needed until Phase 2)
-
-```bash
-npm i -D wrangler@latest
-cp workers/.dev.vars.example workers/.dev.vars   # local only; never committed
-npx wrangler dev --config workers/wrangler.toml  # http://localhost:8787
-```
-
-Type-check it any time with `npm run typecheck` (the `workers` project is part of it, so a skeleton
-that stops compiling fails the same gate CI runs).
-
-## Config
-
-`workers/wrangler.toml` holds non-secret config and placeholders; secrets are `wrangler secret put`
-(see the table in `../docs/PRODUCTION_ARCHITECTURE.md`, §Deployment). The names are documented in
-`workers/.dev.vars.example` and `../.env.example`. Nothing here may contain a real key: the
-`service_role` key in a git-tracked file would be the single worst outcome of this whole layer,
-because it bypasses RLS for every table.
+impression events; a sponsor buys a package of rights over a season. They overlap only in "shows up in
+the app", and merging them early is how you end up with one 30-column table.
