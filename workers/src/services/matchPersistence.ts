@@ -33,6 +33,10 @@ function toApiError(err: unknown, what: string): unknown {
   const detail = err.detail ?? err.message;
   if (/PGRST202|Could not find the function|does not exist/.test(detail) && /kicklive_/.test(detail)) return new ApiError("DEPENDENCY_FAILED", 503, `${MIGRATION_HINT} (${what})`, { detail });
   if (/42501|insufficient_privilege|permission denied/i.test(detail)) return new ApiError("FORBIDDEN", 403, "The database refused this change for your account.", { detail });
+  // The functions raise their own vetoes (`P0001` with a `kicklive:` prefix) so the message a controller
+  // reads is the sentence written here, not a Postgres internal. Every such message is operator-facing by
+  // construction: never append user input to one.
+  if (/P0001/.test(detail) && /kicklive:/.test(detail)) return new ApiError("VALIDATION_FAILED", 400, "The database refused this event: it does not fit the match as it stands.", { detail });
   if (/23514|check_violation|invalid_transition|not allowed while/i.test(detail)) return new ApiError("CONFLICT", 409, "That change is not allowed in the match's current state.", { detail });
   if (/23505|duplicate key|unique/.test(detail)) return new ApiError("CONFLICT", 409, "That event is already recorded.", { detail });
   return err;

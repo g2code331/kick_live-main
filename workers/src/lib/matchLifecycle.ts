@@ -111,7 +111,10 @@ const TRANSITIONS: Partial<Record<MatchStatus, readonly Transition[]>> = {
   extra_time: [
     { to: "full_time", label: "Full time", summary: "End extra time." },
     { to: "penalty_shootout", label: "Shoot-out", summary: "Kick the shoot-out off; the clock stops." },
-    { to: "half_time", label: "Extra-time interval", summary: "Between the two extra-time periods." },
+    // There is no status for "the interval between the two extra-time halves" in `matches.status`, and
+    // inventing a 15th value would split every "what is live now" query in the app. The interval is a
+    // suspension (bank the clock, give a reason) resumed back into `extra_time`, and the
+    // `extra_time_half_time` event marks the moment in the timeline.
     { to: "suspended", label: "Suspend", reasonRequired: true, summary: "Temporary stoppage." },
     { to: "abandoned", label: "Abandon", reasonRequired: true, summary: "Match will not resume." },
   ],

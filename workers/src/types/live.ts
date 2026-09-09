@@ -41,7 +41,12 @@ export interface LiveEnvelope {
   type: LiveMessageKind;
 }
 
-export type EventRowStatus = "active" | "corrected" | "reversed";
+/**
+ * Exactly two states, matching `match_events.event_status`'s CHECK. A "reversal" is not a third state: it
+ * is the original row marked `corrected` plus a replacement row linked by `corrects_event_id`, so the
+ * sequence of what was believed stays readable.
+ */
+export type EventRowStatus = "active" | "corrected";
 
 export interface LiveEvent {
   /** Postgres id. */

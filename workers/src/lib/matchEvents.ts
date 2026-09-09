@@ -133,10 +133,13 @@ export const EVENT_SPECS: Record<MatchEventType, EventSpec> = {
   extra_time_half_time: spec("extra_time_half_time", {
     label: "Extra-time interval",
     group: "lifecycle",
-    lifecycle: true,
+    // The one lifecycle-shaped event a controller taps by hand: `matches.status` has no value for the
+    // break between the two extra-time halves (inventing a 15th would split every "what's live" query),
+    // so the clock is stopped with a suspension and this row marks the moment in the timeline.
+    lifecycle: false,
     team: "forbidden",
-    recordable: false,
-    summary: "Written when the interval between the extra-time periods is recorded.",
+    recordable: true,
+    summary: "Tapped at the interval between the extra-time periods; the clock itself is banked by suspending and restarted on resume.",
   }),
   penalty_shootout_start: spec("penalty_shootout_start", {
     label: "Shoot-off",
