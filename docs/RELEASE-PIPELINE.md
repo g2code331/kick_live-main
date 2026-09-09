@@ -425,6 +425,25 @@ Sizes above are from local `dist/`/`build/` output, **not** from a CI run; there
 measure (see `§0`: the token cannot write `.github/workflows`, and the Actions API 403s), so no
 `gh run` URLs exist yet and the numbers for `.deb`/`.AppImage` sizes are not known.
 
+### 13.1 Added to gate 1 by Phase 1 (and one correction to the table above)
+
+| gate | check                                         | why it exists                                                                                                                                |
+| ---- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1    | typecheck (workers skeleton)                  | `tsc -p tsconfig.workers.json` — `workers/` is code, so it typechecks or the gate fails                                                      |
+| 1    | no hardcoded backend config in shipped source | `node scripts/check-secrets.mjs --scan-only`; planted-probe covered by `tests/unit/phase1-security.test.ts`                                  |
+| 1    | unit tests                                    | 179 now: the Phase 1 file pins the security invariants (config resolution, capability matrix, no client role writes, additive migration SQL) |
+
+The `format (prettier)` row above is a correction, not an addition: the step ran
+`npx --no prettier --check .`, and `npx` does not treat `--no <bin>` as "use the local package" — it
+resolved something else, printed binary junk from `public/*.png`, and exited 0. **That step was a false
+pass for the whole of Phase 0.** Gate 1 now invokes `node_modules/prettier/bin/prettier.cjs` directly,
+which immediately found three real formatting defects. `scripts/package-linux.mjs` still calls
+electron-builder through the same `npx --no` form: left alone deliberately, because packaging cannot be
+exercised in this sandbox and its result is post-verified by artifact existence — fix it in a branch
+where CI can prove the `.deb` still comes out. The same class of bug (a gate that passes by running
+nothing) is what `§12`'s "no tests found is a hard failure" rule exists to catch; the prettier step
+slipped through it because prettier _did_ run, on the wrong input.
+
 ## 14. Troubleshooting
 
 | symptom                                                | first thing to look at                                                                                                                                                                                                                 |

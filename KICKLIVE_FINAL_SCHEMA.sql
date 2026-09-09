@@ -1,3 +1,17 @@
+-- ============================================================================
+-- AUTHORITATIVE BASE SCHEMA
+-- ============================================================================
+-- This file is the base schema: tables, indexes, triggers, and the RLS policy set named in
+-- supabase/README.md. Apply it to an empty project, then apply supabase/migrations/* in order.
+--
+-- It is NOT the whole picture any more: the Phase 1 hardening migration changes the `profiles` read
+-- policy defined below and adds the privilege guard trigger, so a project that has only this file is
+-- still vulnerable to self-granting admin (see docs/SECURITY_AUDIT_PHASE1.md F-01). Re-running this
+-- file over a hardened project re-creates `profiles: public read` — run the hardening migration after
+-- it, never before.
+-- (ARENA-PHASE1-BANNER — added by the Phase 1 audit; see supabase/README.md)
+-- ============================================================================
+
 -- ================================================================
 -- KICKLIVE — COMPLETE DATABASE SQL
 -- ================================================================

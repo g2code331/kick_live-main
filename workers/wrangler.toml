@@ -1,0 +1,72 @@
+# ============================================================================
+#  Kick Live API Worker — Cloudflare configuration (Phase 1 skeleton)
+#  Deployed with:  npx wrangler deploy --config workers/wrangler.toml
+#  Local:          npx wrangler dev  --config workers/wrangler.toml
+#
+#  Secrets are NEVER in this file:
+#      npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+#      npx wrangler secret put SUPABASE_JWT_SECRET
+#      npx wrangler secret put TURNSTILE_SECRET_KEY
+#  Everything below is public-by-design configuration. A `*` origin, a service key here, or an
+#  `env_file` that points at a real .env are the three ways this file gets reviewed and rejected.
+# ============================================================================
+
+name = "kicklive-api"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+compatibility_flags = ["nodejs_compat"]
+# Workers are UTF-8 by default; set explicitly because the media payloads are user prose with
+# emoji in scores and the SPA renders it directly.
+send_metrics = "off"
+
+# Route the API under the same apex as the app so the SPA can use relative URLs
+# (no CORS in the steady state, and the preview/deploy hosts keep working unchanged).
+# Real DNS + zone id are deployment-time decisions, so they stay commented until Phase 2.
+# routes = [
+#   { pattern = "api.kicklive.football/v1/*", custom_domain = false },
+# ]
+
+[vars]
+APP_ENV = "production"
+SUPABASE_URL = "https://REPLACE-WITH-PROJECT-REF.supabase.co"
+# Publishable key: public by design, safe to keep here (RLS still applies to these calls).
+SUPABASE_ANON_KEY = "REPLACE-WITH-PUBLISHABLE-ANON-KEY"
+# Exact origins only. The desktop shell must be listed too, or packaged builds get 403s on the API
+# while the web app works — the worst possible shape for a bug report.
+ALLOWED_ORIGINS = "https://kicklive.football,https://app.kicklive.football"
+# Not secrets, and validated by src/env.ts at request time:
+#   SUPABASE_SERVICE_ROLE_KEY, SUPABASE_JWT_SECRET, TURNSTILE_SECRET_KEY  → `wrangler secret put`
+
+# ── Planned bindings, deliberately inactive until the phase that owns them ──────
+#
+# [[kv_namespaces]]                      # Phase 2 — shared rate-limit counters
+# binding = "RATE_LIMIT_KV"
+# id = "REPLACE-AFTER-`wrangler kv namespace create RATE_LIMIT_KV`"
+#
+# [[r2_buckets]]                         # Phase 4 — media plane replaces inline URLs/unsplash
+# binding = "MEDIA_BUCKET"
+# bucket_name = "kicklive-media"
+#
+# [[queues.producers]]                   # Phase 4 — standings recompute, notification fan-out
+# queue = "kicklive-jobs"
+# binding = "JOB_QUEUE"
+#
+# [[queues.consumers]]
+# queue = "kicklive-jobs"
+# max_batch_size = 10
+# max_retries = 3                        # poison messages then go to the dead-letter queue
+#
+# [durable_objects]                      # Phase 3 — live match rooms, one DO per match_id
+# bindings = [{ name = "MATCH_ROOM", class_name = "MatchRoom" }]
+#
+# [[d1_databases]]                       # INTENTIONALLY ABSENT — do not "helpfully" add one.
+# D1 would be a second copy of match data with a sync job in the middle. Supabase Postgres is the
+# source of truth for every business table; D1 is only ever justified later for Worker-owned
+# ephemeral state, and that needs its own reviewed migration. See workers/README.md.
+
+[observability]
+[observability.logs]
+enabled = true
+# Invocations must be persisted: the audit trail for privileged actions is worthless if the request
+# that made it is not retrievable for the same window.
+invocation_logs = true

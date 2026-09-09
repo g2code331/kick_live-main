@@ -4,6 +4,10 @@ build/
 venv/
 env/
 .env
+# local env overrides and Worker secrets — only the *.example templates are tracked
+.env.*
+!.env.example
+workers/.dev.vars
 .DS_Store
 *.zip
 *.tar.gz

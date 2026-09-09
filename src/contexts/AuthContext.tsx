@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import type { User, Session } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
 import type { UserProfile, UserRole } from "../lib/supabase";
+import { log } from "../lib/log";
 
 interface AuthContextType {
   user: User | null;
@@ -10,7 +11,13 @@ interface AuthContextType {
   session: Session | null;
   loading: boolean;
   signIn: (email: string, password: string, phone?: string) => Promise<{ error: string | null; role?: UserRole }>;
-  signUp: (email: string, password: string, username: string, phone: string, role: UserRole) => Promise<{ error: string | null }>;
+  /**
+   * Public registration. There is deliberately no `role` parameter: the database trigger
+   * (`handle_new_user`) inserts the profile as a `fan`, and privileged roles are granted only by an
+   * admin (see `src/lib/access.ts`). Passing a role here used to be the whole privilege-escalation
+   * path, so the type will not accept one.
+   */
+  signUp: (email: string, password: string, username: string, phone: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   isAdmin: boolean;
   isFan: boolean;
@@ -28,15 +35,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const fetchProfile = async (userId: string) => {
     try {
+      // `select('*')` on your own row is fine: RLS restricts it to `id = auth.uid()`.
       const { data, error } = await supabase.from("profiles").select("*").eq("id", userId).limit(1);
 
       if (error) {
-        console.warn("Profile fetch error:", error.message);
+        log.warn("Profile fetch error:", error.message);
         return null;
       }
       return data && data.length > 0 ? (data[0] as UserProfile) : null;
     } catch (err) {
-      console.error("Profile fetch failed:", err);
+      log.error("Profile fetch failed:", err);
       return null;
     }
   };
@@ -54,7 +62,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!isMounted) return;
 
         if (error) {
-          console.warn("Supabase session error:", error.message);
+          log.warn("Supabase session error:", error.message);
           setLoading(false);
           return;
         }
@@ -69,7 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         setLoading(false);
       } catch (err) {
-        console.error("Auth init failed:", err);
+        log.error("Auth init failed:", err);
         if (isMounted) setLoading(false);
       }
     };
@@ -137,23 +145,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const signUp = async (email: string, password: string, username: string, phone: string, role: UserRole) => {
+  const signUp = async (email: string, password: string, username: string, phone: string) => {
     try {
+      // Only non-privileged, self-owned data goes up. `role` in user metadata used to be read by
+      // the profile trigger; it is ignored server-side now and is never sent from here.
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
-          data: { username, role },
+          data: { username },
         },
       });
 
       if (error) return { error: error.message };
 
       if (data.user) {
-        const { error: profileError } = await supabase.from("profiles").upsert({ id: data.user.id, email, username, phone, role }, { onConflict: "id" });
+        // The `on_auth_user_created` trigger already created this row as a fan; this upsert only
+        // fills in the display fields. No `role` key, by design.
+        const { error: profileError } = await supabase.from("profiles").upsert({ id: data.user.id, email, username, phone }, { onConflict: "id" });
         if (profileError) {
-          console.error("Profile role upsert failed:", profileError.message);
-          return { error: `Account created, but role assignment failed: ${profileError.message}` };
+          log.error("Profile upsert failed:", profileError.message);
+          return { error: `Account created, but the profile could not be saved: ${profileError.message}` };
         }
       }
 

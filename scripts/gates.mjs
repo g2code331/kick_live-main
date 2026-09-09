@@ -69,11 +69,16 @@ const wanted = (n) => (!only || only.includes(n)) && !skip.has(n);
 async function gate1() {
   step(1, "typecheck (web+shared)", process.execPath, ["node_modules/typescript/bin/tsc", "-p", "tsconfig.json"]);
   step(1, "typecheck (scripts+server+desktop)", process.execPath, ["node_modules/typescript/bin/tsc", "-p", "tsconfig.node.json"]);
+  step(1, "typecheck (workers skeleton)", process.execPath, ["node_modules/typescript/bin/tsc", "-p", "tsconfig.workers.json"]);
+  step(1, "no hardcoded backend config in shipped source", process.execPath, ["scripts/check-secrets.mjs", "--scan-only"]);
   step(1, "unit tests", process.execPath, ["scripts/run-tests.mjs", "unit"]);
   step(1, "integration tests", process.execPath, ["scripts/run-tests.mjs", "integration"]);
-  step(1, "format (prettier)", "npx", ["--no", "prettier", "--check", "."]);
+  // `npx --no <bin>` is not a flag: npx ignores it, falls back to fetching a package, and the step
+  // "passes" having run nothing at all. Invoke the installed binaries directly so a formatting
+  // failure is a real failure (this was a false pass until the Phase 1 audit).
+  step(1, "format (prettier)", process.execPath, ["node_modules/prettier/bin/prettier.cjs", "--check", "."]);
   const eslint = fs.existsSync(path.join(REPO_ROOT, "eslint.config.js")) || fs.existsSync(path.join(REPO_ROOT, ".eslintrc.cjs"));
-  if (eslint) step(1, "lint (eslint)", "npx", ["--no", "eslint", "."]);
+  if (eslint && fs.existsSync(path.join(REPO_ROOT, "node_modules/eslint/bin/eslint.js"))) step(1, "lint (eslint)", process.execPath, ["node_modules/eslint/bin/eslint.js", "."]);
   else record(1, "lint (eslint)", "skip", "no eslint config in the repo — prettier is the only formatter gate that exists");
 }
 

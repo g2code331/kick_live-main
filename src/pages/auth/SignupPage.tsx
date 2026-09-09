@@ -1,19 +1,29 @@
 import { assetUrl } from "../../lib/app-shell.ts";
 import { useState } from 'react';
-import { Eye, EyeOff, Loader2, UserPlus, Shield, Users, Newspaper, Heart, Lock, Check, Smartphone, User as UserIcon } from 'lucide-react';
+import { Eye, EyeOff, Loader2, UserPlus, Shield, Users, Newspaper, Heart, Check, Smartphone, User as UserIcon } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
-import type { UserRole } from '../../lib/supabase';
+import { submitAccessRequest } from '../../lib/access';
+import { log } from '../../lib/log';
 
 interface SignupPageProps {
   onNavigate: (page: string) => void;
 }
 
-const rolePasswords: Record<string, string> = {
-  'team_manager': 'mejojO',
-  'media': 'wojojO',
-  'admin': 'isjojO',
-};
+type RequestedRole = 'team_manager' | 'media';
 
+/**
+ * Public registration creates a FAN account — nothing else.
+ *
+ * This file used to hold `const rolePasswords = { team_manager: 'mejojO', media: 'wojojO',
+ * admin: 'isjojO' }` and gate privileged signups on it client-side (audit F-01/F-02): the "secret"
+ * ships inside the bundle, and the role it unlocked was then written from the browser into
+ * `profiles.role`. Anyone could read the map and mint an admin.
+ *
+ * Now: the account is always a fan, and Manager/Media are *applications* — ticking one queues a
+ * request an admin approves in User Control. `admin` cannot be requested at all. The database holds
+ * the real rule (RLS + `kicklive_request_access`); this form only decides how much of the queueing
+ * work a human has to do.
+ */
 export default function SignupPage({ onNavigate }: SignupPageProps) {
   const { signUp } = useAuth();
   const [username, setUsername] = useState('');
@@ -21,39 +31,39 @@ export default function SignupPage({ onNavigate }: SignupPageProps) {
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [role, setRole] = useState<UserRole>('fan');
-  const [rolePasswordInput, setRolePasswordInput] = useState('');
-  const [showRolePasswordInput, setShowRolePasswordInput] = useState(false);
+  const [requestedRole, setRequestedRole] = useState<RequestedRole | null>(null);
+  const [reason, setReason] = useState('');
+  const [requestQueued, setRequestQueued] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
+  const validate = (): string | null => {
+    if (username.trim().length < 3) return 'Username needs at least 3 characters';
+    if (username.trim().length > 32) return 'Username is too long (32 characters max)';
+    if (!/^[A-Za-z0-9 ._'-]+$/.test(username.trim())) return 'Username has unsupported characters';
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim())) return 'Enter a valid email address';
+    if (phone.length < 9 || phone.length > 15) return 'Enter a full phone number (9–15 digits)';
+    if (password.length < 8) return 'Password must be at least 8 characters';
+    if (password !== confirmPassword) return 'Passwords do not match';
+    if (requestedRole && reason.trim().length < 10) {
+      return 'Add a sentence about your club or newsroom so an admin can decide';
+    }
+    return null;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
-
-    // Validate Role Password if not fan
-    if (role !== 'fan') {
-      if (rolePasswordInput !== rolePasswords[role]) {
-        setError(`Incorrect access password for ${role.replace('_', ' ')} role`);
-        return;
-      }
-    }
-
-    if (password !== confirmPassword) {
-      setError('Passwords do not match');
-      return;
-    }
-
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters');
+    const problem = validate();
+    if (problem) {
+      setError(problem);
       return;
     }
 
     setLoading(true);
 
-    const { error: signUpError } = await signUp(email, password, username, phone, role);
+    const { error: signUpError } = await signUp(email.trim().toLowerCase(), password, username.trim(), phone);
 
     if (signUpError) {
       setError(signUpError);
@@ -61,23 +71,21 @@ export default function SignupPage({ onNavigate }: SignupPageProps) {
       return;
     }
 
+    // The account exists by now, so a failed request must not look like a failed signup: log it,
+    // tell the user, and let them retry from their profile later.
+    let queued = false;
+    if (requestedRole) {
+      const { ok, error: requestError } = await submitAccessRequest(requestedRole, reason);
+      if (!ok) log.warn('Access request could not be queued:', requestError);
+      queued = ok;
+      setRequestQueued(ok);
+    }
+
     setSuccess(true);
     setLoading(false);
-    // After 2 seconds, redirect to login
     setTimeout(() => {
       onNavigate('login');
-    }, 2000);
-  };
-
-  const handleRoleSelect = (selectedRole: UserRole) => {
-    if (selectedRole === 'fan') {
-      setRole('fan');
-      setShowRolePasswordInput(false);
-    } else {
-      setRole(selectedRole);
-      setShowRolePasswordInput(true);
-      setRolePasswordInput('');
-    }
+    }, queued ? 4000 : 2000);
   };
 
   if (success) {
@@ -90,9 +98,16 @@ export default function SignupPage({ onNavigate }: SignupPageProps) {
           <h1 className="text-3xl font-black italic uppercase tracking-tighter mb-4">
             Account Created!
           </h1>
-          <p className="text-white/40 mb-8">
-            Success! Redirecting you to the login page...
+          <p className="text-white/40 mb-2">
+            {requestQueued
+              ? 'Your fan account is ready. The access request is queued for an admin to review.'
+              : 'Success! Redirecting you to the login page...'}
           </p>
+          {requestQueued && (
+            <p className="text-[10px] text-white/30 uppercase tracking-widest font-black mb-6">
+              You will be notified once it is approved
+            </p>
+          )}
           <div className="flex justify-center">
             <Loader2 size={24} className="animate-spin text-brand-green" />
           </div>
@@ -123,27 +138,17 @@ export default function SignupPage({ onNavigate }: SignupPageProps) {
             </div>
           )}
 
-          {/* Role Selection */}
+          {/* Account type: fans self-register, everything else is granted */}
           <div className="space-y-4">
             <label className="text-xs font-black uppercase tracking-widest text-white/40 text-center block">
               SELECT YOUR ROLE
             </label>
-            
+
             <div className="flex flex-col gap-4">
-              {/* Fan Role - Featured Big */}
-              <button
-                type="button"
-                onClick={() => handleRoleSelect('fan')}
-                className={`w-full p-6 rounded-2xl border-2 transition-all text-left flex items-center justify-between group ${
-                  role === 'fan'
-                    ? 'border-brand-blue bg-brand-blue/10 scale-[1.02]'
-                    : 'border-white/10 hover:border-white/20 bg-white/5'
-                }`}
-              >
+              {/* Fan Role - what this form actually creates */}
+              <div className="w-full p-6 rounded-2xl border-2 border-brand-blue bg-brand-blue/10 scale-[1.02] text-left flex items-center justify-between">
                 <div className="flex items-center gap-6">
-                  <div className={`w-16 h-16 rounded-2xl flex items-center justify-center transition-colors ${
-                    role === 'fan' ? 'bg-brand-blue text-white' : 'bg-white/5 text-white/20'
-                  }`}>
+                  <div className="w-16 h-16 rounded-2xl flex items-center justify-center bg-brand-blue text-white">
                     <Heart size={32} />
                   </div>
                   <div>
@@ -151,55 +156,68 @@ export default function SignupPage({ onNavigate }: SignupPageProps) {
                     <p className="text-xs text-white/40 mt-1 max-w-xs">Follow matches, make predictions, and engage with the community</p>
                   </div>
                 </div>
-                {role === 'fan' && <div className="w-6 h-6 bg-brand-blue rounded-full flex items-center justify-center"><Check size={14} /></div>}
-              </button>
+                <div className="w-6 h-6 bg-brand-blue rounded-full flex items-center justify-center"><Check size={14} /></div>
+              </div>
 
-              {/* Other Roles - Smaller Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {[
-                  { id: 'team_manager', label: 'Manager', icon: <Users size={20} />, color: 'yellow-500' },
-                  { id: 'media', label: 'Media', icon: <Newspaper size={20} />, color: 'purple-500' },
-                  { id: 'admin', label: 'Admin', icon: <Shield size={20} />, color: 'brand-green' },
-                ].map((option) => (
+              {/* Optional access requests — reviewed by an admin, never applied by this form */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {([
+                  { id: 'team_manager', label: 'Team Manager', icon: <Users size={20} />, blurb: 'Register a club and manage its squad' },
+                  { id: 'media', label: 'Media', icon: <Newspaper size={20} />, blurb: 'Publish reports and match media' },
+                ] as const).map((option) => (
                   <button
                     key={option.id}
                     type="button"
-                    onClick={() => handleRoleSelect(option.id as UserRole)}
+                    onClick={() => setRequestedRole(requestedRole === option.id ? null : option.id)}
+                    aria-pressed={requestedRole === option.id}
                     className={`p-4 rounded-xl border-2 transition-all text-center flex flex-col items-center gap-2 ${
-                      role === option.id
-                        ? `border-${option.color} bg-white/10`
+                      requestedRole === option.id
+                        ? 'border-brand-green bg-white/10'
                         : 'border-white/5 bg-white/5 hover:border-white/10'
                     }`}
                   >
-                    <div className={`p-3 rounded-lg ${role === option.id ? `bg-${option.color} text-black` : 'bg-white/5 text-white/40'}`}>
+                    <div className={`p-3 rounded-lg ${requestedRole === option.id ? 'bg-brand-green text-black' : 'bg-white/5 text-white/40'}`}>
                       {option.icon}
                     </div>
                     <span className="text-xs font-black uppercase tracking-widest">{option.label}</span>
+                    <span className="text-[9px] text-white/30">{option.blurb}</span>
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* Role Password Input (Conditional) */}
-            {showRolePasswordInput && (
-              <div className="animate-in slide-in-from-top-4 duration-300">
-                <div className="relative">
-                  <div className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20">
-                    <Lock size={18} />
-                  </div>
-                  <div className="absolute left-12 top-2 text-[8px] font-black uppercase tracking-widest text-white/30">
-                    Access Password for {role.replace('_', ' ')}
-                  </div>
-                  <input
-                    type="password"
-                    value={rolePasswordInput}
-                    onChange={(e) => setRolePasswordInput(e.target.value)}
-                    placeholder="Enter access code"
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-12 py-3 text-sm text-white placeholder:text-white/20 focus:outline-none focus:border-white/30 transition-colors"
-                  />
-                </div>
+            {requestedRole ? (
+              <div className="space-y-2 animate-in slide-in-from-top-4 duration-300">
+                <label className="text-[10px] font-black uppercase tracking-widest text-white/40">
+                  Why do you need {requestedRole === 'media' ? 'media access' : 'manager access'}?
+                </label>
+                <textarea
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value.slice(0, 1000))}
+                  rows={3}
+                  placeholder="Club, league or newsroom you represent, and how you were invited"
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder:text-white/20 focus:outline-none focus:border-white/30 transition-colors resize-none"
+                />
+                <p className="text-[9px] text-white/30 leading-relaxed">
+                  Your account is created as a fan straight away. An admin reviews the request and
+                  grants the access afterwards — it is not applied by this form.
+                </p>
               </div>
+            ) : (
+              <p className="text-[9px] text-white/30 text-center leading-relaxed">
+                Signing up creates a fan account. Team Manager and Media access are granted by an
+                admin after review.
+              </p>
             )}
+
+            {/* Admin is not obtainable here, and saying so beats people asking */}
+            <div className="flex items-start gap-3 rounded-xl border border-white/5 bg-white/[0.02] px-4 py-3">
+              <Shield size={16} className="text-white/20 mt-0.5 shrink-0" />
+              <p className="text-[9px] text-white/30 leading-relaxed">
+                Administrator accounts are never issued through registration. They are created by an
+                existing admin.
+              </p>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -215,6 +233,7 @@ export default function SignupPage({ onNavigate }: SignupPageProps) {
                   onChange={(e) => setUsername(e.target.value)}
                   placeholder="Choose a username"
                   required
+                  maxLength={32}
                   className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-white/20 focus:outline-none focus:border-brand-green/50 transition-colors"
                 />
               </div>
@@ -232,6 +251,7 @@ export default function SignupPage({ onNavigate }: SignupPageProps) {
                   }}
                   placeholder="0XX XXX XXXX"
                   required
+                  maxLength={15}
                   className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-white/20 focus:outline-none focus:border-brand-green/50 transition-colors"
                 />
               </div>
@@ -262,8 +282,9 @@ export default function SignupPage({ onNavigate }: SignupPageProps) {
                     type={showPassword ? 'text' : 'password'}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Min 6 characters"
+                    placeholder="Min 8 characters"
                     required
+                    minLength={8}
                     className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-white/20 focus:outline-none focus:border-brand-green/50 transition-colors pr-12"
                   />
                   <button

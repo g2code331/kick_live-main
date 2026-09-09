@@ -1,3 +1,14 @@
+-- ============================================================================
+-- SUPERSEDED — DO NOT RUN
+-- ============================================================================
+-- Kept for reference only. KICKLIVE_FINAL_SCHEMA.sql is a superset of this file (same tables, more
+-- columns, more policies) and this one's `profiles` policies are weaker: an UPDATE policy with a
+-- USING clause and no WITH CHECK lets any signed-in user rewrite their own role, which is the
+-- privilege-escalation path Phase 1 closed. Running this file against a hardened project re-opens it.
+-- Do not copy from it; do not schedule it in CI.
+-- (ARENA-PHASE1-BANNER — added by the Phase 1 audit; see supabase/README.md)
+-- ============================================================================
+
 -- =============================================
 -- KICKLIVE COMPLETE DATABASE SCHEMA
 -- Professional Football Management System

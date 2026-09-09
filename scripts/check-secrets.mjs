@@ -27,14 +27,28 @@ const SECRETS = [
     required: true,
     jobs: ["web", "desktop", "release", "deploy-web"],
     why: "baked into the bundle at build time (src/lib/supabase.ts); an empty value ships an app that cannot load a schedule",
-    note: "the repo also carries a fallback URL in source — a build can therefore look successful while pointing at the wrong project",
+    note: "since Phase 1 there is no fallback project in src/lib/supabase.ts: `npm run build` still succeeds, but the app refuses to boot and prints which variable is missing (src/lib/env.ts)",
   },
   { name: "VITE_SUPABASE_ANON_KEY", required: true, jobs: ["web", "desktop", "release", "deploy-web"], why: "same as above; it is a public anon key, but it must be the one matching the URL" },
   { name: "VERCEL_TOKEN", required: false, jobs: ["deploy-web"], why: "without it the preview/production deploy step is skipped", fallback: "deploy by running `npm run build:web` + your own host" },
   { name: "VERCEL_PROJECT_ID", required: false, jobs: ["deploy-web"], why: "needed with VERCEL_TOKEN" },
   { name: "VERCEL_ORG_ID", required: false, jobs: ["deploy-web"], why: "needed with VERCEL_TOKEN" },
   { name: "NPM_TOKEN", required: false, jobs: [], why: "unused today; listed so a future private-package dependency does not get added silently" },
+  // ── Phase 2 (Workers) ──────────────────────────────────────────────────────────────────────
+  // Declared now so the registry is the single list of what this product has secrets for, and so a
+  // future workflow that adds one of these to a *client* job is caught by the scan below: a
+  // service_role key in a web build is not a misconfiguration but a full database exposure.
+  {
+    name: "SUPABASE_SERVICE_ROLE_KEY",
+    required: false,
+    jobs: [],
+    why: "Worker secret (RLS bypass). Must never appear in a web/desktop build job — the source scan fails the run if it is baked into source.",
+  },
+  { name: "SUPABASE_JWT_SECRET", required: false, jobs: [], why: "Worker secret; used to verify the SPA bearer token in workers/src/middleware/auth.ts" },
+  { name: "TURNSTILE_SECRET_KEY", required: false, jobs: [], why: "Worker secret; siteverify for signup + write routes (workers/src/middleware/turnstile.ts)" },
 ];
+
+const REPO_ROOT_FOR_SCAN = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 
 const args = process.argv.slice(2);
 const asJson = args.includes("--json");
@@ -62,12 +76,77 @@ export function audit(env, job) {
   return { rows, blocking, optionalMissing: rows.filter((r) => !r.required && !r.ok) };
 }
 
+/** Directories whose contents ship to a browser or an Electron renderer, i.e. must hold no key. */
+const SCANNED_DIRS = ["src", "pwa", "shared", "server", "desktop/src", "workers/src"];
+
+/**
+ * Hardcoded-backend detector. Phase 1 removed the fallback URL and the fallback anon key from
+ * `src/lib/supabase.ts`; this is what stops them creeping back in (a copy-paste from an older
+ * deployment guide is the realistic way that happens). Two patterns: a Supabase project URL written
+ * as a literal, and any JWT-shaped literal. `.example` files are skipped — placeholders are the point
+ * of those.
+ */
+export function scanSource(root = process.cwd()) {
+  const findings = [];
+  const urlLiteral = /["'`]https:\/\/([a-z0-9-]{12,})\.supabase\.(co|in|net)[\/"'`]/i;
+  const jwtLiteral = /["']eyJ[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}["']/;
+
+  const walk = (dir) => {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === "node_modules" || entry.name === "dist" || entry.name === "build") continue;
+        walk(full);
+        continue;
+      }
+      if (!/\.(ts|tsx|js|jsx|mjs|cjs|html|css|json)$/.test(entry.name)) continue;
+      if (/\.example$/i.test(entry.name)) continue;
+      const text = fs.readFileSync(full, "utf8");
+      const lines = text.split("\n");
+      lines.forEach((line, i) => {
+        const url = urlLiteral.exec(line);
+        if (url) findings.push({ file: path.relative(root, full), line: i + 1, kind: "hardcoded-supabase-url", detail: `project ref ${url[1]}` });
+        if (jwtLiteral.test(line)) findings.push({ file: path.relative(root, full), line: i + 1, kind: "hardcoded-jwt", detail: line.trim().slice(0, 24) + "…" });
+      });
+    }
+  };
+
+  for (const dir of SCANNED_DIRS) walk(path.join(root, dir));
+  return findings;
+}
+
+function reportScan(findings) {
+  if (findings.length === 0) {
+    console.log("source scan: no hardcoded Supabase URL or key in shipped source ✔");
+    return;
+  }
+  for (const f of findings) console.log(`::error::${f.file}:${String(f.line)} — ${f.kind} (${f.detail})`);
+  console.error(
+    `source scan: ${String(findings.length)} hardcoded backend value(s). Put them in the environment and read them in\n` + `  src/lib/env.ts (web) or workers/src/env.ts (Worker); see .env.example.`,
+  );
+}
+
 export function main() {
+  const scanOnly = args.includes("--scan-only");
+  const findings = scanSource(REPO_ROOT_FOR_SCAN);
+  if (scanOnly) {
+    reportScan(findings);
+    if (asJson) console.log(JSON.stringify({ ok: findings.length === 0, findings }, null, 2));
+    return findings.length === 0 ? 0 : 1;
+  }
+
   const { rows, blocking, optionalMissing } = audit(process.env, jobFlag);
   if (asJson) {
     console.log(JSON.stringify({ ok: blocking.length === 0, blocking: blocking.length, optionalMissing: optionalMissing.length, rows }, null, 2));
   } else {
     console.log(`check-secrets: job=${jobFlag ?? "any"}`);
+    if (findings.length === 0) console.log("  source scan: clean");
     for (const r of rows) {
       const mark = r.ok ? "set" : r.required ? "MISSING" : "unset (optional)";
       console.log(`  ${mark.padEnd(17)} ${r.name.padEnd(24)} ${r.detail}${r.ok ? "" : ` — ${r.why}`}`);
@@ -87,6 +166,12 @@ export function main() {
       fs.appendFileSync(summary, lines.join("\n") + "\n");
     }
   }
+  if (findings.length > 0) {
+    reportScan(findings);
+    if (!allowEmpty) return 1;
+    console.warn("::warning::source scan findings ignored because KICKLIVE_ALLOW_MISSING_SECRETS=1");
+  }
+
   if (blocking.length > 0 && !allowEmpty) {
     if (!asJson)
       console.error(

@@ -27,3 +27,7 @@ DEPLOYMENT*.md
 !src/lib/updates.ts
 !src/lib/app-shell.ts
 !src/lib/use-update-control.ts
+# Phase 1 added these as new files, so they are formatted from day one rather than inherited.
+!src/lib/env.ts
+!src/lib/log.ts
+!src/lib/access.ts

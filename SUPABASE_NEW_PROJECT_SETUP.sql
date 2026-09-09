@@ -1,3 +1,12 @@
+-- ============================================================================
+-- SUPERSEDED — DO NOT RUN
+-- ============================================================================
+-- An early 9-table setup. It creates no policies for `profiles` at all (so RLS denies everything,
+-- including sign-in profile reads) and duplicates the rest of the policy set with inline subqueries
+-- instead of public.is_admin(). KICKLIVE_FINAL_SCHEMA.sql replaces it entirely.
+-- (ARENA-PHASE1-BANNER — added by the Phase 1 audit; see supabase/README.md)
+-- ============================================================================
+
 -- =============================================
 -- KICKLIVE - NEW SUPABASE PROJECT SETUP
 -- Run this in NEW Supabase project SQL Editor

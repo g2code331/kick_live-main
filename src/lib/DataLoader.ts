@@ -5,6 +5,7 @@
  */
 
 import { supabase } from './supabase';
+import { log } from './log';
 
 export interface AppData {
   teams: any[];
@@ -20,6 +21,7 @@ class DataLoader {
   private static instance: DataLoader;
   private data: AppData | null = null;
   private isLoading: boolean = false;
+  private pending: Promise<AppData> | null = null;
   private refreshInterval: any = null;
   private subscribers: ((data: AppData) => void)[] = [];
 
@@ -38,27 +40,36 @@ class DataLoader {
   async loadAll(): Promise<AppData> {
     // Return cached data immediately if available (don't wait for refresh)
     if (this.data && !this.isStale()) {
-      console.log('[DataLoader] Using cached data');
+      log.debug('[DataLoader] Using cached data');
       return this.data;
     }
 
-    // If loading, return cached data if available, otherwise wait
-    if (this.isLoading) {
+    // A second caller must not start a parallel identical fetch, and must not spin on a timer
+    // either: it just awaits the in-flight promise. (This used to be `while (isLoading) sleep(100)`,
+    // which woke the tab every 100 ms and could outlive the request it was waiting for.)
+    if (this.pending) {
       if (this.data) {
-        console.log('[DataLoader] Using cached data while refreshing');
+        log.debug('[DataLoader] Using cached data while refreshing');
         return this.data;
       }
-      
-      // Wait for initial load to complete
-      while (this.isLoading) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
-      return this.data!;
+      return this.pending;
     }
 
     this.isLoading = true;
+    const run = this.fetchAll();
+    this.pending = run;
     try {
-      console.log('[DataLoader] Fetching fresh data from Supabase...');
+      return await run;
+    } finally {
+      this.pending = null;
+      this.isLoading = false;
+    }
+  }
+
+  /** One whole-cache load; separated from `loadAll` so concurrent callers can share it. */
+  private async fetchAll(): Promise<AppData> {
+    try {
+      log.debug('[DataLoader] Fetching fresh data from Supabase...');
       const [teams, players, competitions, matches, media, users] = await Promise.all([
         this.loadTeams(),
         this.loadPlayers(),
@@ -80,8 +91,8 @@ class DataLoader {
 
       // Update cache
       this.data = newData;
-      console.log('[DataLoader] ✓ Data refreshed:', { 
-        teams: teams.length, 
+      log.debug('[DataLoader] Data refreshed:', {
+        teams: teams.length,
         players: players.length,
         competitions: competitions.length,
         matches: matches.length
@@ -92,15 +103,13 @@ class DataLoader {
 
       return newData;
     } catch (error) {
-      console.error('[DataLoader] Error loading data:', error);
+      log.error('[DataLoader] Error loading data:', error);
       // Return cached data even if error (better than nothing)
       if (this.data) {
-        console.log('[DataLoader] Using cached data due to error');
+        log.debug('[DataLoader] Using cached data due to error');
         return this.data;
       }
       throw error;
-    } finally {
-      this.isLoading = false;
     }
   }
 
@@ -125,11 +134,11 @@ class DataLoader {
    */
   async refresh(): Promise<void> {
     if (this.isLoading) {
-      console.log('[DataLoader] Already loading, skipping refresh');
+      log.debug('[DataLoader] Already loading, skipping refresh');
       return;
     }
 
-    console.log('[DataLoader] Refreshing data in background (optimized)...');
+    log.debug('[DataLoader] Refreshing data in background (optimized)...');
     try {
       // Only fetch essential columns with limits - REDUCES DATA BY 80%
       const [teams, players, competitions, matches, media] = await Promise.all([
@@ -151,11 +160,11 @@ class DataLoader {
           users: this.data.users, // Keep cached users
           lastLoaded: new Date()
         };
-        console.log('[DataLoader] ✓ Optimized background refresh complete');
+        log.debug('[DataLoader] Optimized background refresh complete');
         this.notifySubscribers();
       }
     } catch (error) {
-      console.error('[DataLoader] Background refresh failed:', error);
+      log.error('[DataLoader] Background refresh failed:', error);
     }
   }
 
@@ -164,11 +173,11 @@ class DataLoader {
    */
   startAutoRefresh(): void {
     if (this.refreshInterval) {
-      console.log('[DataLoader] Auto-refresh already running');
+      log.debug('[DataLoader] Auto-refresh already running');
       return;
     }
 
-    console.log('[DataLoader] Starting auto-refresh (every 5 minutes - optimized)');
+    log.debug('[DataLoader] Starting auto-refresh (every 5 minutes - optimized)');
     this.refreshInterval = setInterval(() => {
       this.refresh();
     }, 5 * 60 * 1000); // 5 minutes - MUCH BETTER FOR EGRESS
@@ -181,7 +190,7 @@ class DataLoader {
     if (this.refreshInterval) {
       clearInterval(this.refreshInterval);
       this.refreshInterval = null;
-      console.log('[DataLoader] Auto-refresh stopped');
+      log.debug('[DataLoader] Auto-refresh stopped');
     }
   }
 
@@ -212,7 +221,7 @@ class DataLoader {
           callback(this.data);
         }
       } catch (error) {
-        console.error('[DataLoader] Subscriber error:', error);
+        log.error('[DataLoader] Subscriber error:', error);
       }
     });
   }

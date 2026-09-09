@@ -1,3 +1,13 @@
+-- ============================================================================
+-- SUPERSEDED — ALREADY FOLDED IN
+-- ============================================================================
+-- Historical column adds (owner_id, status, lineup, gallery, venue, coach, city, match_start_time,
+-- elapsed_seconds_before_pause), all of which KICKLIVE_FINAL_SCHEMA.sql now contains. It also grants
+-- "Authenticated users can create teams" with no owner/status constraint and comments out the admin
+-- policy — both are corrected in supabase/migrations/20260909120000_phase1_security_hardening.sql.
+-- (ARENA-PHASE1-BANNER — added by the Phase 1 audit; see supabase/README.md)
+-- ============================================================================
+
 -- ============================================================
 -- KickLive — Complete Supabase SQL Migrations
 -- Run ALL of this in: Supabase Dashboard → SQL Editor → New Query

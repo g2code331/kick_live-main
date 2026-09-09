@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { Search, X, ChevronRight, Clock, Eye, Tag, ArrowLeft, Loader2, Newspaper } from 'lucide-react';
 import Header from '../components/Header';
 import { supabase } from '../lib/supabase';
+import { recordMediaView } from '../lib/db';
 
 const FALLBACK_IMG = 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&auto=format&fit=crop';
 
@@ -88,7 +89,8 @@ export default function NewsPage() {
         .maybeSingle();
       if (data) {
         setSelected(data);
-        supabase.from('media').update({ views: (data.views || 0) + 1 }).eq('id', data.id).then(() => {});
+        // Atomic increment in Postgres; used to be a client-side read-modify-write on `views`.
+        void recordMediaView(data.id);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -97,7 +99,7 @@ export default function NewsPage() {
   // Increment views when article is opened (best-effort, ignore errors)
   const openArticle = async (article: any) => {
     setSelected(article);
-    supabase.from('media').update({ views: (article.views || 0) + 1 }).eq('id', article.id).then(() => {});
+    void recordMediaView(article.id);
   };
 
   const featured = articles.find(a => a.featured) || articles[0];

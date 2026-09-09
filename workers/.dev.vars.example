@@ -1,0 +1,22 @@
+# Local development only. This file is read by `wrangler dev` and must never be committed.
+# Copy to `workers/.dev.vars` (git-ignored) and fill in.
+#
+# The values marked SECRET belong to the project's most powerful credentials: the service role key
+# can read and write every table with RLS bypassed. Keep them out of git, out of logs, out of
+# `wrangler.toml`, and out of anything that ships to a browser.
+
+APP_ENV=development
+SUPABASE_URL=https://REPLACE-WITH-PROJECT-REF.supabase.co
+SUPABASE_ANON_KEY=REPLACE-WITH-PUBLISHABLE-ANON-KEY
+
+# SECRET — Supabase dashboard → Settings → API → service_role (also called secret key)
+SUPABASE_SERVICE_ROLE_KEY=
+
+# SECRET — Settings → API → JWT Secret (used to verify the SPA's bearer token, HS256)
+SUPABASE_JWT_SECRET=
+
+# SECRET — Cloudflare Turnstile widget secret (leave blank in dev: the check is skipped)
+TURNSTILE_SECRET_KEY=
+
+# Exact origins allowed for CORS. `*` is rejected by src/env.ts on purpose.
+ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173

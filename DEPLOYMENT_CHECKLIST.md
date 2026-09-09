@@ -41,7 +41,10 @@
 ```
 VITE_SUPABASE_URL = https://fnefpcjeebawsebxjhcf.supabase.co
 
-VITE_SUPABASE_ANON_KEY = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZuZWZwY2plZWJhd3NlYnhqaGNmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQwNDAyMTQsImV4cCI6MjA5OTYxNjIxNH0.YkPu5IxtEPZHK9i0oiMTRROrwCT3ZdF1RgCEhaqDhwo
+VITE_SUPABASE_ANON_KEY = <paste the publishable/anon key from Supabase → Settings → API>
+# The key is public by design (RLS enforces access), but it is still project-specific: pasting
+# one from a guide instead of your project was how this repo ended up with a URL and a key for
+# two different projects. Neither value is committed to git any more — see .env.example.
 ```
 
 **✅ DONE when you see "🎉 Congratulations!"**

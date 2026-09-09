@@ -22,6 +22,7 @@ import MatchDetails from "./pages/MatchDetails";
 import ProfilePage from "./pages/ProfilePage";
 import NewsPage from "./pages/NewsPage";
 import { dataLoader } from "./lib/DataLoader";
+import { log } from "./lib/log";
 import { assetUrl } from "./lib/app-shell.ts";
 
 function AppContent() {
@@ -33,14 +34,29 @@ function AppContent() {
   };
 
   useEffect(() => {
-    console.log('[App] Initializing background data loader...');
-    dataLoader.loadAll().then(() => {
-      console.log('[App] ✓ Initial data loaded');
-    }).catch(err => {
-      console.error('[App] Initial data load failed:', err);
-    });
+    log.debug('[App] initializing background data loader');
+    dataLoader
+      .loadAll()
+      .catch((err) => log.error('[App] initial data load failed:', err instanceof Error ? err.message : err));
     dataLoader.startAutoRefresh();
-    return () => { dataLoader.stopAutoRefresh(); };
+
+    // A hidden tab that keeps polling is pure egress: on phones this ran forever in the background.
+    // Pause while hidden, and catch up once — only if the cache actually went stale.
+    const onVisibility = () => {
+      if (typeof document === 'undefined') return;
+      if (document.visibilityState === 'hidden') {
+        dataLoader.stopAutoRefresh();
+      } else {
+        if (dataLoader.isStale()) void dataLoader.refresh();
+        dataLoader.startAutoRefresh();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      dataLoader.stopAutoRefresh();
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, []);
 
   if (loading) {
@@ -87,7 +103,13 @@ function AppContent() {
         <Route path="/forgot-password" element={<ForgotPasswordPage onNavigate={handleNavigate} />} />
         {/* User Profile */}
         <Route path="/profile" element={<ProfilePage />} />
-        {/* Protected Portal Routes */}
+        {/*
+          Protected Portal Routes — UX only, and deliberately not a security control.
+          `profile.role` is a value the browser can overwrite, so these guards only stop honest users
+          from landing on a portal they cannot use. The authority is Postgres RLS, which today is the
+          *only* thing standing between a caller and privileged writes; Phase 2 moves those writes
+          behind Worker endpoints that re-check the role server-side.
+        */}
         <Route path="/admin" element={user && profile?.role === 'admin' ? <AdminPortal onNavigate={handleNavigate} /> : <Navigate to="/" />} />
         <Route path="/team-owner" element={user && profile?.role === 'team_manager' ? <TeamOwnerPortal /> : <Navigate to="/" />} />
         <Route path="/team-portal" element={user && profile?.role === 'team_manager' ? <TeamPortal onNavigate={handleNavigate} /> : <Navigate to="/" />} />

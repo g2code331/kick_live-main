@@ -20,7 +20,7 @@
     "start:desktop": "electron .",
     "dev:desktop": "node scripts/dev-desktop.mjs",
     "package:linux": "node scripts/package-linux.mjs",
-    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json && tsc -p tsconfig.workers.json",
     "test": "node scripts/run-tests.mjs all",
     "test:unit": "node scripts/run-tests.mjs unit",
     "test:integration": "node scripts/run-tests.mjs integration",
@@ -55,6 +55,7 @@
     "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260908.1",
     "@electron/asar": "4.3.0",
     "@tailwindcss/vite": "4.1.17",
     "@types/node": "22.19.17",
