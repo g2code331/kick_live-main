@@ -69,7 +69,9 @@ async function liveRoomNamespace() {
   const { MatchRoom } = await import(path.join(REPO, "workers/src/do/MatchRoom.ts"));
   const rooms = new Map();
   const unsupported = (what) => {
-    throw new Error(`worker-local: ${what} is not available in the Node adapter. Use GET /api/matches/:id/stream (SSE), which serves the same frames from the same room; real sockets need \`npx wrangler dev\`.`);
+    throw new Error(
+      `worker-local: ${what} is not available in the Node adapter. Use GET /api/matches/:id/stream (SSE), which serves the same frames from the same room; real sockets need \`npx wrangler dev\`.`,
+    );
   };
   return {
     idFromName: (name) => String(name),

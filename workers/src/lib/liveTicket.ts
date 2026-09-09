@@ -58,7 +58,10 @@ function timingSafeEqualBytes(a: Uint8Array, b: Uint8Array): boolean {
   return diff === 0;
 }
 
-export async function issueLiveTicket(env: Env, claims: { userId: string; matchId: number; kind: LiveTicketKind; role: AppRole | null }): Promise<{ ticket: string; expires_in: number; expires_at: string }> {
+export async function issueLiveTicket(
+  env: Env,
+  claims: { userId: string; matchId: number; kind: LiveTicketKind; role: AppRole | null },
+): Promise<{ ticket: string; expires_in: number; expires_at: string }> {
   const secret = requireSecret(env, "SUPABASE_JWT_SECRET");
   const ttl = TICKET_TTL_SECONDS[claims.kind];
   const now = Math.floor(Date.now() / 1000);

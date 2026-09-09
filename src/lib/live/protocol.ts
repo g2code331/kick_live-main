@@ -1,24 +1,30 @@
 /**
- * The live-match wire contract, version 1.
+ * The live-match wire contract, as the browser sees it — version 1.
  *
- * Versioned on purpose: the mobile app and the desktop shell ship independently of the Worker, so a
- * message a future version adds must be ignorable rather than fatal. `version` is on every frame, and
- * the client ignores frames with a version it does not know.
+ * This file is a **mirror** of `workers/src/types/live.ts`, deliberately re-declared rather than shared:
+ * the SPA and the Worker are built by different toolchains (`DOM` vs `@cloudflare/workers-types`), and a
+ * shared directory would need its own project reference and build order for a few dozen lines. That
+ * mirrors-the-same-thing risk is handled the way Phase 2 handled it for `src/lib/api/types.ts`: a test
+ * (`tests/unit/live-client.test.ts`) compares the field names and unions on both sides, so drift is a
+ * failing build rather than a wrong score on a fan's screen.
  *
- * Two rules make reconnect and offline recovery possible, and both are visible here rather than hidden
- * in an implementation:
+ * Three rules are load-bearing for everything in `src/lib/live/`:
  *
- *   - every state-changing frame carries a `sequence`, allocated by Postgres (via the recording
- *     function) and mirrored by the Durable Object. Clients detect gaps and ask to resume;
- *   - a client that cannot resume gets a `MATCH_SNAPSHOT` instead. **A gap is always closable by the
- *     server**, so a fan's screen can never be stuck showing minute 61 with the ground having scored two
- *     more.
- *
- * `src/lib/live/protocol.ts` mirrors these field names for the browser build; a test compares the two.
+ *   1. `sequence` is allocated by Postgres, never by a client. A client only ever reports the highest
+ *      sequence it has applied.
+ *   2. The match's status is read from `clock.status`, which every frame carries. There is no separate
+ *      "status" subscription that could lag behind the score.
+ *   3. A frame with an unknown `version` is ignored, not fatal: the desktop shell and a phone can be
+ *      older than the Worker.
  */
-import type { MatchPeriod, MatchStatus } from "../lib/matchLifecycle.ts";
 
 export const PROTOCOL_VERSION = 1 as const;
+
+/** The 14 statuses `matches.status` allows. Pinned against `workers/src/lib/matchLifecycle.ts`. */
+export type MatchStatus = "scheduled" | "waiting" | "first_half" | "half_time" | "second_half" | "extra_time" | "penalty_shootout" | "full_time" | "suspended" | "postponed" | "cancelled" | "abandoned" | "completed" | "live";
+
+/** Which phase of the match a moment belongs to; decides the minute ceiling and the clock's behaviour. */
+export type MatchPeriod = "pre" | "first" | "half_time" | "second" | "extra_first" | "extra_second" | "shootout" | "done" | "interrupted";
 
 export type LiveMessageKind = "MATCH_SNAPSHOT" | "MATCH_EVENT" | "MATCH_STATUS" | "MATCH_CLOCK" | "MATCH_ERROR" | "SYNC_CONFLICT" | "PING" | "PONG" | "CONTROLLERS";
 
@@ -32,15 +38,10 @@ export interface LiveEnvelope {
   type: LiveMessageKind;
 }
 
-/**
- * Exactly two states, matching `match_events.event_status`'s CHECK. A "reversal" is not a third state: it
- * is the original row marked `corrected` plus a replacement row linked by `corrects_event_id`, so the
- * sequence of what was believed stays readable.
- */
+/** Exactly the two states `match_events.event_status` allows; a reversal is a correction, not a third one. */
 export type EventRowStatus = "active" | "corrected";
 
 export interface LiveEvent {
-  /** Postgres id. */
   id: number;
   event_type: string;
   team_id: number | null;
@@ -70,7 +71,7 @@ export interface LiveEvent {
 export interface LiveScore {
   home: number;
   away: number;
-  /** Present only once a shoot-out has started; a shoot-off never touches home/away. */
+  /** Present only once a shoot-out has started; a shoot-out never touches home/away. */
   shootout?: { home: number; away: number } | null;
 }
 
@@ -108,9 +109,9 @@ export interface MatchSnapshotBody {
   match: LiveMatchInfo;
   clock: LiveClock;
   score: LiveScore;
-  /** Newest first in the UI; sent oldest-first and reversed client-side to keep the frame small. */
+  /** Sent oldest-first and reversed client-side; `RoomState.events` is newest-first for rendering. */
   events: LiveEvent[];
-  /** True when the DO had to rebuild from Postgres (after eviction) — useful in incident triage. */
+  /** True when the Durable Object had to rebuild from Postgres (after eviction) — useful in triage. */
   rebuilt_from_database: boolean;
   controllers_online: number;
   viewers_online: number;
@@ -163,9 +164,8 @@ export interface MatchErrorMessage extends LiveEnvelope {
 }
 
 /**
- * Sent to a controller (not to fans) when something it queued was refused — a duplicate, an event for a
- * closed match, a stale draft. The client surfaces it as `SYNC CONFLICT` with the reason; nothing is
- * discarded silently, and the server's snapshot rides along so the controller can re-decide.
+ * Sent to a controller (never to fans) when something it queued was refused. Nothing is discarded
+ * silently: the reason is shown and the server's snapshot rides along so the console can re-decide.
  */
 export interface SyncConflictMessage extends LiveEnvelope {
   type: "SYNC_CONFLICT";
@@ -188,11 +188,43 @@ export interface PingMessage extends LiveEnvelope {
 
 export type LiveMessage = MatchSnapshot | MatchEventMessage | MatchStatusMessage | MatchClockMessage | MatchErrorMessage | SyncConflictMessage | ControllersMessage | PingMessage;
 
-/** Client → server frames. Kept tiny: the only client-authored thing is "what have I seen". */
+/** Client → server frames. The only client-authored thing is "what have I already seen". */
 export type ClientFrame = { type: "resume"; after_sequence: number } | { type: "ping" } | { type: "snapshot" };
+
+/** The room's replay answer, which is also what the SSE poller relays. Mirrors `MatchStreamFrame`. */
+export interface MatchStreamFrame {
+  mode: "events" | "snapshot";
+  sequence: number;
+  events: LiveEvent[];
+  status: MatchStatus;
+  score: LiveScore;
+  clock: LiveClock;
+  reason?: string;
+}
 
 export function isLiveMessage(value: unknown): value is LiveMessage {
   if (value === null || typeof value !== "object") return false;
   const v = value as Record<string, unknown>;
   return v.version === PROTOCOL_VERSION && typeof v.matchId === "number" && typeof v.type === "string" && typeof v.sequence === "number";
+}
+
+/**
+ * Parses one text frame, returning `null` for anything that is not a frame this client understands.
+ *
+ * Both transports go through here — the WebSocket and the SSE fallback emit the same JSON (`event:
+ * MATCH_EVENT`, `data: {…}`) — so there is one reducer, one gap rule and one set of bugs.
+ */
+export function parseFrame(text: string, forMatchId?: number): LiveMessage | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (!isLiveMessage(value)) return null;
+  // A future protocol version must be ignorable rather than fatal (already handled by `isLiveMessage`),
+  // and `matchId` must be the match this page is about: a broadcast that leaked another match's frame
+  // would otherwise paint the wrong score on this screen.
+  if (forMatchId !== undefined && value.matchId !== forMatchId) return null;
+  return value;
 }

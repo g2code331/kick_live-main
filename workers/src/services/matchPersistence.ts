@@ -118,7 +118,10 @@ export async function transitionMatch(rest: SupabaseRest, args: TransitionArgs):
   });
 }
 
-export async function correctEvent(rest: SupabaseRest, args: { eventId: number; reason: string; replacement: Record<string, unknown> | null; expectedSequence: number | null }): Promise<MutationResult> {
+export async function correctEvent(
+  rest: SupabaseRest,
+  args: { eventId: number; reason: string; replacement: Record<string, unknown> | null; expectedSequence: number | null },
+): Promise<MutationResult> {
   return call<MutationResult>(rest, "kicklive_correct_match_event", {
     p_event_id: args.eventId,
     p_reason: args.reason,

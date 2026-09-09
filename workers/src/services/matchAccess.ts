@@ -90,14 +90,7 @@ export async function loadMatch(rest: SupabaseRest, matchId: number): Promise<Ma
 /** The caller's live assignments for one match. RLS exposes their own rows, and admins' view of all. */
 async function myAssignments(rest: SupabaseRest, matchId: number, userId: string): Promise<{ roles: AssignmentRole[]; error: string | null }> {
   try {
-    const rows = await rest
-      .from("match_assignments")
-      .select("role, status")
-      .eq("match_id", matchId)
-      .eq("user_id", userId)
-      .eq("status", "assigned")
-      .limit(12)
-      .rows<{ role: string; status: string }>();
+    const rows = await rest.from("match_assignments").select("role, status").eq("match_id", matchId).eq("user_id", userId).eq("status", "assigned").limit(12).rows<{ role: string; status: string }>();
     return { roles: rows.map((r) => r.role as AssignmentRole).filter((r) => ALL_ASSIGNMENT_ROLES.includes(r)), error: null };
   } catch (err) {
     if (err instanceof ApiError && (err.detail ?? "").match(/42P01|relation .* does not exist|Could not find the table|PGRST205/)) {
@@ -125,7 +118,14 @@ export async function resolveMatchAccess(rest: SupabaseRest, principal: Principa
   const role: AppRole | null = principal.role;
   const isAdmin = role === "admin";
   const { roles: assignments, error } = isAdmin ? { roles: [], error: null } : await myAssignments(rest, matchId, principal.userId);
-  const ownsAClubInThisMatch = !isAdmin && role === "team_manager" && principal.userId !== "" ? await ownsOneOfTheseClubs(rest, principal.userId, [match.home_team_id, match.away_team_id].filter((v): v is number => typeof v === "number")) : false;
+  const ownsAClubInThisMatch =
+    !isAdmin && role === "team_manager" && principal.userId !== ""
+      ? await ownsOneOfTheseClubs(
+          rest,
+          principal.userId,
+          [match.home_team_id, match.away_team_id].filter((v): v is number => typeof v === "number"),
+        )
+      : false;
 
   const controls = isAdmin || assignments.some((a) => CONTROLLING_ASSIGNMENTS.includes(a));
   const closes = isAdmin || assignments.some((a) => CLOSING_ASSIGNMENTS.includes(a));
@@ -140,7 +140,9 @@ export async function resolveMatchAccess(rest: SupabaseRest, principal: Principa
     canReopen: isAdmin,
     assignments,
     isAdmin,
-    reason: controls ? error : (error ?? (role === "team_manager" && ownsAClubInThisMatch ? "You manage a club in this match, so you may not control it." : "You are not an assigned official for this match.")),
+    reason: controls
+      ? error
+      : (error ?? (role === "team_manager" && ownsAClubInThisMatch ? "You manage a club in this match, so you may not control it." : "You are not an assigned official for this match.")),
   };
 
   return { match, rights, ownsAClubInThisMatch };

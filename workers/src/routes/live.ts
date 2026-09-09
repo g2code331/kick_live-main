@@ -124,7 +124,21 @@ function authorized(access: MatchAccess, action: "event" | "transition" | "close
 }
 
 /** The parts of the body a controller is allowed to name. Anything else is a 400, not a surprise. */
-const EVENT_KEYS = ["client_event_id", "event_type", "team_id", "player_id", "assist_player_id", "minute", "extra_minute", "description", "goal_type", "card_reason", "metadata", "allow_duplicate_content", "expected_sequence"] as const;
+const EVENT_KEYS = [
+  "client_event_id",
+  "event_type",
+  "team_id",
+  "player_id",
+  "assist_player_id",
+  "minute",
+  "extra_minute",
+  "description",
+  "goal_type",
+  "card_reason",
+  "metadata",
+  "allow_duplicate_content",
+  "expected_sequence",
+] as const;
 
 function readEventBody(fields: Fields): Record<string, unknown> {
   const type = fields.enumValue("event_type", MATCH_EVENT_TYPES as unknown as readonly string[], { required: true, label: "an event type this database accepts" });
@@ -158,7 +172,8 @@ function readEventBody(fields: Fields): Record<string, unknown> {
       });
     }
     for (const [k, v] of Object.entries(metadata)) {
-      if (typeof v === "string" && v.length > 500) throw new ApiError("VALIDATION_FAILED", 400, `metadata.${k} is too long.`, { fields: [{ field: `metadata.${k}`, message: "must be 500 characters or fewer" }] });
+      if (typeof v === "string" && v.length > 500)
+        throw new ApiError("VALIDATION_FAILED", 400, `metadata.${k} is too long.`, { fields: [{ field: `metadata.${k}`, message: "must be 500 characters or fewer" }] });
     }
   }
 
@@ -190,7 +205,9 @@ function readEventBody(fields: Fields): Record<string, unknown> {
     throw new ApiError("VALIDATION_FAILED", 400, "This event needs a player.", { fields: [{ field: "player_id", message: "required" }] });
   }
   if (spec.players === "one_or_two" && spec.group === "substitution" && assistId === undefined) {
-    throw new ApiError("VALIDATION_FAILED", 400, "A substitution needs the player coming off as well as the one coming on.", { fields: [{ field: "assist_player_id", message: "required for a substitution" }] });
+    throw new ApiError("VALIDATION_FAILED", 400, "A substitution needs the player coming off as well as the one coming on.", {
+      fields: [{ field: "assist_player_id", message: "required for a substitution" }],
+    });
   }
   if (!spec.goalType && goalType !== undefined) body.goal_type = null;
   if (!spec.cardReason && cardReason !== undefined) body.card_reason = null;
@@ -360,7 +377,8 @@ export async function handleMatchCorrection(ctx: HandlerContext): Promise<Respon
   const raw = fields.raw.replacement;
   let replacement: Record<string, unknown> | null = null;
   if (raw !== undefined && raw !== null) {
-    if (typeof raw !== "object" || Array.isArray(raw)) throw new ApiError("VALIDATION_FAILED", 400, "replacement must be an object with the corrected fields.", { fields: [{ field: "replacement", message: "must be an object" }] });
+    if (typeof raw !== "object" || Array.isArray(raw))
+      throw new ApiError("VALIDATION_FAILED", 400, "replacement must be an object with the corrected fields.", { fields: [{ field: "replacement", message: "must be an object" }] });
     // Only these may be corrected, and they are validated by the same reader as a fresh event, so a
     // "correction" cannot smuggle in a shape the original event would have been refused for.
     const corrected = new Fields(raw, [...EVENT_KEYS]);
@@ -432,7 +450,8 @@ export async function handleMatchLock(ctx: HandlerContext): Promise<Response> {
   const locked = fields.boolean("locked", { default: true });
   const reason = fields.prose("reason", { max: 500 });
   fields.throwIfInvalid();
-  if (locked === true && (reason ?? "").length < 3) throw new ApiError("VALIDATION_FAILED", 400, "Locking a match needs a reason.", { fields: [{ field: "reason", message: "at least 3 characters" }] });
+  if (locked === true && (reason ?? "").length < 3)
+    throw new ApiError("VALIDATION_FAILED", 400, "Locking a match needs a reason.", { fields: [{ field: "reason", message: "at least 3 characters" }] });
 
   const data = await callRoom<MutationAck>(ctx, matchId, "/lock", {
     method: "POST",
@@ -492,7 +511,8 @@ export async function handleMatchAssign(ctx: HandlerContext): Promise<Response> 
     .limit(1)
     .maybeSingle<{ id: string; username: string; role: string }>()
     .catch(() => null);
-  if (!profile) throw new ApiError("VALIDATION_FAILED", 400, "No account with that id — the official must have signed up before being assigned.", { fields: [{ field: "user_id", message: "not found" }] });
+  if (!profile)
+    throw new ApiError("VALIDATION_FAILED", 400, "No account with that id — the official must have signed up before being assigned.", { fields: [{ field: "user_id", message: "not found" }] });
 
   const result = await assignMatch(supabaseAsUser(ctx.env, ctx.principal.token ?? ""), { matchId, userId: userId ?? "", role, note: note ?? null });
   void ctx.ctx.waitUntil(
@@ -633,7 +653,9 @@ export async function handleLiveSocket(ctx: HandlerContext): Promise<Response> {
   const upstream = response.webSocket;
   if (!upstream) {
     const body = await response.text();
-    throw new ApiError(response.status === 401 ? "UNAUTHENTICATED" : "DEPENDENCY_FAILED", response.status === 401 ? 401 : 503, "The live match room refused this socket.", { detail: body.slice(0, 200) });
+    throw new ApiError(response.status === 401 ? "UNAUTHENTICATED" : "DEPENDENCY_FAILED", response.status === 401 ? 401 : 503, "The live match room refused this socket.", {
+      detail: body.slice(0, 200),
+    });
   }
   return new Response(null, { status: 101, webSocket: upstream });
 }
@@ -699,7 +721,23 @@ export async function handleMatchStream(ctx: HandlerContext): Promise<Response> 
             // still sees 45+2 and "Half time" without polling the whole fixture list.
             if (replay.clock && replay.clock.status !== seenStatus) {
               seenStatus = replay.clock.status;
-              emit({ type: "MATCH_STATUS", version: 1, matchId, sequence: replay.sequence, at: new Date().toISOString(), status: replay.clock.status, previous_status: replay.clock.status, label: describe(replay.clock.status), reason: null, clock: replay.clock, score: replay.score, event: null }, replay.sequence);
+              emit(
+                {
+                  type: "MATCH_STATUS",
+                  version: 1,
+                  matchId,
+                  sequence: replay.sequence,
+                  at: new Date().toISOString(),
+                  status: replay.clock.status,
+                  previous_status: replay.clock.status,
+                  label: describe(replay.clock.status),
+                  reason: null,
+                  clock: replay.clock,
+                  score: replay.score,
+                  event: null,
+                },
+                replay.sequence,
+              );
             }
             if (replay.sequence > cursor) cursor = replay.sequence;
             if (Date.now() - lastKeepalive > SSE_KEEPALIVE_MS) {
@@ -709,7 +747,14 @@ export async function handleMatchStream(ctx: HandlerContext): Promise<Response> 
           } catch (err) {
             errors += 1;
             if (errors >= SSE_MAX_ERRORS) {
-              emit({ type: "MATCH_ERROR", version: 1, matchId, sequence: cursor, at: new Date().toISOString(), error: { code: err instanceof ApiError ? err.code : "INTERNAL_ERROR", message: "The live stream could not be refreshed. Reconnect to resume from your last event." } });
+              emit({
+                type: "MATCH_ERROR",
+                version: 1,
+                matchId,
+                sequence: cursor,
+                at: new Date().toISOString(),
+                error: { code: err instanceof ApiError ? err.code : "INTERNAL_ERROR", message: "The live stream could not be refreshed. Reconnect to resume from your last event." },
+              });
               controller.close();
               return;
             }
@@ -717,7 +762,14 @@ export async function handleMatchStream(ctx: HandlerContext): Promise<Response> 
         }
       } catch (err) {
         if (!closed) {
-          emit({ type: "MATCH_ERROR", version: 1, matchId, sequence: cursor, at: new Date().toISOString(), error: { code: err instanceof ApiError ? err.code : "INTERNAL_ERROR", message: "The live stream stopped. Reconnect to resume from your last event." } });
+          emit({
+            type: "MATCH_ERROR",
+            version: 1,
+            matchId,
+            sequence: cursor,
+            at: new Date().toISOString(),
+            error: { code: err instanceof ApiError ? err.code : "INTERNAL_ERROR", message: "The live stream stopped. Reconnect to resume from your last event." },
+          });
         }
       }
       try {
