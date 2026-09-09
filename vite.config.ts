@@ -1,24 +1,52 @@
-import path from "path";
-import { fileURLToPath } from "url";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
-import { viteSingleFile } from "vite-plugin-singlefile";
+
+import { KICKLIVE_BUILD_DEFAULTS, kickliveVersion } from "./tools/vite-shared.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// https://vite.dev/config/
-export default defineConfig({
-  plugins: [react(), tailwindcss(), viteSingleFile()],
-  resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "src"),
+/**
+ * Web / PWA build.
+ *
+ * Output is `dist/web`: a normal multi-file bundle (hashed assets under /assets/, real
+ * `Content-Type` per extension). `vite-plugin-singlefile` is deliberately NOT used here — an
+ * inlined single file hides exactly the class of packaging bugs this pipeline is meant to catch
+ * (asset 404s masquerading as HTML, module scripts served as text/html, absolute-path assumptions).
+ */
+export default defineConfig(() => {
+  const version = kickliveVersion();
+  return {
+    root: __dirname,
+    plugins: [react(), tailwindcss()],
+    resolve: {
+      alias: {
+        "@": path.resolve(__dirname, "src"),
+        "@shared": path.resolve(__dirname, "shared"),
+      },
     },
-  },
-  server: {
-    host: "0.0.0.0",
-    port: 5000,
-    allowedHosts: true,
-  },
+    define: {
+      __APP_VERSION__: JSON.stringify(version),
+      __KICKLIVE_SHELL__: JSON.stringify("web"),
+    },
+    base: "/",
+    build: {
+      ...KICKLIVE_BUILD_DEFAULTS,
+      outDir: path.resolve(__dirname, "dist/web"),
+      sourcemap: process.env["KICKLIVE_SOURCEMAP"] === "1",
+    },
+    server: {
+      host: "0.0.0.0",
+      port: 5000,
+      allowedHosts: true as const,
+    },
+    preview: {
+      host: "0.0.0.0",
+      port: 5000,
+      allowedHosts: true as const,
+    },
+  };
 });

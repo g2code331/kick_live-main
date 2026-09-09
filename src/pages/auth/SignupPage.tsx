@@ -1,7 +1,8 @@
+import { assetUrl } from "../../lib/app-shell.ts";
 import { useState } from 'react';
 import { Eye, EyeOff, Loader2, UserPlus, Shield, Users, Newspaper, Heart, Lock, Check, Smartphone, User as UserIcon } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
-import { UserRole } from '../../lib/supabase';
+import type { UserRole } from '../../lib/supabase';
 
 interface SignupPageProps {
   onNavigate: (page: string) => void;
@@ -106,7 +107,7 @@ export default function SignupPage({ onNavigate }: SignupPageProps) {
         {/* Logo */}
         <div className="text-center mb-8">
           <div className="w-16 h-16 mx-auto mb-4">
-            <img src="/kicklive-icon.png" alt="KickLive" className="w-full h-full object-contain" />
+            <img src={assetUrl("kicklive-icon.png")} alt="KickLive" className="w-full h-full object-contain" />
           </div>
           <h1 className="text-3xl font-black italic uppercase tracking-tighter">
             Join KickLive

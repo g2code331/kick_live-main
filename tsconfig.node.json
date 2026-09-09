@@ -1,9 +1,9 @@
 {
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "composite": true,
-    "module": "ESNext",
-    "moduleResolution": "Node",
-    "allowSyntheticDefaultImports": true
+    "lib": ["ESNext"],
+    "types": ["node"],
+    "noUncheckedIndexedAccess": true
   },
-  "include": ["vite.config.ts"]
+  "include": ["shared", "server", "desktop/src", "scripts/lib", "vite.config.ts", "vite.renderer.config.ts", "tools"]
 }

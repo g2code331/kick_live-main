@@ -1,0 +1,13 @@
+[Desktop Entry]
+Name=KickLive
+Exec=/opt/KickLive/kicklive %U
+Terminal=false
+Type=Application
+Icon=kicklive
+StartupWMClass=kicklive
+StartupNotify=true
+X-KickLive-Version=1.0.0
+X-KickLive-Feed=https://github.com/g2code331/kick_live-main/releases
+Comment=KickLive - premium football live scores, standings, predictions and tournament management.
+MimeType=x-scheme-handler/kicklive;
+Categories=Network;Sports;Game;

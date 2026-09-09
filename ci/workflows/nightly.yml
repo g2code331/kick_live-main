@@ -1,0 +1,76 @@
+# Nightly rehearsal of everything the sandbox could not prove: a clean install, the real
+# electron-builder output, the xvfb smoke run, and the update client against the live feed.
+name: Nightly
+
+on:
+  schedule:
+    - cron: "30 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    name: All gates, clean checkout
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.18.0"
+          cache: npm
+      - name: npm ci (proves the lockfile is complete from a clean tree)
+        run: npm ci --no-audit --no-fund
+      - name: Tooling for .deb + xvfb
+        run: bash scripts/ci/setup-linux-tools.sh
+      - name: Run every gate (1-6)
+        run: node scripts/gates.mjs | tee /tmp/gates.txt
+      - name: Real packaging + smoke
+        run: |
+          npm run package:linux -- --require-full
+          bash scripts/ci/desktop-smoke.sh
+      - name: Install the .deb in the runner and launch it once
+        run: |
+          set -euo pipefail
+          sudo dpkg -i release/kicklive_*_amd64.deb || sudo apt-get install -f -y
+          test -x /usr/bin/kicklive || { echo "::error::/usr/bin/kicklive missing after dpkg -i"; exit 1; }
+          test -f /usr/share/applications/kicklive.desktop || { echo "::error::no .desktop entry"; exit 1; }
+          grep -q '^StartupWMClass=kicklive$' /usr/share/applications/kicklive.desktop
+          grep -q '^X-KickLive-Version=' /usr/share/applications/kicklive.desktop
+          test -f /usr/share/icons/hicolor/512x512/apps/kicklive.png
+          xvfb-run -a kicklive --no-sandbox --disable-gpu --version | tee /tmp/version.txt
+          grep -q "$(cat VERSION)" /tmp/version.txt || { echo "::error::installed binary reports a different version than VERSION"; exit 1; }
+          sudo dpkg -r kicklive
+          test ! -e /usr/bin/kicklive || { echo "::error::postrm left /usr/bin/kicklive behind"; exit 1; }
+      - name: Update client against the live stable feed
+        run: |
+          set -euo pipefail
+          url="https://github.com/$GITHUB_REPOSITORY/releases/latest/download/kicklive-update-stable.json"
+          if ! curl -fsSL "$url" -o /tmp/live-manifest.json; then
+            echo "::warning::no stable feed published yet (expected until the first release runs)"
+            exit 0
+          fi
+          node scripts/update-manifest.mjs validate /tmp/live-manifest.json
+          node scripts/check-update-live.mjs --manifest /tmp/live-manifest.json --current "$(cat VERSION)"
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo '```'
+            tail -45 /tmp/gates.txt 2>/dev/null || echo "(gates produced no output)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nightly-smoke-logs
+          path: release/smoke-*.log
+          if-no-files-found: ignore

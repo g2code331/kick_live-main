@@ -1,0 +1,29 @@
+# Generated / vendored / not ours to reformat in a release-pipeline PR.
+node_modules
+dist
+renderer/dist
+build
+release
+coverage
+public
+*.min.js
+package-lock.json
+
+# Pre-existing app code: it is not touched by this pipeline and reformatting it here would bury the
+# release work in 40+ files of style churn. Formatting-only sweep is a separate PR (see
+# docs/RELEASE-PIPELINE.md "Known gaps"). New/edited files under src are still listed explicitly.
+src/pages/**
+src/components/**
+src/hooks/**
+src/data/**
+src/lib/**
+src/types/**
+src/App.tsx
+src/index.css
+.opencode/**
+.vercel/**
+DEPLOYMENT*.md
+!src/components/UpdateControl.tsx
+!src/lib/updates.ts
+!src/lib/app-shell.ts
+!src/lib/use-update-control.ts

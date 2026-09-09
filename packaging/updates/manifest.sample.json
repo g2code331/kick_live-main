@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "product": "kicklive",
+  "channel": "stable",
+  "version": "1.0.0",
+  "releasedAt": "2026-09-09T00:00:00.000Z",
+  "notes": "KickLive 1.0.0: template manifest. Replace version/notes, then regenerate sha256+size+url with `npm run update-manifest -- build` against the real artifacts \u2014 never hand-edit those three fields.",
+  "notesUrl": "https://github.com/g2code331/kick_live-main/releases/tag/v1.0.0",
+  "platforms": {
+    "linux_x64": {
+      "kind": "deb",
+      "fileName": "kicklive_1.0.0_amd64.deb",
+      "url": "https://github.com/g2code331/kick_live-main/releases/download/v1.0.0/kicklive_1.0.0_amd64.deb",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "size": 1,
+      "minGlibc": "2.28"
+    },
+    "linux_arm64": {
+      "kind": "deb",
+      "fileName": "kicklive_1.0.0_arm64.deb",
+      "url": "https://github.com/g2code331/kick_live-main/releases/download/v1.0.0/kicklive_1.0.0_arm64.deb",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "size": 1,
+      "minGlibc": "2.28"
+    }
+  },
+  "web": {
+    "version": "1.0.0",
+    "swUrl": "/sw.js",
+    "precache": ["/", "/index.html", "/site.webmanifest"]
+  }
+}

@@ -1,7 +1,8 @@
+import { assetUrl } from "../../lib/app-shell.ts";
 import { useState } from 'react';
 import { Eye, EyeOff, LogIn, ArrowLeft } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
-import { UserRole } from '../../lib/supabase';
+import type { UserRole } from '../../lib/supabase';
 import AppBackground from '../../components/AppBackground';
 
 interface LoginPageProps {
@@ -85,7 +86,7 @@ export default function LoginPage({ onNavigate, showBackButton = false }: LoginP
         {/* Logo */}
         <div className="text-center mb-8">
           <div className="w-24 h-24 mx-auto mb-6 rounded-3xl overflow-hidden shadow-2xl shadow-brand-green/20">
-            <img src="/kicklive-icon.png" alt="KickLive" className="w-full h-full object-contain" />
+            <img src={assetUrl("kicklive-icon.png")} alt="KickLive" className="w-full h-full object-contain" />
           </div>
           <h1 className="text-3xl font-black italic uppercase tracking-tighter text-white">
             Welcome Back

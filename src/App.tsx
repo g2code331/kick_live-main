@@ -22,6 +22,7 @@ import MatchDetails from "./pages/MatchDetails";
 import ProfilePage from "./pages/ProfilePage";
 import NewsPage from "./pages/NewsPage";
 import { dataLoader } from "./lib/DataLoader";
+import { assetUrl } from "./lib/app-shell.ts";
 
 function AppContent() {
   const { user, profile, loading } = useAuth();
@@ -49,7 +50,7 @@ function AppContent() {
         <div className="relative min-h-screen flex items-center justify-center">
           <div className="text-center z-10">
             <div className="w-32 h-32 mx-auto mb-6 animate-spin">
-              <img src="/kicklive-icon.png" alt="KickLive" className="w-full h-full object-contain" />
+              <img src={assetUrl("kicklive-icon.png")} alt="KickLive" className="w-full h-full object-contain" />
             </div>
             <p className="text-[#39FF14] font-black uppercase tracking-[0.3em] animate-pulse">Loading...</p>
             <div className="flex gap-2 mt-4 justify-center">

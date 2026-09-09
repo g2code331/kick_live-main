@@ -1,0 +1,109 @@
+# electron-builder configuration for the KickLive Linux desktop.
+#
+# Layout contract asserted by scripts/verify-packaging.mjs (and by CI after a real build):
+#   release/linux-unpacked/
+#     kicklive                       executableName == BRAND.id
+#     chrome-sandbox                 chmod'd by packaging/hooks/after-install.sh
+#     resources/app.asar             contains package.json, build/electron/*, renderer/dist/index.html
+#     resources/app.asar.unpacked/   renderer/dist/assets/** (served + hashed by the embedded server)
+#     resources/kicklive? no extra resources
+#   release/kicklive_<version>_amd64.deb
+#   release/KickLive-<version>-x86_64.AppImage
+#
+# NOTE: `desktopName` lives in package.json (not here) because electron-builder reads it from the
+# package metadata to derive StartupWMClass, and Electron reads it for app_id / WM_CLASS.
+
+appId: com.kicklive.desktop
+productName: KickLive
+copyright: Copyright 2026 KickLive
+
+directories:
+  output: release
+  buildResources: packaging/buildResources
+
+# Only these trees ship. node_modules is intentionally absent: the main/preload bundles are
+# self-contained (esbuild), so an app.asar with zero dependencies cannot drift from the lockfile.
+files:
+  - package.json
+  - build/electron/**
+  - renderer/dist/**
+  - "!**/*.map"
+
+asar: true
+# The renderer's hashed assets are read by the embedded loopback HTTP server (stat + streaming
+# reads + ETag from mtime) and are the bulk of the payload; keeping them as real files on disk
+# avoids piping every chunk through the asar shim, and it makes the deb's payload diffable.
+asarUnpack:
+  - renderer/dist/assets/**
+
+compression: normal
+npmRebuild: false
+removePackageScripts: true
+detectUpdateChannel: false
+
+# Releases are published by .github/workflows/release.yml with `gh release upload`; the builder
+# itself never publishes, so a failed build can't half-publish a manifest.
+publish: null
+
+protocols:
+  - name: KickLive Protocol
+    schemes:
+      - kicklive
+
+linux:
+  executableName: kicklive
+  # Single string; electron-builder appends the trailing ';' itself.
+  category: "Network;Sports;Game;"
+  description: KickLive - premium football live scores, standings, predictions and tournament management.
+  maintainer: KickLive <packaging@kicklive.example>
+  vendor: KickLive
+  icon: packaging/icons
+  # v27 default; set explicitly so the installed .desktop filename == desktopName == StartupWMClass.
+  syncDesktopName: true
+  target:
+    - deb
+    - AppImage
+  desktop:
+    # Merged into the generated [Desktop Entry] block. `packaging/linux/kicklive.desktop` is the
+    # expectation that scripts/verify-packaging.mjs diffs against the file inside the .deb, so any
+    # key added here must be added there too (branding `check` mode fails otherwise).
+    entry:
+      StartupNotify: "true"
+      X-KickLive-Version: "${version}"
+      X-KickLive-Feed: "https://github.com/g2code331/kick_live-main/releases"
+
+deb:
+  packageName: kicklive
+  section: web
+  priority: optional
+  compression: xz
+  # electron-builder's built-in default dependency list still uses the pre-`t64` package names,
+  # which do not exist on Ubuntu 24.04 (libgtk-3-0 -> libgtk-3-0t64, libasound2 -> libasound2t64,
+  # ...). Alternatives keep one deb installable on Debian 12 and Ubuntu 22.04/24.04.
+  depends:
+    - "libgtk-3-0t64 | libgtk-3-0"
+    - "libnss3"
+    - "libasound2t64 | libasound2"
+    - "libgbm1"
+    - "libdrm2"
+    - "libxkbcommon0"
+    - "libcups2t64 | libcups2"
+    - "libnotify4"
+    - "libxss1"
+    - "libxtst6"
+    - "libatspi2.0-0t64 | libatspi2.0-0"
+    - "libuuid1"
+    - "libsecret-1-0"
+    - "xdg-utils"
+  # Drop the default `Recommends: libappindicator3-1` (removed from Debian/Ubuntu).
+  recommends: []
+  afterInstall: packaging/hooks/after-install.sh
+  afterRemove: packaging/hooks/after-remove.sh
+  # No first-class afterUpgrade option in this version, so use fpm's own flag.
+  fpm:
+    - "--after-upgrade=packaging/hooks/after-upgrade.sh"
+
+appImage:
+  artifactName: KickLive-${version}-${arch}.AppImage
+
+artifactName: "${name}_${version}_${arch}.${ext}"

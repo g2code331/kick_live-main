@@ -1,3 +1,4 @@
+import { assetUrl } from "../../lib/app-shell.ts";
 import { useState, useEffect } from 'react';
 import { Mail, ArrowLeft, Loader2, CheckCircle } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
@@ -47,7 +48,7 @@ export default function ForgotPasswordPage({ onNavigate }: ForgotPasswordPagePro
         {/* Logo */}
         <div className="text-center mb-8">
           <div className="w-20 h-20 mx-auto mb-6">
-            <img src="/kicklive-icon.png" alt="KickLive" className="w-full h-full object-contain" />
+            <img src={assetUrl("kicklive-icon.png")} alt="KickLive" className="w-full h-full object-contain" />
           </div>
           <h1 className="text-3xl font-black italic uppercase tracking-tighter">
             Forgot Password?

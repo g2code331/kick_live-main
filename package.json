@@ -12,7 +12,7 @@
   "scripts": {
     "dev": "vite",
     "build": "npm run build:web && npm run build:renderer && npm run build:desktop",
-    "build:web": "node scripts/version.mjs check --soft && vite build --config vite.config.ts",
+    "build:web": "node scripts/build-web.mjs",
     "build:renderer": "vite build --config vite.renderer.config.ts",
     "build:desktop": "node scripts/build-desktop.mjs",
     "preview:web": "vite preview",
@@ -21,9 +21,9 @@
     "dev:desktop": "node scripts/dev-desktop.mjs",
     "package:linux": "node scripts/package-linux.mjs",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json",
-    "test": "node --test tests/unit tests/integration",
-    "test:unit": "node --test tests/unit",
-    "test:integration": "node --test tests/integration",
+    "test": "node scripts/run-tests.mjs all",
+    "test:unit": "node scripts/run-tests.mjs unit",
+    "test:integration": "node scripts/run-tests.mjs integration",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "branding:check": "node scripts/branding.mjs check",
@@ -35,7 +35,12 @@
     "verify:packaging": "node scripts/verify-packaging.mjs",
     "update-manifest": "node scripts/update-manifest.mjs",
     "smoke:desktop": "node scripts/smoke-desktop.mjs",
-    "gates": "node scripts/gates.mjs"
+    "gates": "node scripts/gates.mjs",
+    "build:pwa": "node scripts/build-pwa.mjs",
+    "verify:full": "node scripts/verify-packaging.mjs --require-full",
+    "ci:install": "node scripts/install-ci.mjs",
+    "ci:check": "node scripts/install-ci.mjs --check",
+    "package:linux:dir": "node scripts/package-linux.mjs --dir"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.109.0",
@@ -63,6 +68,21 @@
     "prettier": "3.9.6",
     "tailwindcss": "4.1.17",
     "typescript": "5.9.3",
-    "vite": "7.3.2"
+    "vite": "7.3.2",
+    "yaml": "^2.9.0"
+  },
+  "homepage": "https://github.com/g2code331/kick_live-main",
+  "license": "UNLICENSED",
+  "author": {
+    "name": "KickLive",
+    "email": "packaging@kicklive.example"
+  },
+  "desktopName": "kicklive.desktop",
+  "bugs": {
+    "url": "https://github.com/g2code331/kick_live-main/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/g2code331/kick_live-main.git"
   }
 }
