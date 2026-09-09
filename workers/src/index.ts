@@ -75,8 +75,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext, request
   // 3. Authentication. No `Authorization` header → anonymous principal, no network call.
   const principal: Principal = await authenticate(request, env);
 
-  // 4. Authorization.
-  authorizeForRoute(principal, route.capability);
+  // 4. Authorization. `orAssigned` routes keep an anonymous caller out and let an authenticated one
+  // through to the handler, which must prove the per-match assignment before it touches anything.
+  authorizeForRoute(principal, route.capability, { allowAssignment: route.orAssigned === true });
 
   // 5. Rate limit.
   const rate = await limitRequest(request, env, route, principal);

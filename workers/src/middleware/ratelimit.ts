@@ -59,6 +59,13 @@ export const RATE_LIMITED_BY_DEFAULT: readonly string[] = [
   "POST /auth/access-requests",
   "POST /matches/:matchId/events",
   "PUT /matches/:matchId/state",
+  // Phase 3's other ways to change what thousands of people are watching. Listed here so the census test
+  // fails if one of them is ever "refactored" into an unthrottled route.
+  "POST /matches/:matchId/corrections",
+  "POST /matches/:matchId/finalize",
+  "POST /matches/:matchId/lock",
+  "POST /matches/:matchId/assignments",
+  "POST /matches/:matchId/assignments/stand-down",
   "POST /media",
   "POST /admin/notifications/broadcast",
   "POST /admin/users/:userId/role",

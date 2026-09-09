@@ -16,6 +16,7 @@ import type { Principal } from "../middleware/auth.ts";
 import { handleHealth } from "./health.ts";
 import { handleMe } from "./me.ts";
 import { handleMyTeams } from "./teams.ts";
+import { handleLiveSocket, handleLiveTicket, handleMatchAccess, handleMatchAssignmentList, handleMatchAudit, handleMatchCorrection, handleMatchDetail, handleMatchDiagnostics, handleMatchEvents, handleMatchFinalize, handleMatchLock, handleMatchSnapshot, handleMatchStandDown, handleMatchStream, handleMatchTransition, handleRecordMatchEvent, handleMatchAssign } from "./live.ts";
 
 export interface HandlerContext {
   readonly request: Request;
@@ -30,15 +31,39 @@ export interface HandlerContext {
 
 export type RouteHandler = (ctx: HandlerContext) => Promise<Response>;
 
-/** Keyed by the same `pattern` strings used in `router.ts`. */
+/**
+ * Keyed by `"<METHOD> <pattern>"`, i.e. by the same method+pattern identity `router.ts` declares and
+ * `matchRoute` matches on. The method is part of the key because a resource keeps its read and write
+ * paths on one pattern (`GET /matches/:id/events` is the fan timeline, `POST` to the same path is a
+ * controller appending to it) — one resource, two handlers, no second URL to remember.
+ */
 export const HANDLERS: Record<string, RouteHandler> = {
-  "/health": handleHealth,
-  "/me": handleMe,
-  "/teams/mine": handleMyTeams,
+  "GET /health": handleHealth,
+  "GET /me": handleMe,
+  "GET /teams/mine": handleMyTeams,
+
+  // ── live match engine (Phase 3) ───────────────────────────────────────────
+  "GET /matches/:matchId": handleMatchDetail,
+  "GET /matches/:matchId/snapshot": handleMatchSnapshot,
+  "GET /matches/:matchId/events": handleMatchEvents,
+  "POST /matches/:matchId/events": handleRecordMatchEvent,
+  "GET /matches/:matchId/access": handleMatchAccess,
+  "GET /matches/:matchId/stream": handleMatchStream,
+  "POST /matches/:matchId/live-ticket": handleLiveTicket,
+  "GET /live/matches/:matchId": handleLiveSocket,
+  "GET /matches/:matchId/diagnostics": handleMatchDiagnostics,
+  "GET /matches/:matchId/audit": handleMatchAudit,
+  "GET /matches/:matchId/assignments": handleMatchAssignmentList,
+  "PUT /matches/:matchId/state": handleMatchTransition,
+  "POST /matches/:matchId/assignments": handleMatchAssign,
+  "POST /matches/:matchId/assignments/stand-down": handleMatchStandDown,
+  "POST /matches/:matchId/corrections": handleMatchCorrection,
+  "POST /matches/:matchId/finalize": handleMatchFinalize,
+  "POST /matches/:matchId/lock": handleMatchLock,
 };
 
 export async function dispatchRoute(ctx: HandlerContext, match: Matched): Promise<Response> {
-  const handler = HANDLERS[match.route.pattern];
+  const handler = HANDLERS[`${match.route.method} ${match.route.pattern}`];
   if (!handler || !match.route.implemented) {
     // Thrown rather than returned so the entry point's catch applies CORS + security headers to it too.
     throw notImplemented(match.route.summary, match.route.phase, "The route is declared in router.ts; its handler is not written yet.");

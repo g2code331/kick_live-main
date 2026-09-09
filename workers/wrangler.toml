@@ -45,6 +45,18 @@ ALLOWED_ORIGINS = "http://localhost:5000,http://127.0.0.1:5000,http://localhost:
 # RATE_LIMIT_KV is intentionally unbound in development: the limiter falls back to a per-isolate
 # counter and says so in `x-ratelimit-store: memory`.
 
+# Phase 3: the live match room. One instance per match id (`idFromName(String(match_id))`), holding the
+# sockets and the write queue for that match. `class_name` must match the exported class in
+# `src/do/MatchRoom.ts`, and the `migrations` block below is what creates it — an existing environment
+# that adds a class needs a NEW tag; reusing a tag makes wrangler refuse, which is the safe direction.
+[[durable_objects.bindings]]
+name = "LIVE_MATCH_ROOM"
+class_name = "MatchRoom"
+
+[[migrations]]
+tag = "v1-live-rooms"
+new_sqlite_classes = ["MatchRoom"]
+
 # ─────────────────────────────────────────────────────────────────────────
 # STAGING — the rehearsal environment. Same schema, different project, different keys.
 # ─────────────────────────────────────────────────────────────────────────
@@ -67,6 +79,15 @@ ALLOWED_ORIGINS = "https://staging.kicklive.football"
 # [[env.staging.kv_namespaces]]
 # binding = "RATE_LIMIT_KV"
 # id = "create with: npx wrangler kv namespace create RATE_LIMIT_KV --env staging"
+
+# Named environments do not inherit top-level bindings, so the room is declared per environment.
+[[env.staging.durable_objects.bindings]]
+name = "LIVE_MATCH_ROOM"
+class_name = "MatchRoom"
+
+[[env.staging.migrations]]
+tag = "v1-live-rooms"
+new_sqlite_classes = ["MatchRoom"]
 
 # ─────────────────────────────────────────────────────────────────────────
 # PRODUCTION
@@ -92,6 +113,17 @@ ALLOWED_ORIGINS = "https://kicklive.football,https://www.kicklive.football"
 # binding = "RATE_LIMIT_KV"
 # id = "create with: npx wrangler kv namespace create RATE_LIMIT_KV --env production"
 
+[[env.production.durable_objects.bindings]]
+name = "LIVE_MATCH_ROOM"
+class_name = "MatchRoom"
+
+# Production keeps its own tag history: rooms already created in staging are not carried over, and that
+# is correct — a match's live state is rebuildable from Postgres, which is why losing a Durable Object
+# (or a whole environment's worth of them) is an outage of convenience, not a data-loss event.
+[[env.production.migrations]]
+tag = "v1-live-rooms"
+new_sqlite_classes = ["MatchRoom"]
+
 [env.production.observability]
 [env.production.observability.logs]
 enabled = true
@@ -105,7 +137,7 @@ invocation_logs = true
 # [[r2_buckets]]      # Phase 4 — media plane (replaces inline URLs / unsplash hotlinks)
 # [[queues.producers]]# Phase 4 — standings recompute, notification fan-out
 # [[queues.consumers]]# max_batch_size = 10, max_retries = 3, dead-letter queue
-# [durable_objects]   # Phase 3 — one MatchRoom per match_id
+# (Phase 3 shipped the block above: [durable_objects.bindings] + [migrations].)
 #
 # [[d1_databases]]    # INTENTIONALLY ABSENT — do not "helpfully" add one.
 # D1 would be a second copy of match data with a sync job in the middle. Supabase Postgres is the

@@ -24,14 +24,29 @@ export const DENIED = "This account is not permitted to perform that action.";
  * runs before `dispatchRoute`, so a declared-but-unbuilt admin route still refuses a fan instead of
  * advertising which routes exist.
  */
-export function authorizeForRoute(principal: Principal, capability: Capability | null): void {
+export interface AuthorizeOptions {
+  /**
+   * `router.ts` sets this on routes where "assigned to this row" is an alternative to the role. It only
+   * downgrades a 403 into "authenticated, now go and prove it in the handler"; an anonymous caller is
+   * still 401, and `public.read` is unaffected. Kept as an explicit opt-in on the route rather than a
+   * permissive matrix so `capabilitiesFor(role)` never tells a fan they can record goals.
+   */
+  readonly allowAssignment?: boolean;
+}
+
+export function authorizeForRoute(principal: Principal, capability: Capability | null, opts: AuthorizeOptions = {}): void {
   if (capability === null) return;
   // Anything that is not the one capability an anonymous caller holds goes through the reusable guard
   // first, so the 401 comes from `requireAuth` (the same call a handler may repeat defensively) and the
   // 403 comes from the matrix. Order matters: an unauthenticated probe should not learn that a route
   // exists and is merely closed to it.
   if (capability !== "public.read") requireAuth(principal);
-  decide(principal, capability);
+  try {
+    decide(principal, capability);
+  } catch (err) {
+    if (opts.allowAssignment === true && err instanceof ApiError && err.code === "FORBIDDEN") return;
+    throw err;
+  }
 }
 
 /** A caller whose identity is verified *and* whose role the database confirmed a moment ago. */

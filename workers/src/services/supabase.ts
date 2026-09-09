@@ -71,6 +71,11 @@ class Builder {
     return this;
   }
 
+  gt(column: string, value: string | number): this {
+    this.params.append(column, `gt.${String(value)}`);
+    return this;
+  }
+
   gte(column: string, value: string | number): this {
     this.params.append(column, `gte.${String(value)}`);
     return this;

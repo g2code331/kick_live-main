@@ -52,12 +52,19 @@ export interface Env {
 
   /**
    * The only optional binding Phase 2 declares, because `middleware/ratelimit.ts` reads it and
-   * degrades to an in-isolate counter when it is absent. R2 (media), Durable Objects (match rooms) and
-   * Queues (background jobs) are deliberately NOT declared here: scaffolding bindings with no code
-   * behind them produces a config that looks real and a deploy that fails. They arrive in the phase
-   * that implements their first route.
+   * degrades to an in-isolate counter when it is absent. R2 (media) and Queues (background jobs) remain
+   * deliberately undeclared: scaffolding a binding with no code behind it produces a config that looks
+   * real and a deploy that fails.
    */
   readonly RATE_LIMIT_KV?: KVNamespace | undefined;
+
+  /**
+   * Phase 3: the per-match live room (`do/MatchRoom.ts`). Declared optional because a mis-deployed
+   * environment must produce "the live room is not bound on this Worker" at the first request, not a
+   * `undefined.get` TypeError; `routes/live.ts` checks it before use. Set in `workers/wrangler.toml`
+   * per environment, which is also where the class name is registered.
+   */
+  readonly LIVE_MATCH_ROOM?: DurableObjectNamespace | undefined;
 }
 
 export class ConfigError extends Error {

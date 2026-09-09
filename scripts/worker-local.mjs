@@ -17,6 +17,14 @@
  *
  * Config comes from `workers/.dev.vars` when present (git-ignored), otherwise the safe defaults below —
  * enough for `GET /api/health`, the 401/403 paths and the CORS preflight with no credentials at all.
+ *
+ * Durable Objects are shimmed rather than stubbed (see `liveRoomNamespace()`): the *real* `MatchRoom`
+ * class from `workers/src/do/MatchRoom.ts` runs in-process with an in-memory `state.storage`. That is
+ * worth the code because it means the live match engine's ordering, sequence, idempotency, conflict and
+ * recovery logic is genuinely exercised locally, and `GET /api/matches/:id/stream` (SSE) is the same
+ * frames over the same room. What cannot be exercised here is the WebSocket transport itself: Node's
+ * `http` server in this script does not implement the upgrade handshake, so a socket connection is
+ * refused with that reason stated. Real sockets need `npx wrangler dev`.
  */
 
 import fs from "node:fs";
@@ -46,11 +54,77 @@ const env = {
   APP_ENV: "development",
   // A syntactically valid local endpoint, not a project. Real reads need `workers/.dev.vars`.
   SUPABASE_URL: "http://localhost:54321",
+  SUPABASE_ANON_KEY: "local-anon-key-not-a-real-credential",
   ALLOWED_ORIGINS: "http://localhost:5000,http://127.0.0.1:5000",
   ...devVars(),
 };
 
+/**
+ * The live match room, in-process. `DurableObjectState` is reduced to what `MatchRoom` actually uses —
+ * `storage.get/put`, `getAlarm/setAlarm/deleteAlarm`, `getWebSockets`, `getTags`, `acceptWebSocket` —
+ * with the same semantics that matter: storage returns a *copy* (a structured clone, as on the platform,
+ * so a room cannot alias its own state by accident), and an alarm fires on a timer.
+ */
+async function liveRoomNamespace() {
+  const { MatchRoom } = await import(path.join(REPO, "workers/src/do/MatchRoom.ts"));
+  const rooms = new Map();
+  const unsupported = (what) => {
+    throw new Error(`worker-local: ${what} is not available in the Node adapter. Use GET /api/matches/:id/stream (SSE), which serves the same frames from the same room; real sockets need \`npx wrangler dev\`.`);
+  };
+  return {
+    idFromName: (name) => String(name),
+    get(id) {
+      let room = rooms.get(id);
+      if (!room) {
+        const data = new Map();
+        let timer = null;
+        let alarmAt = null;
+        const state = {
+          id: { toString: () => String(id) },
+          storage: {
+            get: async (key) => (data.has(key) ? structuredClone(data.get(key)) : undefined),
+            put: async (key, value) => {
+              data.set(key, structuredClone(value));
+            },
+            delete: async (key) => {
+              data.delete(key);
+            },
+            list: async () => ({ keys: [...data.keys()], list_complete: true, cacheStatus: null }),
+            getAlarm: async () => alarmAt,
+            setAlarm: async (time) => {
+              alarmAt = time;
+              if (timer) clearTimeout(timer);
+              timer = setTimeout(() => room.alarm?.(), Math.max(0, time - Date.now()));
+              if (typeof timer.unref === "function") timer.unref();
+            },
+            deleteAlarm: async () => {
+              alarmAt = null;
+              if (timer) clearTimeout(timer);
+              timer = null;
+            },
+          },
+          // No socket can be held here (no upgrade handshake), so broadcasts fan out to nothing and the
+          // room still behaves correctly for the REST/SSE paths — which is exactly the property under test.
+          getWebSockets: () => [],
+          getTags: () => [],
+          acceptWebSocket: () => unsupported("WebSocket hibernation"),
+          setWebSocketAutoResponse: () => undefined,
+          blockConcurrencyWhile: (fn) => fn(),
+          waitUntil: (p) => {
+            p.catch((err) => console.error("durable object waitUntil rejected:", err));
+          },
+        };
+        room = new MatchRoom(state, env);
+        rooms.set(id, room);
+      }
+      return { fetch: (request) => room.fetch(request) };
+    },
+  };
+}
+
 const worker = (await import(path.join(REPO, "workers/src/index.ts"))).default;
+
+env.LIVE_MATCH_ROOM = await liveRoomNamespace();
 
 const executionContext = {
   waitUntil: (p) => {
@@ -76,12 +150,18 @@ const server = http.createServer((req, res) => {
     // The connecting IP, from the socket rather than a header a client can forge.
     headers.set("cf-connecting-ip", req.socket.remoteAddress ?? "unknown");
 
+    // A client hanging up must reach the handler, or an SSE stream keeps polling a room nobody reads.
+    const abort = new AbortController();
+    req.on("aborted", () => abort.abort());
+    res.on("close", () => abort.abort());
+
     let response;
     try {
       const request = new Request(url, {
         method: req.method ?? "GET",
         headers,
         body: BODYLESS.has(req.method ?? "GET") ? undefined : Buffer.concat(chunks),
+        signal: abort.signal,
       });
       response = await worker.fetch(request, env, executionContext);
     } catch (err) {
@@ -92,12 +172,36 @@ const server = http.createServer((req, res) => {
       });
     }
 
-    const body = Buffer.from(await response.arrayBuffer());
     const out = {};
     for (const [key, value] of response.headers) {
       if (out[key] === undefined) out[key] = value;
       else out[key] = `${out[key]}, ${value}`;
     }
+
+    // Streams are piped, not buffered: `text/event-stream` never "finishes", and buffering it here would
+    // look like a hang rather than like a live feed.
+    if (String(out["content-type"] ?? "").includes("text/event-stream")) {
+      res.writeHead(response.status, out);
+      if (!response.body) {
+        res.end();
+        return;
+      }
+      const reader = response.body.getReader();
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done || res.writableEnded) break;
+          res.write(Buffer.from(value));
+        }
+      } catch {
+        /* client hung up mid-frame */
+      } finally {
+        res.end();
+      }
+      return;
+    }
+
+    const body = Buffer.from(await response.arrayBuffer());
     res.writeHead(response.status, out);
     res.end(body.length > 0 ? body : null);
   });
@@ -112,6 +216,8 @@ server.listen(port, "0.0.0.0", () => {
     console.log(`  unconfigured: ${missing.join(", ")} — signed-in routes will answer 500/401 until workers/.dev.vars exists`);
     console.log(`  (GET /api/health, the 401/403 paths and the CORS preflight work without them)`);
   }
+  console.log("  live match room: in-process MatchRoom (Durable Object shim); reads/writes need a real SUPABASE_URL in workers/.dev.vars");
+  console.log("  live fan stream: GET /api/matches/:matchId/stream (SSE); WebSocket upgrade is refused by this adapter");
 });
 
 for (const signal of ["SIGINT", "SIGTERM"]) {

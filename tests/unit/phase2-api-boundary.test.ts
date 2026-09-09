@@ -23,6 +23,7 @@ import { ApiError } from "../../workers/src/lib/response.ts";
 import { Fields, GOAL_TYPES, MATCH_EVENT_TYPES, MATCH_STATUSES, readJsonBody, readQuery, REQUESTABLE_ROLES } from "../../workers/src/lib/validation.ts";
 import { createRateLimiter, limitKeyFor, resetRateLimitMemory, RATE_LIMITED_BY_DEFAULT, BUDGETS } from "../../workers/src/middleware/ratelimit.ts";
 import { ROUTES } from "../../workers/src/router.ts";
+import { HANDLERS } from "../../workers/src/routes/index.ts";
 import { assertSupabaseUrl } from "../../workers/src/services/supabase.ts";
 import { createApiClient, fieldErrors, API_ROOT } from "../../src/lib/api/client.ts";
 import { resolveApiBaseUrl, ConfigError } from "../../src/lib/env.ts";
@@ -630,7 +631,16 @@ describe("phase2 · environment separation", () => {
     const keys = ROUTES.map((r) => `${r.method} ${r.pattern}`);
     assert.equal(new Set(keys).size, keys.length, "one handler per method+pattern; no parallel implementations");
     for (const listed of RATE_LIMITED_BY_DEFAULT) assert.ok(keys.includes(listed), `${listed} is documented as rate-limited but is not a route`);
-    assert.equal(ROUTES.filter((r) => r.implemented).length, 3, "phase 2 implements health, /me and /teams/mine, nothing else");
+    // The census moved from "exactly the three Phase 2 demonstrations" to a bijection: a route marked
+    // implemented must have a handler registered, and a registered handler must belong to a declared,
+    // implemented route. That is the property the pin was really protecting — a route table that promises
+    // something the code does not serve, or serves something the table does not admit to.
+    const implemented = new Set(ROUTES.filter((r) => r.implemented).map((r) => `${r.method} ${r.pattern}`));
+    const registered = new Set(Object.keys(HANDLERS));
+    for (const route of implemented) assert.ok(registered.has(route), `${route} is declared implemented but has no handler in routes/index.ts`);
+    for (const handler of registered) assert.ok(implemented.has(handler), `${handler} has a handler but is not declared implemented in router.ts`);
+    assert.equal(registered.size, implemented.size, "handler and route censuses must be the same size");
+    assert.ok(implemented.has("GET /health") && implemented.has("GET /me") && implemented.has("GET /teams/mine"), "the Phase 2 demonstrations stay implemented");
     // Documentation is part of the contract: the README's route map is generated from this table, and a
     // hand-edited copy is how a doc starts promising routes that were never built.
     const declared = (read("workers/README.md").match(/^\| `(GET|POST|PUT|PATCH|DELETE) /gm) ?? []).length;

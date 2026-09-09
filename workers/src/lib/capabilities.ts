@@ -28,6 +28,8 @@ export type Capability =
   | "match_control.write"
   | "match_control.finalize"
   | "match_control.lock"
+  /** Assign officials to a match. Admin-only: whoever picks the referee decides who may score the game. */
+  | "match.assign"
   // competition administration
   | "competition.manage"
   | "fixtures.generate"
@@ -65,10 +67,17 @@ const MATRIX: Record<Capability, readonly AppRole[]> = {
   "identity.grant_role": ["admin"],
   "identity.read_directory": ["admin"],
 
+  // These four say "this role may do this *without* a per-match grant". They are deliberately
+  // admin-only, and `Phase 3` adds the assignment path rather than widening them: a route marked
+  // `orAssigned` in `router.ts` lets an authenticated caller through the coarse gate, after which
+  // `services/matchAccess.ts` must prove the caller is an assigned official **for that match**, and the
+  // database re-checks the same fact inside the write function. Role alone is still never enough —
+  // `tests/unit/phase1-security.test.ts` pins exactly that, and it passes unchanged.
   "match_control.read": ["admin", "media"],
   "match_control.write": ["admin"],
   "match_control.finalize": ["admin"],
   "match_control.lock": ["admin"],
+  "match.assign": ["admin"],
 
   "competition.manage": ["admin"],
   "fixtures.generate": ["admin"],
