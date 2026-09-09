@@ -64,6 +64,8 @@ route table exists before the handlers do.
 - Supabase's JWT `role` claim is the Postgres role (`anon` / `authenticated`), not the application
   role. Confusing the two would look like a control and be a bug, so the claim is ignored.
 - A valid token with no profile row is a 401, not a fallback to "fan": fail closed.
+- Every non-public route goes through the same guard: `requireAuth()` in `middleware/auth.ts`, called by
+  `authorizeForRoute()`. There is no per-route "is there a session?" line left to forget.
 - The capability matrix answers "may this role attempt this action". `services/teamAccess.ts` answers
   "is this row yours". `/api/teams/mine` implements both: it filters on `owner_id` **and** issues its
   read with the caller's own token, so RLS enforces the same predicate a second time. A bug in the

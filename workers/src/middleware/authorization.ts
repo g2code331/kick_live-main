@@ -13,6 +13,7 @@ import type { AppRole, Env } from "../env.ts";
 import type { Capability } from "../lib/capabilities.ts";
 import { roleHasCapability } from "../lib/capabilities.ts";
 import { ApiError } from "../lib/response.ts";
+import { requireAuth } from "./auth.ts";
 import type { Principal } from "./auth.ts";
 
 export const DENIED = "This account is not permitted to perform that action.";
@@ -25,13 +26,12 @@ export const DENIED = "This account is not permitted to perform that action.";
  */
 export function authorizeForRoute(principal: Principal, capability: Capability | null): void {
   if (capability === null) return;
+  // Anything that is not the one capability an anonymous caller holds goes through the reusable guard
+  // first, so the 401 comes from `requireAuth` (the same call a handler may repeat defensively) and the
+  // 403 comes from the matrix. Order matters: an unauthenticated probe should not learn that a route
+  // exists and is merely closed to it.
+  if (capability !== "public.read") requireAuth(principal);
   decide(principal, capability);
-  // Anything beyond `public.read` needs a session *and* a role, which is what `decide` just checked:
-  // an anonymous principal has `role: null`, and the matrix grants that principal exactly one
-  // capability. No separate "is there a user?" rule is needed, so no route can forget one.
-  if (capability !== "public.read" && (principal.userId === "" || principal.role === null)) {
-    throw new ApiError("UNAUTHENTICATED", 401, "Authentication required.");
-  }
 }
 
 /** A caller whose identity is verified *and* whose role the database confirmed a moment ago. */

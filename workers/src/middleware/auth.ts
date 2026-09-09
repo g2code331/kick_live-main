@@ -130,7 +130,12 @@ export async function authenticate(request: Request, env: Env): Promise<Principa
   return { userId: row.id, email: row.email, username: row.username, role, token };
 }
 
-/** For every non-public route: anonymous callers get 401 here, before a handler can see `{}`. */
+/**
+ * The reusable authentication guard: anonymous callers get 401 here, before a handler can see `{}`.
+ * `authorizeForRoute` calls it for every capability except `public.read`, so no individual route has to
+ * remember it; a handler that resolves a principal from something other than the pipeline (a future
+ * queue consumer, say) calls it directly.
+ */
 export function requireAuth(principal: Principal): Principal & { role: AppRole; userId: string } {
   if (!principal.userId || principal.role === null) {
     throw new ApiError("UNAUTHENTICATED", 401, "Authentication required.");
