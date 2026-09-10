@@ -1,9 +1,10 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import type { User, Session } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
 import type { UserProfile, UserRole } from "../lib/supabase";
 import { log } from "../lib/log";
+import { invalidate, noteAuthIdentity } from "../lib/data";
 
 interface AuthContextType {
   user: User | null;
@@ -27,27 +28,33 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+/**
+ * One row, one primary key, RLS-restricted to `id = auth.uid()`.
+ *
+ * Module scope rather than inside the provider: it closes over nothing but the client, so the auth
+ * callbacks can depend on it without a per-render identity, and the named columns are the point — the row
+ * is already bounded, and this is about the *next* column somebody adds to `profiles` not silently arriving
+ * in a bundle that reads five fields (KICKLIVE_FINAL_SCHEMA.sql §3.1).
+ */
+async function fetchProfile(userId: string): Promise<UserProfile | null> {
+  try {
+    const { data, error } = await supabase.from("profiles").select("id, email, username, phone, role, avatar_url, team_id, created_at, updated_at").eq("id", userId).limit(1);
+    if (error) {
+      log.warn("Profile fetch error:", error.message);
+      return null;
+    }
+    return data && data.length > 0 ? (data[0] as UserProfile) : null;
+  } catch (err) {
+    log.error("Profile fetch failed:", err);
+    return null;
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
-
-  const fetchProfile = async (userId: string) => {
-    try {
-      // `select('*')` on your own row is fine: RLS restricts it to `id = auth.uid()`.
-      const { data, error } = await supabase.from("profiles").select("*").eq("id", userId).limit(1);
-
-      if (error) {
-        log.warn("Profile fetch error:", error.message);
-        return null;
-      }
-      return data && data.length > 0 ? (data[0] as UserProfile) : null;
-    } catch (err) {
-      log.error("Profile fetch failed:", err);
-      return null;
-    }
-  };
 
   useEffect(() => {
     let isMounted = true;
@@ -108,7 +115,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const signIn = async (email: string, password: string, phone?: string) => {
+  const signIn = useCallback(async (email: string, password: string, phone?: string) => {
     try {
       // If phone is provided, try phone+password login
       if (phone) {
@@ -143,9 +150,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (err: any) {
       return { error: err.message || "Sign in failed" };
     }
-  };
+  }, []);
 
-  const signUp = async (email: string, password: string, username: string, phone: string) => {
+  const signUp = useCallback(async (email: string, password: string, username: string, phone: string) => {
     try {
       // Only non-privileged, self-owned data goes up. `role` in user metadata used to be read by
       // the profile trigger; it is ignored server-side now and is never sent from here.
@@ -173,28 +180,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (err: any) {
       return { error: err.message || "Sign up failed" };
     }
-  };
+  }, []);
 
-  const signOut = async () => {
+  const signOut = useCallback(async () => {
     await supabase.auth.signOut();
     setUser(null);
     setProfile(null);
     setSession(null);
-  };
+    // A shared read cache is only safe if it is single-identity: the rows in it are whatever RLS let *this*
+    // user see. `noteAuthIdentity` clears on the change; this also drops anything a stale token cached.
+    invalidate("*");
+  }, []);
 
-  const value = {
-    user,
-    profile,
-    session,
-    loading,
-    signIn,
-    signUp,
-    signOut,
-    isAdmin: profile?.role === "admin",
-    isFan: profile?.role === "fan",
-    isTeamManager: profile?.role === "team_manager",
-    isMedia: profile?.role === "media",
-  };
+  // Memoised (audit F-10): the value object used to be new on every render, so all twelve consumers of
+  // `useAuth()` re-rendered whenever the provider did — on a portal with a 30 s poll that is the whole tree
+  // every half minute, whatever it contains.
+  const value = useMemo<AuthContextType>(
+    () => ({
+      user,
+      profile,
+      session,
+      loading,
+      signIn,
+      signUp,
+      signOut,
+      isAdmin: profile?.role === "admin",
+      isFan: profile?.role === "fan",
+      isTeamManager: profile?.role === "team_manager",
+      isMedia: profile?.role === "media",
+    }),
+    [user, profile, session, loading, signIn, signUp, signOut],
+  );
+
+  useEffect(() => {
+    // The data layer keys are cached answers produced with this user's token. Bind them to it.
+    noteAuthIdentity(user?.id ?? null);
+  }, [user?.id]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

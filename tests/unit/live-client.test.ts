@@ -743,7 +743,11 @@ describe("phase3 · the console is the one implementation, and the fan page is o
     for (const forbidden of [".update(", ".insert(", ".delete(", "supabase.from('matches')", 'supabase.from("matches")', "setInterval"]) {
       assert.ok(!body.includes(forbidden), `the console must not ${forbidden === "setInterval" ? "own a timer" : `write ${forbidden}`}`);
     }
-    assert.ok(body.includes('supabase.from("players")'), "squad reads stay on the legacy read path (the Worker has no squad route yet) — documented, not hidden");
+    // Phase 4 moved this read into the shared data layer. It is *still* a Supabase read — the Worker has no
+    // squad route, and §17.4 of the architecture doc says so — but the console no longer owns a client, a
+    // limit or a cache of its own. Pinning the stronger statement rather than relaxing the old one.
+    assert.ok(body.includes("useQuery(squadFor"), "squad reads come from the data layer's bounded, tagged spec");
+    assert.ok(!body.includes("supabase.from("), "and the console issues no Supabase read of its own any more");
     for (const needle of ["actions.record(", "actions.transition(", "actions.correct(", "actions.finalize(", "actions.lock(", "actions.assign("]) {
       assert.ok(body.includes(needle), `the console must offer ${needle.split(".")[1]}`);
     }

@@ -1,103 +1,53 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Users, Trophy, Calendar, MapPin, Shirt, TrendingUp, Activity, Layout } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { readOnce, useQuery } from '../lib/data';
+import { squadFor, teamCompetitions, teamFixtures, teamProfile, standings as standingsQuery } from '../lib/data/queries.ts';
 import { FORMATIONS } from '../lib/formations';
 
 export default function TeamProfile() {
   const { teamId } = useParams<{ teamId: string }>();
   const navigate = useNavigate();
-  const [team, setTeam] = useState<any>(null);
-  const [players, setPlayers] = useState<any[]>([]);
-  const [matches, setMatches] = useState<any[]>([]);
+  const id = Number(teamId);
+  const valid = Number.isFinite(id) && id > 0;
+
+  // Four cached reads. The page used to run five queries in sequence — `select('*')` for the club row, the
+  // squad, the fixtures, a `competitions` read joined against every match — and then one *whole-competition*
+  // read per competition the club appeared in (F-05's N+1). The per-competition tables come from the same
+  // cache key `/tables` uses, so visiting one makes the other free.
+  const { data: loadedTeam, loading: teamLoading } = useQuery(teamProfile, { teamId: id }, { enabled: valid });
+  const { data: squad } = useQuery(squadFor, { teamIds: valid ? [id] : [] }, { enabled: valid });
+  const { data: fixtures } = useQuery(teamFixtures, { teamId: id, limit: 20 }, { enabled: valid });
+  const { data: comps } = useQuery(teamCompetitions, { teamId: id }, { enabled: valid });
+
+  const team = (loadedTeam as any) ?? null;
+  const players = ((squad ?? []) as any[]);
+  const matches = ((fixtures ?? []) as any[]);
   const [standings, setStandings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const competitionList = (comps ?? []) as any[];
   useEffect(() => {
-    if (teamId) loadTeamData();
-  }, [teamId]);
-
-  async function loadTeamData() {
-    try {
-      const { data: teamData } = await supabase
-        .from('teams')
-        .select('*')
-        .eq('id', teamId)
-        .single();
-      setTeam(teamData);
-
-      const { data: playersData } = await supabase
-        .from('players')
-        .select('id, name, number, position, goals, assists, nationality, age, photo_url')
-        .eq('team_id', teamId)
-        .order('number');
-      setPlayers(playersData || []);
-
-      const { data: matchesData } = await supabase
-        .from('matches')
-        .select(`
-          id, home_score, away_score, status, minute, start_time,
-          homeTeam:teams!home_team_id(id, name, short_name),
-          awayTeam:teams!away_team_id(id, name, short_name),
-          competitions(id, name)
-        `)
-        .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`)
-        .order('start_time', { ascending: false })
-        .limit(20);
-      setMatches(matchesData || []);
-
-      // Competitions & standings
-      const { data: compsData } = await supabase
-        .from('competitions')
-        .select('id, name, type, season, matches!inner(id, home_team_id, away_team_id)')
-        .filter('matches.home_team_id', 'eq', teamId)
-        .or(`matches.away_team_id.eq.${teamId}`);
-
-      if (compsData && compsData.length > 0) {
-        const standingsData = await Promise.all(
-          compsData.map(async (comp: any) => {
-            const { data: compMatches } = await supabase
-              .from('matches')
-              .select('home_team_id, away_team_id, home_score, away_score, status')
-              .eq('competition_id', comp.id)
-              .in('status', ['completed', 'full_time', 'finished']);
-
-            const teamStats: any = {};
-            compMatches?.forEach((match: any) => {
-              [match.home_team_id, match.away_team_id].forEach((tid: any) => {
-                if (!teamStats[tid]) {
-                  teamStats[tid] = { teamId: tid, played: 0, won: 0, drawn: 0, lost: 0, gf: 0, ga: 0, gd: 0, points: 0 };
-                }
-                const stats = teamStats[tid];
-                stats.played++;
-                const isHome = match.home_team_id === tid;
-                const teamScore = isHome ? match.home_score : match.away_score;
-                const oppScore = isHome ? match.away_score : match.home_score;
-                stats.gf += teamScore || 0;
-                stats.ga += oppScore || 0;
-                stats.gd = stats.gf - stats.ga;
-                if (teamScore > oppScore) { stats.won++; stats.points += 3; }
-                else if (teamScore === oppScore) { stats.drawn++; stats.points += 1; }
-                else stats.lost++;
-              });
-            });
-
-            return {
-              competition: comp,
-              standings: Object.values(teamStats).sort((a: any, b: any) =>
-                b.points !== a.points ? b.points - a.points : b.gd !== a.gd ? b.gd - a.gd : b.gf - a.gf
-              ),
-            };
-          })
-        );
-        setStandings(standingsData);
-      }
-    } catch (err) {
-      console.error('Error loading team data:', err);
-    } finally {
-      setLoading(false);
+    if (!valid || !competitionList.length) {
+      setStandings([]);
+      return;
     }
-  }
+    let cancelled = false;
+    void (async () => {
+      const tables = await Promise.all(
+        competitionList.slice(0, 4).map(async (comp) => ({ competition: comp, standings: (await readOnce(standingsQuery, { competitionId: Number(comp.id) })) ?? [] })),
+      );
+      if (!cancelled) setStandings(tables.filter((t) => t.standings.length > 0));
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, competitionList.map((c) => c.id).join(",")]);
+
+  useEffect(() => {
+    setLoading(teamLoading);
+  }, [teamLoading]);
 
   if (loading) {
     return (

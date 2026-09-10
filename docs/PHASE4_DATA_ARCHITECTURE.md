@@ -220,3 +220,64 @@ turns out to want a global team index, the loader is the shape of the answer and
 should live. The 10 superseded `MatchControl*` variants and `EventModal.tsx` stay exactly as Phase 3 left
 them; the `matches.status = 'finished'` filter bug (F-05) is **not** silently fixed inside a perf phase in
 files nobody renders — it is listed here so the deletion decision covers it.
+
+## 5. After — the layer as built
+
+`node scripts/query-audit.mjs` again, with the same definitions (regenerate §2's table with `--write`):
+
+| metric                                           | before | after |
+| ------------------------------------------------ | ------ | ----- |
+| PostgREST call sites in `src/`                   | 217    | 211   |
+| files that talk to the database directly         | 43     | 32    |
+| reads with no `limit`/`range`/`single`           | 52     | 39    |
+| whole-row reads that are not a single-row lookup | 45     | 32    |
+| components owning a refetching interval          | 6      | 2     |
+
+The site count is not the interesting number, because 26 of the 211 now live in
+`src/lib/data/queries.ts` — the pages' own queries went from 26 to 0 while the layer gained theirs. The two
+surviving pollers are `MatchControlFull.tsx` (superseded, unreachable since Phase 3) and
+`DataLoader.ts` (started by nobody, counted because the interval is still in the file). What is left in the
+32 unbounded reads is overwhelmingly the legacy admin screens and the superseded variants, which this phase
+does not own.
+
+What a fan's visit costs now:
+
+| screen        | cold load                               | warm (Back/Forward, second visitor) | while open                              |
+| ------------- | --------------------------------------- | ----------------------------------- | --------------------------------------- |
+| any page      | 1 (`auth.getSession`) + 1 (`profiles`)  | same                                | nothing                                 |
+| `/`           | 3 keys, in parallel                     | 0 reads, served from cache          | 1 read / 30 s (the strip only)          |
+| `/matches`    | 1                                       | 0                                   | 1 read / 30 s, `filter`-keyed           |
+| `/tables`     | 2 (competition index is `slow`, cached) | 0–1                                 | none                                    |
+| `/team/:id`   | 5 keys, one per question                | 0                                   | none                                    |
+| `/news`       | 1 per page                              | 0 for a page already read           | none                                    |
+| `/portal/fan` | 4 keys                                  | 0                                   | 1 read / 30 s for the match window only |
+| header search | 1 per distinct query                    | 0 for a query already typed         | none                                    |
+
+Six `DataLoader` queries per cold start and six per five minutes per visible tab are gone for every screen,
+which is where most of that reduction is.
+
+Modules, and what each is for:
+
+| module                        | role                                                                                                               |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `src/lib/data/cache.ts`       | the `Map`: TTL, in-flight coalescing, `minIntervalMs`, tags, `sessionStorage` mirror, identity binding, armed keys |
+| `src/lib/data/context.ts`     | `DataCtx`, the `QuerySpec` shape, `runQuery`, `rows()`/`one()` error unwrapping, `isMissingOnServer`               |
+| `src/lib/data/queries.ts`     | every public read: columns, bound, key, tags, class — 22 specs, all pinned bounded and tagged by test              |
+| `src/lib/data/useResource.ts` | `useQuery` (SWR + `poll` + `enabled` + `refetch`), `readOnce`, `invalidate`                                        |
+| `src/lib/data/ticker.ts`      | one `setInterval` for the whole app; paused while hidden; catches up once on return                                |
+| `src/lib/data/freshness.ts`   | the five classes, the status vocabulary from the schema's CHECK list                                               |
+| `src/lib/data/standings.ts`   | the table rule, once, shared by `/tables`, `/team/:id` and the SQL fallback                                        |
+| `src/lib/data/perf.ts`        | the counters: reads, hits, coalesced, stale serves, per-key ages, slowest read                                     |
+
+Deliberate limits of this unit, stated as such:
+
+- **Writes were not touched.** 92 of the call sites are still pages writing to Supabase directly; each moves
+  when its Worker route exists (Phase 2's table), and invalidation was added at the two places that write
+  rows the cached reads show (`FixturesViewer`'s reshuffle, the console's sequence advance).
+- **`AdminPortal`'s seven-query dashboard load is still seven queries.** It is an admin screen, per-identity,
+  mounted on demand rather than on every visit; folding it into one `adminOverview` key is a small, separate
+  change and mixing it in here would have made the diff harder to review than the win is worth.
+- The standings and squad-count specs call `kicklive_competition_standings` / `kicklive_squad_sizes` and fall
+  back to the browser rule until the Phase 4 migration is applied. The fallback is counted in the
+  diagnostics, and `42501` does **not** fall back — a refusal is not the same as an absence, and the test for
+  that distinction is the reason the fallback matcher matches codes rather than substrings.

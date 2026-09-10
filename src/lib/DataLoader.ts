@@ -1,7 +1,19 @@
 /**
- * KICKLIVE - BACKGROUND DATA LOADER
- * Loads all app data from Supabase on initialization
- * Keeps data fresh with background refresh
+ * KICKLIVE · BACKGROUND DATA LOADER — retained, not started (finding F-01)
+ *
+ * `App.tsx` used to call `loadAll()` on mount and `startAutoRefresh()` (six queries per cold start, six more
+ * every five minutes per visible tab). Nothing ever called `getTeams()`, `getMatches()`, `getPlayers()`,
+ * `getMedia()`, `getUsers()` or `subscribe()`: the warmest cache in the app had no readers, which is why the
+ * Phase 4 audit records it as a load generator rather than a cache. The boot effect now calls
+ * `initDataLayer()`, and reads go through `src/lib/data/` — one keyed cache, one shared ticker, TTLs per
+ * freshness class (`docs/PHASE4_DATA_ARCHITECTURE.md` §4).
+ *
+ * The class stays on disk on purpose, for two reasons: it is the shape of the answer if a portal ever wants a
+ * genuinely global index (and that index should live in the new cache, not here), and deleting a component
+ * because a grep found no readers is how a phase like this one acquires a bug nobody noticed. If you want it
+ * gone, deleting this file and its export line is the whole change — no screen depends on it.
+ *
+ * Its own reads were already bounded and column-named; what they were not was *used*.
  */
 
 import { supabase } from './supabase';

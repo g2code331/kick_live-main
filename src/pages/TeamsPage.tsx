@@ -1,50 +1,21 @@
-import { useState, useEffect } from "react";
-import { MapPin, ChevronRight, ArrowUpRight, Users } from "lucide-react";
-import { useNavigate } from "react-router-dom";
 import Header from "../components/Header";
 import Loading from "../components/Loading";
-import { supabase } from "../lib/supabase";
+import { MapPin, ChevronRight, ArrowUpRight, Users } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { useQuery } from "../lib/data";
+import { squadSizes, teamsIndex } from "../lib/data/queries.ts";
 
 export default function TeamsPage() {
   const navigate = useNavigate();
-  const [teams, setTeams] = useState<any[]>([]);
-  const [playerCounts, setPlayerCounts] = useState<Map<number, number>>(new Map());
-  const [loading, setLoading] = useState(true);
+  // Two `slow` keys. The club list is the same answer for every visitor, and the squad counts used to cost
+  // one row per player in the league read into a Map (F-06); now Postgres groups them when the function is
+  // deployed, and the cached fallback keeps the page honest meanwhile.
+  const { data: teamRows, loading } = useQuery(teamsIndex, {});
+  const { data: counts } = useQuery(squadSizes, {});
+  const teams = (teamRows ?? []) as any[];
+  const playerCounts = counts ?? new Map<number, number>();
 
-  useEffect(() => {
-    async function loadTeams() {
-      try {
-        // Fetch all teams
-        const { data: teamsData } = await supabase
-          .from('teams')
-          .select('id, name, short_name, city, coach, primary_color, secondary_color, status')
-          .in('status', ['active', null as any])
-          .order('name');
-        
-        setTeams(teamsData || []);
-
-        // Fetch player counts per team
-        const { data: playersData } = await supabase
-          .from('players')
-          .select('team_id');
-        
-        const counts = new Map<number, number>();
-        playersData?.forEach(player => {
-          counts.set(player.team_id, (counts.get(player.team_id) || 0) + 1);
-        });
-        
-        setPlayerCounts(counts);
-      } catch (err) {
-        console.error('Error loading teams:', err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    
-    loadTeams();
-  }, []);
-
-  if (loading) return <Loading text="Loading Teams..." size="md" />;
+  if (loading && !teams.length) return <Loading text="Loading Teams..." size="md" />;
 
   return (
     <div className="relative min-h-screen">

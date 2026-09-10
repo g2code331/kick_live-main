@@ -1,6 +1,12 @@
 import { useState, useEffect } from 'react';
 import { X, Calendar, MapPin, Edit2, Search, Filter, Loader2, Play, RotateCcw } from 'lucide-react';
+import { invalidate, useQuery } from '../../../lib/data';
+// Reads go through `src/lib/data`. The two writes below do not, on purpose: a fixture reshuffle is a
+// privileged mutation, and moving writes behind the Worker is Phase 2's route-by-route migration, not
+// something to fold into a caching change. The invalidation after each one is what keeps this honest.
 import { supabase } from '../../../lib/supabase';
+import { FRESHNESS } from '../../../lib/data/freshness.ts';
+import { competitionFixtures, teamsIndex } from '../../../lib/data/queries.ts';
 import { CompetitionEngine } from '../../../lib/CompetitionEngine';
 import MatchControlCenter from './MatchControlCenter';
 
@@ -17,61 +23,26 @@ export default function FixturesViewer({ competition, isOpen, onClose }: Fixture
   const [selectedMatch, setSelectedMatch] = useState<any>(null);
   const [isMatchControlOpen, setIsMatchControlOpen] = useState(false);
   const [isReshuffling, setIsReshuffling] = useState(false);
-  const [teams, setTeams] = useState<any[]>([]);
+
+  // Both reads are shared and cached: the club index is the same `slow` key `/teams` warms, and the fixture
+  // read embeds the two club names, which replaces the third query this screen used to issue for them. The
+  // board also refreshes on the `fast` class now, which it never did — left open, it showed the schedule as
+  // of whenever it was opened.
+  const clubs = useQuery(teamsIndex, {}, { enabled: isOpen });
+  const rows = useQuery(
+    competitionFixtures,
+    { competitionId: Number(competition?.id ?? 0), limit: 200 },
+    { enabled: isOpen && !!competition?.id, poll: FRESHNESS.fast },
+  );
+  const teams = (clubs.data ?? []) as any[];
 
   useEffect(() => {
-    if (isOpen && competition) {
-      loadFixtures();
-      loadTeams();
-    }
-  }, [isOpen, competition]);
+    setFixtures((rows.data ?? []) as any[]);
+    setLoading(rows.loading && (rows.data?.length ?? 0) === 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows.data]);
 
-  async function loadTeams() {
-    const { data } = await supabase.from('teams').select('id, name, short_name');
-    setTeams(data || []);
-  }
-
-  async function loadFixtures() {
-    setLoading(true);
-    try {
-      const { data: matchesData, error: matchesError } = await supabase
-        .from('matches')
-        .select('id, home_team_id, away_team_id, home_score, away_score, status, minute, start_time')
-        .eq('competition_id', competition.id)
-        .order('start_time', { ascending: true });
-
-      if (matchesError) throw matchesError;
-
-      if (!matchesData || matchesData.length === 0) {
-        setFixtures([]);
-        return;
-      }
-
-      const teamIds = Array.from(new Set([
-        ...matchesData.map(m => m.home_team_id),
-        ...matchesData.map(m => m.away_team_id)
-      ]));
-
-      const { data: teamsData } = await supabase
-        .from('teams')
-        .select('id, name, short_name')
-        .in('id', teamIds);
-
-      const teamsMap = new Map(teamsData?.map(t => [t.id, t]));
-
-      const combinedFixtures = matchesData.map(match => ({
-        ...match,
-        homeTeam: teamsMap.get(match.home_team_id),
-        awayTeam: teamsMap.get(match.away_team_id)
-      }));
-
-      setFixtures(combinedFixtures);
-    } catch (err) {
-      console.error('Error loading fixtures:', err);
-    } finally {
-      setLoading(false);
-    }
-  }
+  const loadFixtures = () => rows.refetch();
 
   const handleReshuffle = async () => {
     if (!confirm('Are you sure you want to reshuffle fixtures? This will delete all existing fixtures and generate new ones.')) return;
@@ -112,9 +83,13 @@ export default function FixturesViewer({ competition, isOpen, onClose }: Fixture
       if (newFixtures && newFixtures.length > 0) {
         const { error } = await supabase.from('matches').insert(newFixtures);
         if (error) throw error;
-        
+
+        // Targeted invalidation (§4.2): this wrote rows behind the cache's back, so the tags it dirties are
+        // named here — the fixture lists, every standings table, and this competition's key. The news and
+        // squad caches are left alone, because nothing about them changed.
+        invalidate('matches', 'standings', `competition:${competition.id}`);
         alert(`Fixtures reshuffled! Generated ${newFixtures.length} new fixtures.`);
-        loadFixtures();
+        await loadFixtures();
       }
     } catch (err: any) {
       alert('Error reshuffling: ' + err.message);

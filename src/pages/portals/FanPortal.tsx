@@ -5,7 +5,8 @@ import {
   RefreshCw, Loader2, ChevronRight, Award
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
-import { supabase } from '../../lib/supabase';
+import { isDoneStatus, isLiveStatus, useQuery } from '../../lib/data';
+import { fanMatches, scorers, teamNews, teamsIndex } from '../../lib/data/queries.ts';
 
 interface FanPortalProps {
   onNavigate: (page: string) => void;
@@ -14,6 +15,14 @@ interface FanPortalProps {
 export default function FanPortal({ onNavigate }: FanPortalProps) {
   const { profile, signOut } = useAuth();
   const [activeTab, setActiveTab] = useState<'home' | 'matches' | 'teams' | 'stats'>('home');
+
+  // Four keys instead of one four-query burst. The difference is what gets refreshed when: the recent-match
+  // window is the only thing worth a heartbeat here, while the club index is `slow` and was being re-read
+  // every 30 s with no limit on it at all (F-04, F-06).
+  const recent = useQuery(fanMatches, { limit: 50 }, { poll: true });
+  const gold = useQuery(scorers, { limit: 10 });
+  const clubs = useQuery(teamsIndex, {});
+  const feed = useQuery(teamNews, { limit: 10 });
 
   const [liveMatches, setLiveMatches] = useState<any[]>([]);
   const [recentMatches, setRecentMatches] = useState<any[]>([]);
@@ -24,62 +33,33 @@ export default function FanPortal({ onNavigate }: FanPortalProps) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const load = async (silent = false) => {
-    if (!silent) setLoading(true); else setRefreshing(true);
-    try {
-      const [matchRes, playerRes, teamRes, newsRes] = await Promise.all([
-        supabase
-          .from('matches')
-          .select('id, home_team_id, away_team_id, home_score, away_score, status, minute, start_time, homeTeam:teams!home_team_id(name,short_name,primary_color,secondary_color), awayTeam:teams!away_team_id(name,short_name,primary_color,secondary_color), competitions(name)')
-          .order('start_time', { ascending: false })
-          .limit(50),
-        supabase
-          .from('players')
-          .select('id, name, position, goals, assists, nationality, team_id, teams(name, short_name, primary_color)')
-          .order('goals', { ascending: false })
-          .limit(10),
-        supabase
-          .from('teams')
-          .select('id, name, short_name, city, venue, coach, primary_color, secondary_color, status')
-          .in('status', ['active', null as any])
-          .order('name'),
-        supabase
-          .from('team_news')
-          .select('id, title, body, created_at, author_name, team_id, teams(name, primary_color)')
-          .order('created_at', { ascending: false })
-          .limit(10),
-      ]);
-
-      const matches = matchRes.data || [];
-      const liveStatuses = ['first_half', 'second_half', 'extra_time', 'half_time', 'penalty_shootout'];
-      const doneStatuses = ['full_time', 'completed', 'finished'];
-
-      setLiveMatches(matches.filter((m: any) => liveStatuses.includes(m.status)));
-      setRecentMatches(matches.filter((m: any) => doneStatuses.includes(m.status)).slice(0, 10));
-      setUpcomingMatches(
-        matches
-          .filter((m: any) => !liveStatuses.includes(m.status) && !doneStatuses.includes(m.status))
-          .sort((a: any, b: any) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
-          .slice(0, 10)
-      );
-
-      setTopScorers((playerRes.data || []).filter((p: any) => (p.goals || 0) > 0));
-      setAllTeams((teamRes.data || []).filter((t: any) => t.status !== 'pending' && t.status !== 'rejected'));
-      setNews(newsRes.data || []);
-    } catch (err) {
-      console.error('[FanPortal] Load error:', err);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
-
   useEffect(() => {
-    load();
-    // Auto-refresh every 30 seconds
-    const interval = setInterval(() => load(true), 30000);
-    return () => clearInterval(interval);
-  }, []);
+    const matches = (recent.data ?? []) as any[];
+    const done = matches.filter((m) => isDoneStatus(m.status));
+    const live = matches.filter((m) => isLiveStatus(m.status) || m.status === 'half_time');
+    setLiveMatches(live);
+    setRecentMatches(done.slice(0, 10));
+    setUpcomingMatches(
+      matches
+        .filter((m) => !live.includes(m) && !done.includes(m))
+        .sort((a, b) => new Date(b.start_time ?? 0).getTime() - new Date(a.start_time ?? 0).getTime())
+        .slice(0, 10),
+    );
+    setTopScorers(((gold.data ?? []) as any[]).filter((p) => (p.goals ?? 0) > 0));
+    setAllTeams(((clubs.data ?? []) as any[]).filter((t) => t.status !== 'pending' && t.status !== 'rejected'));
+    setNews((feed.data ?? []) as any[]);
+    setLoading(recent.loading && !matches.length);
+  }, [recent.data, gold.data, clubs.data, feed.data, recent.loading]);
+
+  const load = async (silent = false) => {
+    if (!silent) setLoading(true);
+    else setRefreshing(true);
+    const results = await Promise.allSettled([recent.refetch(), gold.refetch(), clubs.refetch(), feed.refetch()]);
+    const failed = results.filter((r) => r.status === 'rejected').length;
+    if (failed) console.warn(`[FanPortal] ${failed} of ${results.length} refreshes failed; the values on screen are the last good ones`);
+    setLoading(false);
+    setRefreshing(false);
+  };
 
   const handleSignOut = async () => { await signOut(); onNavigate('login'); };
 

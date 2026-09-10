@@ -89,10 +89,13 @@ export function scanQuerySites(root = ROOT) {
         kind: writeMatch ? "write" : "read",
         write: Boolean(writeMatch),
         op: writeMatch ? writeMatch[1] : "select",
-        // `select('*')` on a table with 40 columns costs the transfer; a named list costs what the page shows.
+        // `select('*')` on a whole table costs the transfer; on a single row it costs one row. The metric
+        // that matters is a whole-row read that is not a single-row lookup, so `isSingle` splits them and
+        // `star` below means "starred *and* not a single-row read".
         star: Boolean(select) && /(^|,)\s*\*\s*(,|$)/.test(select[2]) ? true : !select && !writeMatch,
         columns: select ? select[2].replace(/\s+/g, " ").trim() : null,
         bounded: modifiers.some((x) => ["limit", "range", "single", "maybeSingle"].includes(x)),
+        isSingle: modifiers.includes("single") || modifiers.includes("maybeSingle"),
         embeds: embeds || /:[a-z_]+\s*!/.test(select?.[2] ?? ""),
         modifiers: [...new Set(modifiers)],
       });
@@ -184,14 +187,14 @@ export function summarise() {
     const t = tables.get(s.table) ?? { reads: 0, writes: 0, star: 0, unbounded: 0 };
     if (s.write) t.writes++;
     else t.reads++;
-    if (s.star) t.star++;
+    if (s.star && !s.isSingle) t.star++;
     if (!s.bounded && !s.write) t.unbounded++;
     tables.set(s.table, t);
 
     const f = files.get(s.file) ?? { reads: 0, writes: 0, star: 0, unbounded: 0, tables: new Set() };
     if (s.write) f.writes++;
     else f.reads++;
-    if (s.star) f.star++;
+    if (s.star && !s.isSingle) f.star++;
     if (!s.bounded && !s.write) f.unbounded++;
     f.tables.add(s.table);
     files.set(s.file, f);
@@ -205,7 +208,7 @@ export function summarise() {
       reads: sites.filter((s) => !s.write).length,
       writes: sites.filter((s) => s.write).length,
       rpc: sites.filter((s) => s.kind === "rpc").length,
-      starSelects: sites.filter((s) => s.star && !s.write).length,
+      starSelects: sites.filter((s) => s.star && !s.write && !s.isSingle).length,
       unboundedReads: unbounded.length,
       files: files.size,
       tables: tables.size,
@@ -226,10 +229,10 @@ function renderDoc(report) {
   L.push("Regenerate: `node scripts/query-audit.mjs --write docs/data/phase4-query-inventory.md`.");
   L.push("");
   L.push("Machine-extracted from the tree, comments stripped, so a docblock that mentions a query is not");
-  L.push("counted. `unbounded` = a read with no `limit`/`range`/`single`; `star` = `select('*')` or an");
-  L.push("embedded join of whole rows. Both are only problems at scale, which is why they are counted and");
-  L.push("not simply banned: `select('*').eq('id', auth.uid()).single()` is fine, `select('*')` over");
-  L.push("`players` is not.");
+  L.push("counted. `unbounded` = a read with no `limit`/`range`/`single`; `whole-row` = `select('*')` or an embedded");
+  L.push("join of whole rows that is *not* a single-row lookup — `select('*').eq('id', auth.uid()).single()` is");
+  L.push("fine and is not counted, `select('*')` over `players` is. Neither is banned outright: they are");
+  L.push("problems at scale, which is exactly what a scale that has not arrived yet cannot argue with.");
   L.push("");
   L.push(`| total sites | reads | writes | rpc | \`select('*')\` | unbounded | files | tables | pollers |`);
   L.push(`| --- | --- | --- | --- | --- | --- | --- | --- | --- |`);
@@ -238,7 +241,7 @@ function renderDoc(report) {
   L.push("");
   L.push("## By table");
   L.push("");
-  L.push("| table | reads | writes | unbounded reads | whole-row selects |");
+  L.push("| table | reads | writes | unbounded reads | whole-row reads (not single-row) |");
   L.push("| --- | --- | --- | --- | --- |");
   for (const row of report.tables) L.push(`| \`${row.name}\` | ${row.reads} | ${row.writes} | ${row.unbounded} | ${row.star} |`);
   L.push("");

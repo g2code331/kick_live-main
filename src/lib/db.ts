@@ -2,8 +2,9 @@
  * Read helpers for the public pages, plus the one anonymous write the site makes.
  *
  * Two deliberate rules here:
- *  - every read names its columns and sets a `limit()` — no `select('*')` over a whole table
- *    (the pattern `src/lib/DataLoader.ts` still uses, see docs/PRODUCTION_ARCHITECTURE.md §7);
+ *  - every read names its columns and sets a `limit()` — no `select('*')` over a whole table;
+ *    from Phase 4 the public reads live in `src/lib/data/queries.ts` with a cache key and a TTL each, and
+ *    this module keeps the one write the site makes anonymously (see docs/PRODUCTION_ARCHITECTURE.md §7);
  *  - mock data is a *development* convenience only. Returning `data/mockData.ts` after a Supabase
  *    failure made an outage look like a successful load — supporters saw invented scores on a live
  *    product. In a production build the caller now gets an empty list plus a logged error.

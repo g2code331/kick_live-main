@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Bell, Search, LogIn, User, Shield, X, Trophy, Calendar } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase } from '../lib/supabase';
+import { readOnce } from '../lib/data';
+import { globalSearch, recentResults } from '../lib/data/queries.ts';
 import { assetUrl } from "../lib/app-shell.ts";
 import UpdateControl from "../components/UpdateControl.tsx";
 
@@ -41,43 +42,51 @@ export default function Header() {
 
   const isActive = (path: string) => location.pathname === path;
 
-  // Live search
+  // Search: debounced here, cached and deduplicated in the data layer. The 300 ms pause stays because a
+  // keystroke is not a question, and the two `ilike` reads now share one key — `docs/PHASE4_DATA_ARCHITECTURE.md`
+  // F-08 counted this box as two whole-table scans per pause with no reuse at all.
   useEffect(() => {
     if (!searchQuery.trim()) {
       setSearchResults({ teams: [], matches: [] });
       return;
     }
-    const q = searchQuery.trim().toLowerCase();
-    const delay = setTimeout(async () => {
-      const [teamsRes, matchesRes] = await Promise.all([
-        supabase.from('teams').select('id, name, short_name, primary_color').ilike('name', `%${q}%`).limit(5),
-        supabase.from('matches').select('id, home_score, away_score, status, homeTeam:teams!home_team_id(name), awayTeam:teams!away_team_id(name)').or(`status.in.(first_half,second_half,extra_time,full_time,completed)`).limit(5),
-      ]);
-      setSearchResults({
-        teams: teamsRes.data || [],
-        matches: (matchesRes.data || []).filter((m: any) =>
-          m.homeTeam?.name?.toLowerCase().includes(q) || m.awayTeam?.name?.toLowerCase().includes(q)
-        ),
-      });
+    let cancelled = false;
+    const delay = setTimeout(() => {
+      void readOnce(globalSearch, { query: searchQuery })
+        .then((result: { teams: any[]; matches: any[] } | null) => {
+          if (cancelled || !result) return;
+          setSearchResults(result);
+        })
+        .catch(() => {
+          if (!cancelled) setSearchResults({ teams: [], matches: [] });
+        });
     }, 300);
-    return () => clearTimeout(delay);
+    return () => {
+      cancelled = true;
+      clearTimeout(delay);
+    };
   }, [searchQuery]);
 
-  // Load recent match results for notifications
-  const loadNotifications = async () => {
-    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const { data } = await supabase
-      .from('matches')
-      .select('id, home_score, away_score, status, start_time, homeTeam:teams!home_team_id(name, short_name), awayTeam:teams!away_team_id(name, short_name)')
-      .in('status', ['full_time', 'completed'])
-      .gte('start_time', yesterday)
-      .order('start_time', { ascending: false })
-      .limit(8);
-    setNotifications(data || []);
-  };
+  // Recent results, for the bell. Read once per open — the entry outlives the panel, so re-opening it in
+  // the same session is free, and `matches` invalidates it when a match finalizes.
+  useEffect(() => {
+    if (!notifOpen) return;
+    let cancelled = false;
+    void readOnce(recentResults, { hours: 24, limit: 8 })
+      .then((rows: any[] | null) => {
+        if (!cancelled) setNotifications(rows ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setNotifications([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [notifOpen]);
 
   const handleNotifToggle = () => {
-    if (!notifOpen) loadNotifications();
+    // Opening the panel is the refresh: the effect on `notifOpen` reads through the cache, so this costs a
+    // request only when the entry has aged out. It used to fire its own query on every open, every time.
     setNotifOpen(o => !o);
     setSearchOpen(false);
   };

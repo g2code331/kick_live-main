@@ -1,64 +1,26 @@
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Loading from "../components/Loading";
 import Header from "../components/Header";
-import { supabase } from "../lib/supabase";
+import { useQuery } from "../lib/data";
+import { liveMatches as liveMatchesQuery, newsPreview, scorers } from "../lib/data/queries.ts";
 
 export default function HomePage() {
   const navigate = useNavigate();
-  const [liveMatches, setLiveMatches] = useState<any[]>([]);
-  const [topScorers, setTopScorers] = useState<any[]>([]);
-  const [news, setNews] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Three keys, not one burst: the live strip wants a heartbeat and the news rail does not, so they are
+  // cached separately and only the strip is armed (§4.3 of the Phase 4 doc). Back/Forward costs nothing,
+  // and a second visitor to the same question gets the first one's answer.
+  const live = useQuery(liveMatchesQuery, { limit: 10 }, { poll: true });
+  const gold = useQuery(scorers, { limit: 10 });
+  const media = useQuery(newsPreview, { limit: 6 });
+
+  const liveMatches = live.data ?? [];
+  const topScorers = gold.data ?? [];
+  const news = media.data ?? [];
+  const loading = live.loading && gold.loading && media.loading;
   const [newsIndex, setNewsIndex] = useState(0);
   const newsScrollRef = useRef<HTMLDivElement>(null);
   const newsHovering = useRef(false);
-
-  useEffect(() => {
-    async function loadRealData() {
-      try {
-        const [matchesRes, playersRes, mediaRes] = await Promise.all([
-          supabase
-            .from('matches')
-            .select('id, home_score, away_score, status, minute, homeTeam:teams!home_team_id(name, short_name), awayTeam:teams!away_team_id(name, short_name), competitions(name)')
-            .in('status', ['first_half', 'second_half', 'extra_time', 'half_time', 'live'])
-            .limit(10),
-          supabase
-            .from('players')
-            .select('id, name, goals, nationality, teams(name)')
-            .order('goals', { ascending: false })
-            .limit(10),
-          supabase
-            .from('media')
-            .select('id, title, category, image_url, created_at, excerpt')
-            .order('created_at', { ascending: false })
-            .limit(6),
-        ]);
-
-        setLiveMatches(matchesRes.data || []);
-        setTopScorers(playersRes.data || []);
-        setNews(mediaRes.data || []);
-      } catch (err) {
-        console.error('Error loading data:', err);
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    loadRealData();
-
-    // Poll live matches every 30 s to save egress
-    const pollInterval = setInterval(async () => {
-      const { data } = await supabase
-        .from('matches')
-        .select('id, home_score, away_score, status, minute, homeTeam:teams!home_team_id(name, short_name), awayTeam:teams!away_team_id(name, short_name)')
-        .in('status', ['first_half', 'second_half', 'extra_time', 'half_time', 'live'])
-        .limit(10);
-      setLiveMatches(data || []);
-    }, 30000); // 30 s instead of 10 s
-
-    return () => clearInterval(pollInterval);
-  }, []);
 
   // Auto-advance the "Latest News" carousel every 4s, pausing while the user is interacting
   useEffect(() => {

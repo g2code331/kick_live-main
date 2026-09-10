@@ -1,42 +1,17 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Play, Pause, Clock, CheckCircle, AlertCircle } from 'lucide-react';
-import { supabase } from '../../../lib/supabase';
+import { useQuery } from '../../../lib/data';
+import { matchList } from '../../../lib/data/queries.ts';
 import MatchControlCenter from './MatchControlCenter';
 
 export default function MultiMatchQueue() {
-  const [matches, setMatches] = useState<any[]>([]);
   const [selectedMatch, setSelectedMatch] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
 
-  // Load matches on mount and set up real-time polling every 5 seconds
-  useEffect(() => {
-    loadMatches();
-    
-    // Poll for match updates every 5 seconds for real-time sync
-    const pollInterval = setInterval(() => {
-      loadMatches();
-    }, 5000);
-    
-    return () => clearInterval(pollInterval);
-  }, []);
-
-  async function loadMatches() {
-    try {
-      // Only fetch necessary columns, limit to 100 matches max
-      const { data, error } = await supabase
-        .from('matches')
-        .select('id, home_team_id, away_team_id, home_score, away_score, status, start_time, minute, competition_id, homeTeam:teams!home_team_id(short_name, name), awayTeam:teams!away_team_id(short_name, name)')
-        .order('start_time', { ascending: false })
-        .limit(100);
-      
-      if (error) throw error;
-      setMatches(data || []);
-    } catch (err) {
-      console.error('Error loading matches:', err);
-    } finally {
-      setLoading(false);
-    }
-  }
+  // The operator's board is the one screen where a 5 s cadence is right, and it is now one shared key
+  // (`matchList`, filter `all`) instead of a private `setInterval` that re-read 100 rows per open tab. Two
+  // queue tabs, or a queue open next to `/matches`, cost one round trip between them instead of two.
+  const { data, loading } = useQuery(matchList, { filter: 'all', page: 0, pageSize: 100 }, { poll: 5000 });
+  const matches = ((data?.rows ?? []) as any[]).slice(0, 100);
 
   // Proper status filtering for time-sensitive match states
   const liveMatches = matches.filter(m => 

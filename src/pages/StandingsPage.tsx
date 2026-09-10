@@ -1,123 +1,25 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Info } from "lucide-react";
 import Header from "../components/Header";
 import Loading from "../components/Loading";
-import { supabase } from "../lib/supabase";
+import { useQuery } from "../lib/data";
+import { competitionsIndex, standings as standingsQuery } from "../lib/data/queries.ts";
 
 export default function StandingsPage() {
-  const [standings, setStandings] = useState<any[]>([]);
-  const [competitions, setCompetitions] = useState<any[]>([]);
   const [selectedComp, setSelectedComp] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-
-  // Load competitions once on mount
+  // The table used to be built in the browser from an unbounded read of every match in the competition, and
+  // the rules for it lived in three files (F-05). It is now one `fast`-keyed read: `kicklive_competition_standings`
+  // where the function is deployed, the shared browser rule where it is not, and one cache entry for the
+  // `/tables` visit that a `MatchControlCenter` finalize can invalidate by tag.
+  const { data: compRows, loading: compsLoading } = useQuery(competitionsIndex, {});
+  const competitions = (compRows ?? []) as any[];
   useEffect(() => {
-    async function loadComps() {
-      const { data } = await supabase
-        .from('competitions')
-        .select('id, name, type, season')
-        .order('created_at', { ascending: false })
-        .limit(20);
-      setCompetitions(data || []);
-      if (data && data.length > 0) setSelectedComp(data[0]);
-    }
-    loadComps();
-  }, []);
+    if (!selectedComp && competitions.length) setSelectedComp(competitions[0]);
+  }, [competitions, selectedComp]);
 
-  // Re-calculate standings whenever selected competition changes
-  useEffect(() => {
-    if (!selectedComp) return;
-
-    async function buildStandings() {
-      setLoading(true);
-      try {
-        // Only fetch matches for this competition
-        const { data: matchesData } = await supabase
-          .from('matches')
-          .select('home_team_id, away_team_id, home_score, away_score, status')
-          .eq('competition_id', selectedComp.id);
-
-        if (!matchesData || matchesData.length === 0) {
-          setStandings([]);
-          setLoading(false);
-          return;
-        }
-
-        // Collect only the team IDs that appear in this competition's matches
-        const teamIds = new Set<number>();
-        matchesData.forEach(m => {
-          teamIds.add(m.home_team_id);
-          teamIds.add(m.away_team_id);
-        });
-
-        const { data: teamsData } = await supabase
-          .from('teams')
-          .select('id, name, short_name, primary_color, secondary_color, status')
-          .in('id', Array.from(teamIds))
-          .in('status', ['active', null as any]);
-
-        const teamsMap = new Map((teamsData || []).map(t => [t.id, t]));
-
-        // Build stats only for teams in this competition
-        const teamStats: Record<number, any> = {};
-        teamIds.forEach(id => {
-          const team = teamsMap.get(id);
-          if (!team) return;
-          teamStats[id] = {
-            teamId: id,
-            name: team.name,
-            shortName: team.short_name,
-            primaryColor: team.primary_color,
-            secondaryColor: team.secondary_color,
-            played: 0, won: 0, drawn: 0, lost: 0,
-            gf: 0, ga: 0, gd: 0, points: 0, form: []
-          };
-        });
-
-        matchesData.forEach(match => {
-          const finished = ['completed', 'full_time', 'finished'].includes(match.status);
-          if (!finished) return;
-
-          const home = teamStats[match.home_team_id];
-          const away = teamStats[match.away_team_id];
-          if (!home || !away) return;
-
-          home.played++; away.played++;
-          home.gf += match.home_score || 0;
-          home.ga += match.away_score || 0;
-          away.gf += match.away_score || 0;
-          away.ga += match.home_score || 0;
-          home.gd = home.gf - home.ga;
-          away.gd = away.gf - away.ga;
-
-          if ((match.home_score || 0) > (match.away_score || 0)) {
-            home.won++; home.points += 3; home.form.push('W');
-            away.lost++; away.form.push('L');
-          } else if ((match.home_score || 0) < (match.away_score || 0)) {
-            away.won++; away.points += 3; away.form.push('W');
-            home.lost++; home.form.push('L');
-          } else {
-            home.drawn++; away.drawn++; home.points += 1; away.points += 1;
-            home.form.push('D'); away.form.push('D');
-          }
-        });
-
-        const sorted = Object.values(teamStats).sort((a: any, b: any) => {
-          if (b.points !== a.points) return b.points - a.points;
-          if (b.gd !== a.gd) return b.gd - a.gd;
-          return b.gf - a.gf;
-        });
-
-        setStandings(sorted);
-      } catch (err) {
-        console.error('Error building standings:', err);
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    buildStandings();
-  }, [selectedComp?.id]);
+  const table = useQuery(standingsQuery, { competitionId: Number(selectedComp?.id ?? 0) }, { enabled: Number(selectedComp?.id) > 0 });
+  const standings = (table.data ?? []) as any[];
+  const loading = compsLoading || (!standings.length && !!selectedComp && table.loading);
 
   return (
     <div className="relative min-h-screen">

@@ -30,7 +30,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { AlertTriangle, CheckCircle2, Clock3, Lock, LockOpen, RefreshCw, Send, Undo2, Users, Wifi, WifiOff, X, Zap } from "lucide-react";
 
-import { supabase } from "../../../lib/supabase";
+import { invalidate, useQuery } from "../../../lib/data";
+import { squadFor } from "../../../lib/data/queries.ts";
 import { fetchAudit, type MatchAuditData } from "../../../lib/live/api.ts";
 import { GOAL_TYPE_CHOICES, MINUTE_CEILINGS, TAP_GROUPS, tapEvent } from "../../../lib/live/eventCatalog.ts";
 import { useMatchRoom } from "../../../lib/live/useMatchRoom.ts";
@@ -95,8 +96,6 @@ export default function MatchControlCenter({ match, isOpen = true, onClose, onBa
   const [correction, setCorrection] = useState<CorrectionForm | null>(null);
   const [notice, setNotice] = useState<{ tone: "ok" | "bad"; text: string } | null>(null);
   const [audit, setAudit] = useState<MatchAuditData | null>(null);
-  const [homePlayers, setHomePlayers] = useState<SquadPlayer[]>([]);
-  const [awayPlayers, setAwayPlayers] = useState<SquadPlayer[]>([]);
   const [defaultTeam, setDefaultTeam] = useState<"home" | "away">("home");
   const [assignmentUserId, setAssignmentUserId] = useState("");
   const [assignmentRole, setAssignmentRole] = useState("head_referee");
@@ -110,22 +109,14 @@ export default function MatchControlCenter({ match, isOpen = true, onClose, onBa
   );
   const teamName = useCallback((teamId: number | null) => (teamId === null ? null : teamId === state.match?.home_team_id ? (state.match?.home_team_name ?? "Home") : teamId === state.match?.away_team_id ? (state.match?.away_team_name ?? "Away") : null), [state.match]);
 
-  // Squads, read once per pair of teams. A player list is not live state; refetching it on a goal is noise.
-  useEffect(() => {
-    const ids = [state.match?.home_team_id, state.match?.away_team_id].filter((v): v is number => typeof v === "number" && v > 0);
-    if (ids.length === 0) return;
-    let cancelled = false;
-    void (async () => {
-      const { data } = await supabase.from("players").select("id, name, number, position, team_id").in("team_id", ids).order("number", { ascending: true });
-      if (cancelled || !data) return;
-      const rows = data as SquadPlayer[];
-      setHomePlayers(rows.filter((p) => p.team_id === ids[0]));
-      setAwayPlayers(rows.filter((p) => p.team_id === ids[1]));
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [state.match?.away_team_id, state.match?.home_team_id]);
+  // Squads, read once per pair of teams through the shared cache: bounded, tagged `squad:<teamId>`, and the
+  // same rows the fan page reads for those two clubs. A player list is not live state, so refetching it on a
+  // goal would be noise — the cache's `page` TTL and an invalidation from a squad edit are enough.
+  const squadTeamIds = [state.match?.home_team_id, state.match?.away_team_id].filter((v): v is number => typeof v === "number" && v > 0);
+  const { data: squadRows } = useQuery(squadFor, { teamIds: squadTeamIds, limit: 60 }, { enabled: squadTeamIds.length > 0 });
+  const squad = (squadRows ?? []) as SquadPlayer[];
+  const homePlayers = squad.filter((p) => p.team_id === squadTeamIds[0]);
+  const awayPlayers = squad.filter((p) => p.team_id === squadTeamIds[1]);
 
   const players = defaultTeam === "home" ? homePlayers : awayPlayers;
   const selectedTeamId = teamIdFor(defaultTeam);
@@ -137,11 +128,17 @@ export default function MatchControlCenter({ match, isOpen = true, onClose, onBa
     return () => clearTimeout(id);
   }, [notice]);
 
-  // The admin portal's list refreshes when the room's cursor moves, not on a timer of its own.
+  // The room is the authority for this match; the lists elsewhere in the app are caches, and this is the
+  // moment they become wrong. So a moving sequence dirties the tags rather than waiting for a TTL, which is
+  // §4.2's targeted invalidation doing its job — `match:<id>` for the fan page's supplements, `matches` for
+  // the boards — and the news, squad and standings-adjacent keys are left alone because they did not change.
   useEffect(() => {
-    if (lastSequence.current !== 0 && state.sequence !== lastSequence.current) onUpdate?.();
+    if (lastSequence.current !== 0 && state.sequence !== lastSequence.current) {
+      invalidate(`match:${matchId}`, "matches");
+      onUpdate?.();
+    }
     lastSequence.current = state.sequence;
-  }, [onUpdate, state.sequence]);
+  }, [matchId, onUpdate, state.sequence]);
 
   useEffect(() => {
     if (!isOpen || rights?.isAdmin !== true) {

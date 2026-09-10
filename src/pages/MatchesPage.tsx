@@ -1,66 +1,33 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Header from "../components/Header";
 import Loading from "../components/Loading";
-import { supabase } from "../lib/supabase";
+import { describeAge, useQuery } from "../lib/data";
+import { matchList, type MatchFilter } from "../lib/data/queries.ts";
+
+const PAGE_SIZE = 20;
 
 export default function MatchesPage() {
   const navigate = useNavigate();
+  const [filter, setFilter] = useState<MatchFilter>('all');
+  const [page, setPage] = useState(0);
   const [matches, setMatches] = useState<any[]>([]);
-  const [filter, setFilter] = useState('all');
-  const [loading, setLoading] = useState(true);
-
+  // One shared read for the fixture list, armed on the `fast` cadence: the 10 s `setInterval` this page owned
+  // is gone, and the page that is open is the only thing that makes it tick (§4.3, F-04). Each page is its
+  // own cache key, so "load more" adds a read instead of re-reading the window it already showed.
+  const { data, error, loading, stale, ageMs, refetch } = useQuery(
+    matchList,
+    { filter, page, pageSize: PAGE_SIZE },
+    { poll: page === 0 },
+  );
   useEffect(() => {
-    loadMatches();
-    
-    // Poll for live match updates every 10 seconds
-    const pollInterval = setInterval(() => {
-      if (filter === 'live' || filter === 'all') {
-        loadMatches();
-      }
-    }, 10000);
-    
-    return () => clearInterval(pollInterval);
-  }, [filter]);
+    if (!data) return;
+    setMatches((prev) => (data.page === 0 ? data.rows : [...prev.filter((m) => !data.rows.some((d: any) => d.id === m.id)), ...data.rows]));
+  }, [data]);
+  const refresh = () => void refetch();
+  const loadMore = () => setPage((n) => n + 1);
 
-  async function loadMatches() {
-    try {
-      let query = supabase
-        .from('matches')
-        .select(`
-          id,
-          home_score,
-          away_score,
-          status,
-          minute,
-          start_time,
-          competition_id,
-          homeTeam:teams!home_team_id(name, short_name),
-          awayTeam:teams!away_team_id(name, short_name),
-          competitions(name)
-        `)
-        .order('start_time', { ascending: false });
-      
-      if (filter === 'live') {
-        query = query.in('status', ['first_half', 'second_half', 'extra_time', 'live']);
-      } else if (filter === 'scheduled') {
-        query = query.eq('status', 'scheduled');
-      } else if (filter === 'finished') {
-        query = query.in('status', ['full_time', 'completed', 'finished']);
-      }
-      
-      const { data, error } = await query.limit(50);
-      
-      if (error) throw error;
-      setMatches(data || []);
-    } catch (err) {
-      console.error('Matches load error:', err);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  if (loading) return <Loading text="Loading Matches..." size="md" />;
+  if (loading && !matches.length) return <Loading text="Loading Matches..." size="md" />;
 
   const filteredMatches = matches;
 
@@ -71,13 +38,29 @@ export default function MatchesPage() {
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8">
           <div>
             <h1 className="text-3xl sm:text-4xl font-black italic uppercase tracking-tighter">Fixtures & Results</h1>
-            <p className="text-white/40 text-sm mt-1">Real-time match updates</p>
+            <p className="text-white/40 text-sm mt-1">
+              {error ? (
+                <button onClick={refresh} className="text-amber-400 hover:text-amber-300">
+                  {`showing the last list that loaded · ${error}`}
+                </button>
+              ) : stale && matches.length ? (
+                <button onClick={refresh} className="hover:text-white">
+                  {`updated ${describeAge(ageMs)} · tap to refresh`}
+                </button>
+              ) : (
+                'Real-time match updates'
+              )}
+            </p>
           </div>
           <div className="flex gap-2 flex-wrap">
             {['all', 'live', 'scheduled', 'finished'].map(f => (
               <button
                 key={f}
-                onClick={() => setFilter(f)}
+                onClick={() => {
+                  setFilter(f as MatchFilter);
+                  setPage(0);
+                  setMatches([]);
+                }}
                 className={`px-3 sm:px-4 py-2 rounded-xl font-black uppercase text-xs tracking-widest whitespace-nowrap ${
                   filter === f ? 'bg-brand-green text-black' : 'bg-white/5 text-white/40 hover:text-white'
                 }`}
@@ -130,6 +113,15 @@ export default function MatchesPage() {
               </div>
             </div>
           ))}
+
+          {(data?.more ?? false) && (
+            <button
+              onClick={loadMore}
+              className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-white/60 font-black uppercase text-[10px] tracking-widest"
+            >
+              {`Load ${PAGE_SIZE} more`}
+            </button>
+          )}
         </div>
 
         {filteredMatches.length === 0 && (

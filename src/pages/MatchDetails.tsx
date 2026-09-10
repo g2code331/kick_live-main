@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Calendar, Users, MessageSquare, Activity, TrendingUp, Wifi, WifiOff } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { useQuery } from '../lib/data';
+import { matchFixture, matchSupplements } from '../lib/data/queries.ts';
 
 import { useMatchRoom } from '../lib/live/useMatchRoom.ts';
 
@@ -22,62 +23,47 @@ export default function MatchDetails() {
   const id = Number(matchId);
   const { state, clock, connection, secondsSinceFrame } = useMatchRoom(Number.isFinite(id) ? id : 0, { mode: 'viewer', enabled: Number.isFinite(id) && id > 0 });
 
-  const [fixture, setFixture] = useState<any>(null);
+  // The fixture's static identity, and the three things the ledger does not answer — both through the shared
+  // cache now, keyed by the match. That is what makes a Back trip free, what makes the console's own writes
+  // invalidate this page (both are tagged `match:<id>`), and what bounded the squad read that used to pull
+  // every row for two clubs with no limit (F-06).
+  const valid = Number.isFinite(id) && id > 0;
+  const fixtureQuery = useQuery(matchFixture, { matchId: id }, { enabled: valid });
+  const fixture = fixtureQuery.data as any;
   const [commentary, setCommentary] = useState<any[]>([]);
   const [stats, setStats] = useState<any>(null);
   const [lineups, setLineups] = useState<any>({ home: [], away: [] });
-  const [loading, setLoading] = useState(true);
-  const lastAux = useRef(0);
+  const teamIds = [fixture?.home_team_id, fixture?.away_team_id].filter((v: any) => typeof v === 'number') as number[];
+  const aux = useQuery(
+    matchSupplements,
+    { matchId: id, teamIds },
+    { enabled: valid && teamIds.length > 0 || (valid && teamIds.length === 0) },
+  );
 
-  // The fixture's static identity: names, colours, kickoff, competition. Read once; it does not change
-  // while a fan is watching, and the live fields on the same row are no longer read from here.
   useEffect(() => {
-    if (!Number.isFinite(id) || id <= 0) return;
-    let cancelled = false;
-    void (async () => {
-      const { data } = await supabase
-        .from('matches')
-        .select(`
-          id, status, venue, start_time, match_start_time, home_team_id, away_team_id,
-          homeTeam:teams!home_team_id(id, name, short_name, primary_color, secondary_color),
-          awayTeam:teams!away_team_id(id, name, short_name, primary_color, secondary_color),
-          competitions(name)
-        `)
-        .eq('id', id)
-        .single();
-      if (cancelled) return;
-      setFixture(data);
-      setLoading(false);
-    })();
-    return () => { cancelled = true; };
-  }, [id]);
+    const data = aux.data;
+    if (!data) return;
+    setCommentary(data.commentary);
+    setStats(data.statistics);
+    setLineups({
+      home: data.players.filter((p: any) => p.team_id === teamIds[0]),
+      away: data.players.filter((p: any) => p.team_id === teamIds[1]),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aux.data]);
 
-  // Commentary, statistics and lineups: refreshed when the ledger moves, never on their own timer.
+  // Refresh the auxiliary block when the ledger moves — never on its own timer. `refetch` bypasses the TTL
+  // floor, so a goal in the room means a fresh commentary page here, once, for every fan watching.
+  const lastSequence = useRef(0);
   useEffect(() => {
-    if (!Number.isFinite(id) || id <= 0) return;
-    const now = Date.now();
-    if (state.sequence > 0 && now - lastAux.current < 5000) return;
-    lastAux.current = now;
-    let cancelled = false;
-    void (async () => {
-      const [commentaryResult, statsResult, teamIds] = await Promise.all([
-        supabase.from('match_commentary').select('*').eq('match_id', id).order('minute', { ascending: true }),
-        supabase.from('match_statistics').select('*').eq('match_id', id).single(),
-        Promise.resolve([fixture?.home_team_id, fixture?.away_team_id].filter((v: any) => typeof v === 'number') as number[]),
-      ]);
-      const playersResult = teamIds.length > 0 ? await supabase.from('players').select('id, name, number, position, team_id').in('team_id', teamIds) : { data: null };
-      if (cancelled) return;
-      setCommentary(commentaryResult.data || []);
-      setStats(statsResult.data);
-      if (playersResult.data) {
-        setLineups({
-          home: (playersResult.data as any[]).filter((p) => p.team_id === teamIds[0]),
-          away: (playersResult.data as any[]).filter((p) => p.team_id === teamIds[1]),
-        });
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [fixture?.away_team_id, fixture?.home_team_id, id, state.sequence]);
+    if (state.sequence > 0 && state.sequence !== lastSequence.current) {
+      lastSequence.current = state.sequence;
+      void aux.refetch();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.sequence]);
+
+  const loading = fixtureQuery.loading && !fixture && !state.ready;
 
   // The engine's own ordering is newest-first, which is right for a console and wrong for a timeline a
   // fan reads top-to-bottom from kickoff.

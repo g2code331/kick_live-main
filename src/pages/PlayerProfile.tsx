@@ -1,61 +1,21 @@
-import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Trophy, Activity, Calendar, MapPin, Shirt } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { useQuery } from '../lib/data';
+import { playerProfile, teamFixtures } from '../lib/data/queries.ts';
 
 export default function PlayerProfile() {
   const { playerId } = useParams<{ playerId: string }>();
   const navigate = useNavigate();
-  const [player, setPlayer] = useState<any>(null);
-  const [team, setTeam] = useState<any>(null);
-  const [matches, setMatches] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const id = Number(playerId);
+  const valid = Number.isFinite(id) && id > 0;
+  // Two cached reads, both keyed: the player's row and their club's recent fixtures. The second used to run
+  // inside the first's callback, so a Back/Forward trip cost both again.
+  const { data: player, loading } = useQuery(playerProfile, { playerId: id }, { enabled: valid });
+  const teamId = Number((player as any)?.team_id ?? 0);
+  const { data: recent } = useQuery(teamFixtures, { teamId, limit: 10 }, { enabled: teamId > 0 });
 
-  useEffect(() => {
-    if (playerId) {
-      loadPlayerData();
-    }
-  }, [playerId]);
-
-  async function loadPlayerData() {
-    try {
-      // Fetch player details
-      const { data: playerData } = await supabase
-        .from('players')
-        .select('*, teams(id, name, short_name, primary_color, secondary_color, city, coach)')
-        .eq('id', playerId)
-        .single();
-      
-      if (playerData) {
-        setPlayer(playerData);
-        setTeam(playerData.teams);
-      }
-
-      // Fetch recent matches involving player's team
-      if (playerData?.team_id) {
-        const { data: matchesData } = await supabase
-          .from('matches')
-          .select(`
-            id,
-            home_score,
-            away_score,
-            status,
-            minute,
-            start_time,
-            homeTeam:teams!home_team_id(id, name, short_name),
-            awayTeam:teams!away_team_id(id, name, short_name)
-          `)
-          .or(`home_team_id.eq.${playerData.team_id},away_team_id.eq.${playerData.team_id}`)
-          .order('start_time', { ascending: false })
-          .limit(10);
-        setMatches(matchesData || []);
-      }
-    } catch (err) {
-      console.error('Error loading player data:', err);
-    } finally {
-      setLoading(false);
-    }
-  }
+  const team = ((player as any)?.teams as any) ?? null;
+  const matches = (recent ?? []) as any[];
 
   if (loading) {
     return (

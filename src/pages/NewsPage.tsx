@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Search, X, ChevronRight, Clock, Eye, Tag, ArrowLeft, Loader2, Newspaper } from 'lucide-react';
 import Header from '../components/Header';
-import { supabase } from '../lib/supabase';
+import { readOnce, useQuery } from '../lib/data';
+import { newsArticle, newsPage } from '../lib/data/queries.ts';
 import { recordMediaView } from '../lib/db';
 
 const FALLBACK_IMG = 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&auto=format&fit=crop';
@@ -35,7 +36,6 @@ export default function NewsPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const [articles, setArticles] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
   const [category, setCategory] = useState<Category>('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [selected, setSelected] = useState<any>(null);
@@ -43,54 +43,36 @@ export default function NewsPage() {
   const [hasMore, setHasMore] = useState(true);
   const PAGE_SIZE = 12;
 
-  const fetchArticles = useCallback(async (reset = false) => {
-    const currentPage = reset ? 0 : page;
-    setLoading(true);
-    // Build query with only guaranteed-to-exist columns (matches home page query)
-    // views / featured / tags are added later via SQL migration
-    let q = supabase
-      .from('media')
-      .select('id, title, excerpt, content, category, image_url, created_at')
-      .order('created_at', { ascending: false })
-      .range(currentPage * PAGE_SIZE, currentPage * PAGE_SIZE + PAGE_SIZE - 1);
+  const { data, loading, error, refetch } = useQuery(newsPage, { category, query: searchQuery, page, pageSize: PAGE_SIZE });
 
-    if (category !== 'All') q = q.eq('category', category);
-    if (searchQuery.trim()) q = q.ilike('title', `%${searchQuery.trim()}%`);
+  // One key per page, so "Load more" adds a read instead of re-reading what is already on screen, and a
+  // filter change that comes back gets its cached first page (F-03).
+  useEffect(() => {
+    if (!data) return;
+    setArticles((prev) => (data.page === 0 ? data.rows : [...prev.filter((a) => !data.rows.some((b: any) => b.id === a.id)), ...data.rows]));
+    setHasMore(data.more);
+  }, [data]);
 
-    const { data, error } = await q;
-    if (error) console.error('Failed to load articles:', error.message);
-    if (!error) {
-      const incoming = data || [];
-      setArticles(prev => reset ? incoming : [...prev, ...incoming]);
-      setHasMore(incoming.length === PAGE_SIZE);
-      if (!reset) setPage(p => p + 1);
-    }
-    setLoading(false);
-  }, [category, searchQuery, page]);
+  const loadMore = () => setPage((p) => p + 1);
+  const refresh = () => void refetch();
 
-  // Reset + refetch when filters change
+  // Filters reset the window rather than the cache: the previous filter's pages stay warm for the Back button.
   useEffect(() => {
     setPage(0);
     setArticles([]);
-    fetchArticles(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [category, searchQuery]);
 
-  // If we arrived here from the homepage carousel with a specific article in mind,
-  // fetch it directly (regardless of current filters/pagination) and open it.
+  // If we arrived here from the homepage carousel with a specific article in mind, open it regardless of
+  // the current filters — through the cache, so a second visitor of that article does not re-read it.
   useEffect(() => {
     const articleId = (location.state as any)?.articleId;
     if (!articleId) return;
-    (async () => {
-      const { data } = await supabase
-        .from('media')
-        .select('id, title, excerpt, content, category, image_url, created_at, views')
-        .eq('id', articleId)
-        .maybeSingle();
-      if (data) {
-        setSelected(data);
+    void (async () => {
+      const found = await readOnce(newsArticle, { id: Number(articleId) });
+      if (found) {
+        setSelected(found);
         // Atomic increment in Postgres; used to be a client-side read-modify-write on `views`.
-        void recordMediaView(data.id);
+        void recordMediaView(found.id as number);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -228,7 +210,7 @@ export default function NewsPage() {
         {hasMore && articles.length > 0 && (
           <div className="mt-10 text-center">
             <button
-              onClick={() => fetchArticles(false)}
+              onClick={loadMore}
               disabled={loading}
               className="px-8 py-3 rounded-2xl bg-white/5 border border-white/10 text-white/60 font-black text-xs uppercase tracking-widest hover:bg-white/10 hover:text-white transition-all disabled:opacity-40 flex items-center gap-2 mx-auto"
             >

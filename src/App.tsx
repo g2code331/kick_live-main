@@ -21,7 +21,7 @@ import PlayerProfile from "./pages/PlayerProfile";
 import MatchDetails from "./pages/MatchDetails";
 import ProfilePage from "./pages/ProfilePage";
 import NewsPage from "./pages/NewsPage";
-import { dataLoader } from "./lib/DataLoader";
+import { initDataLayer } from "./lib/data";
 import { log } from "./lib/log";
 import { assetUrl } from "./lib/app-shell.ts";
 
@@ -34,29 +34,14 @@ function AppContent() {
   };
 
   useEffect(() => {
-    log.debug('[App] initializing background data loader');
-    dataLoader
-      .loadAll()
-      .catch((err) => log.error('[App] initial data load failed:', err instanceof Error ? err.message : err));
-    dataLoader.startAutoRefresh();
-
-    // A hidden tab that keeps polling is pure egress: on phones this ran forever in the background.
-    // Pause while hidden, and catch up once — only if the cache actually went stale.
-    const onVisibility = () => {
-      if (typeof document === 'undefined') return;
-      if (document.visibilityState === 'hidden') {
-        dataLoader.stopAutoRefresh();
-      } else {
-        if (dataLoader.isStale()) void dataLoader.refresh();
-        dataLoader.startAutoRefresh();
-      }
-    };
-    document.addEventListener('visibilitychange', onVisibility);
-
-    return () => {
-      dataLoader.stopAutoRefresh();
-      document.removeEventListener('visibilitychange', onVisibility);
-    };
+    // Phase 4 replaced this effect. It used to call `dataLoader.loadAll()` — six queries for a cache with
+    // zero readers (audit finding F-01) — and `startAutoRefresh()`, six more every five minutes per visible
+    // tab. `initDataLayer()` starts one ticker that refreshes only what a mounted screen armed, pauses while
+    // hidden, and does nothing at all on a page that is not polling. Pages read through `src/lib/data`, so
+    // the app-wide warm-up has no job left: the first screen to need a key asks for it, and everyone else
+    // gets that answer.
+    initDataLayer();
+    log.debug('[App] data layer ready');
   }, []);
 
   if (loading) {
