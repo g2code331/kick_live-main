@@ -112,13 +112,43 @@ engine needs no rewrite (it is pure), `MatchAutomation` needs the `supabase` cli
 Worker's admin client and its `try/catch`-swallowed errors turned into failed jobs. Exit: finalize
 returns before the work is done, and the work visibly retries.
 
-## Phase 5 — push notifications
+## Phase 5 — push notifications 🟡 code in progress, ⚠ migration not applied, ⚠ FCM not configured
 
-`device_tokens` (per user, per device, per platform) + notification preferences, `POST
-/v1/notifications/subscriptions`, an FCM/APNs delivery worker fed from the queue, and `notifications`
-rows given a `user_id` (today: no recipient, no reader — architecture §11). In-app notifications move
-from `Header.tsx`'s recent-results hack to the real table. Exit: a goal reaches a phone without anyone
-having the app open.
+The plan above changed in one place: **the queue belongs here, not in Phase 4** (Phase 4 became the data
+architecture/caching/performance phase, so `kicklive-jobs` and the notification fan-out landed together in
+this one). Design and audit: `docs/NOTIFICATIONS_ARCHITECTURE.md`.
+
+- **Supabase** — `notifications` gains `user_id/kind/dedupe_key/read_at/metadata/priority/expires_at`
+  (extended, not recreated: the 217-day-old broadcast rows stay, and `notifications: public read` becomes
+  owner-scoped-or-broadcast); new `notification_preferences` (row per user per category, per-kind defaults,
+  `channels[]` ready for a second delivery medium), `notification_devices` (token as a credential,
+  `unique (provider, token)` so a re-registration moves rather than duplicates), `notification_jobs` (the
+  durable wake-up), `notification_deliveries` (per-device outcome), `match_interest` (the one relationship
+  table, because no follow model exists yet and the audience needs a seam). All new tables: RLS enabled +
+  forced, `revoke all` + narrow grants, self-verifying migration.
+- **Worker** — 8 routes (devices, preferences, inbox, read, read-all, public config, diagnostics, admin
+  broadcast), the capability matrix unchanged (`profile.read_own` + `notifications.broadcast` are already
+  there and neither is widened), a policy module as the only place event→audience→copy is decided, an FCM
+  HTTP v1 adapter with a mock used by every test, and no Firebase credential anywhere near the browser.
+- **Queue** — `kicklive-notifications` + DLQ with the settings `wrangler.toml:138` reserved, consumer that
+  claims jobs under `for update skip locked`, and a `*/5` cron sweep, because the queue is a wake-up and the
+  job table is the truth.
+- **Idempotency** — three constraints, not one: `dedupe_key = match:<id>|seq:<sequence>|kind:<kind>` on the
+  job, `(user_id, dedupe_key)` on the inbox row, `(job_id, device_id)` on the delivery. The sequence is
+  Phase 3's server-assigned per-match number, which is what makes reconnects, refreshes and replays
+  harmless rather than merely unlikely.
+- **Jobs are created inside the event RPC**, in the same transaction as the goal, guarded by
+  `to_regclass('public.notification_jobs')` so an unapplied migration costs no notification and never a lost
+  event. `ctx.waitUntil(queue.send(…))` after commit; the referee never waits for FCM.
+- **Frontend** — the three decorative "Notification Prefs" toggles in `ProfilePage`/`ProfileDashboard`
+  become real; the bell gains an unread badge from the inbox while keeping its results list; Web Push opt-in
+  asks for permission only inside a click on a meaningful affordance, registers through the API, and
+  retries offline.
+
+Exit criterion, restated honestly: the **code** path from an authoritative goal to an FCM request exists and
+is tested against a mock delivery adapter. "A goal reaches a phone" additionally needs the §20 manual setup
+(Firebase project, service-account secret, queue ids, migration applied) and has **not** been verified here —
+no Postgres, no Cloudflare queue and no browser in this environment. Not configured ≠ working.
 
 ## Phase 6 — advertising and sponsorship
 
