@@ -1781,10 +1781,14 @@ begin
     raise exception 'hardening failed: match_events is still updatable by a client role';
   end if;
 
+  -- By NAME, not by pattern. A `like 'kicklive_%'` count over these tables is a claim about the whole
+  -- schema from inside one file: Phase 5 later adds `kicklive_notification_job` to `match_events`, so the
+  -- count would become 4 and this check would fail on any re-run of this migration — an assertion that
+  -- breaks because a *later* file did something correct is a bug in the assertion.
   select count(*) into v_count from pg_trigger t
     join pg_class c on c.oid = t.tgrelid
    where c.relname in ('matches','match_events') and not t.tgisinternal
-     and t.tgname like 'kicklive_%';
+     and t.tgname in ('kicklive_guard_match_result_columns', 'kicklive_guard_match_events_append_only', 'kicklive_sequence_on_insert');
   if v_count <> 3 then
     raise exception 'hardening failed: % engine triggers installed, expected 3', v_count;
   end if;

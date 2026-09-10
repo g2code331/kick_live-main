@@ -26,6 +26,7 @@ import { authorizeForRoute } from "./middleware/authorization.ts";
 import { applyCors, corsOriginFor, preflightResponse } from "./middleware/cors.ts";
 import { BUDGETS, clientAddress, createRateLimiter, limitKeyFor, rateLimitHeaders, type RateDecision } from "./middleware/ratelimit.ts";
 import { handleNotificationQueue, sweepNotifications, type QueueBatch } from "./queues/notifications.ts";
+import { handleAdEventQueue, runAdMaintenance } from "./queues/ads.ts";
 import { MEDIA_SWEEP_CRON, sweepMedia } from "./services/mediaStore.ts";
 import { matchRoute, stripApiPrefix, type RouteDef } from "./router.ts";
 import { dispatchRoute } from "./routes/index.ts";
@@ -59,6 +60,20 @@ export default {
 
   /** Fan-out for notification jobs. `queues.consumers` in wrangler.toml decides what a failure costs. */
   async queue(batch: MessageBatch<unknown>, env: Env): Promise<void> {
+    // Which consumer a batch goes to has to be decided by the queue it arrived on, because one Worker now
+    // serves two `queue.consumer` bindings. `MessageBatch#queue` is the queue's *name*, and the names are the
+    // vars below rather than strings duplicated from wrangler.toml: a test asserts each pair agrees, which is
+    // the only defence against renaming a queue in one file and silently sending measurements to the
+    // notification fan-out. An unrecognised name is a config error, and says so, rather than acking.
+    const queueName = (batch as unknown as { queue?: string }).queue;
+    const adQueue = env.AD_EVENTS_QUEUE_NAME;
+    if (adQueue && queueName === adQueue) {
+      await handleAdEventQueue(batch as unknown as QueueBatch, env);
+      return;
+    }
+    if (adQueue && queueName && env.NOTIFICATION_QUEUE_NAME && queueName !== env.NOTIFICATION_QUEUE_NAME) {
+      throw new Error(`no consumer configured for queue ${queueName}`);
+    }
     await handleNotificationQueue(batch as unknown as QueueBatch, env);
   },
 
@@ -75,6 +90,12 @@ export default {
   async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     if (controller.cron === MEDIA_SWEEP_CRON) {
       try {
+        // Advertising maintenance rides the hourly media sweep rather than getting its own cron line for the
+        // same reason the notification sweep shares one: a second schedule is a second place for a deploy to
+        // be wrong, and neither job is latency-sensitive. Expiry only has to be prompt-ish because `serve`
+        // decides eligibility at request time and will not show a creative whose window has closed — this pass
+        // exists so that the *tables* say what the *answer* said, and so retention actually prunes.
+        await runAdMaintenance(env);
         await sweepMedia(env);
       } catch (err) {
         logError(`media-sweep-${controller.cron.replace(/\s+/g, "-")}`, err);

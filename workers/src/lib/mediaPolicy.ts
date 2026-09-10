@@ -17,7 +17,20 @@
 
 /** Kinds with a table the registry can attach to. `sponsors`/`advertisements`
  *  are reserved prefixes for Phase 7 and are not legal asset kinds yet. */
-export const MEDIA_KINDS = ["teams", "players", "competitions", "seasons", "news", "team_news", "matches", "users"] as const;
+export const MEDIA_KINDS = [
+  "teams",
+  "players",
+  "competitions",
+  "seasons",
+  "news",
+  "team_news",
+  "matches",
+  "users",
+  // A registry-only kind, added by the same migration that creates the table it points at: `advertisements`
+  // widens `media_assets_kind_check` in Phase 7 for exactly that reason. `sponsors` will arrive the same way —
+  // a kind legal before its table exists is an invitation to write objects nothing can authorize or render.
+  "advertisements",
+] as const;
 export type MediaKind = (typeof MEDIA_KINDS)[number];
 
 /** Kinds a browser may upload to. `matches` is registry-only (its media is
@@ -71,6 +84,23 @@ export const MEDIA_CATEGORIES: Record<MediaKind, MediaCategory> = {
   },
   news: { kind: "news", table: "media", urlColumn: "image_url", idColumn: "id", visibility: "public", maxBytes: 10 * 1024 * 1024, uploadable: true, description: "News and match-report images" },
   team_news: { kind: "team_news", table: "team_news", urlColumn: "image_url", idColumn: "id", visibility: "public", maxBytes: 10 * 1024 * 1024, uploadable: true, description: "Club news images" },
+  // Registry-only kinds: they exist so that an asset row can name its entity and be *authorized* by a
+  // function that knows the table, and so `kicklive_entity_assets` can answer for them. Neither is
+  // uploadable from the generic media route — an advertisement's creative is reserved through
+  // `kicklive_ad_reserve_creative`, which checks that the caller owns the flight's advertiser, and a
+  // sponsor's logo through `kicklive_sponsor_reserve_asset`, which checks the sponsorship desk. A
+  // `urlColumn` of "" is the type-level statement of that: there is no entity column for a publish to
+  // repoint, so the generic path physically cannot attach one by accident.
+  advertisements: {
+    kind: "advertisements",
+    table: "advertisements",
+    urlColumn: "image_url",
+    idColumn: "id",
+    visibility: "public",
+    maxBytes: 10 * 1024 * 1024,
+    uploadable: false,
+    description: "Advertisement creatives (image format only; HTML is stored as text, not bytes)",
+  },
   matches: {
     kind: "matches",
     table: "matches",
@@ -111,8 +141,16 @@ export const MIGRATION_MAX_BYTES_PER_RUN = 64 * 1024 * 1024;
 export const MIGRATION_MAX_OBJECTS_PER_RUN = 200;
 export const MIGRATION_CONCURRENCY = 4;
 
-/** Character set and length of an object key — the rule the database's CHECK enforces. */
-export const OBJECT_KEY_PATTERN = /^[a-z0-9][a-z0-9._/-]{2,509}$/;
+/** Character set of an object key — the rule the database's CHECK enforces. */
+export const OBJECT_KEY_PATTERN = /^[a-z0-9][a-z0-9._/-]{2,}$/;
+/**
+ * …which is only half of that CHECK. The length bound is a separate predicate on both sides because
+ * Postgres' regex engine refuses a repetition count above 255 (`{2,509}` is rejected at *evaluation*
+ * time, so the failure would surface as every insert erroring rather than as a bad migration), and a
+ * key this long is not a thing this app produces: the longest real one is ~70 characters.
+ */
+export const OBJECT_KEY_MIN_LENGTH = 3;
+export const OBJECT_KEY_MAX_LENGTH = 512;
 
 /**
  * The whole rule a key taken from a URL must satisfy. The character set is not enough on its own:
@@ -123,6 +161,7 @@ export const OBJECT_KEY_PATTERN = /^[a-z0-9][a-z0-9._/-]{2,509}$/;
  * reader of this route who benefits.
  */
 export function isSafeObjectKey(value: string): boolean {
+  if (value.length < OBJECT_KEY_MIN_LENGTH || value.length > OBJECT_KEY_MAX_LENGTH) return false;
   if (!OBJECT_KEY_PATTERN.test(value)) return false;
   if (value.includes("..") || value.includes("//")) return false;
   return value.split("/").every((segment) => segment !== "" && segment !== ".");

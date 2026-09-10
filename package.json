@@ -32,6 +32,7 @@
     "brand:assets:check": "node scripts/brand-assets.mjs --check",
     "version:check": "node scripts/version.mjs check",
     "version:write": "node scripts/version.mjs write",
+    "check:sql": "node scripts/check-sql.mjs",
     "verify": "node scripts/verify.mjs check",
     "verify:write": "node scripts/verify.mjs write",
     "verify:packaging": "node scripts/verify-packaging.mjs",

@@ -34,6 +34,12 @@ send_metrics = "off"
 # production ref (the `SUPABASE_PROJECT_REF` check in services/supabase.ts enforces the pair).
 # ─────────────────────────────────────────────────────────────────────────
 [vars]
+NOTIFICATION_QUEUE_NAME = "kicklive-notifications-dev"
+AD_EVENTS_QUEUE_NAME = "kicklive-ad-events-dev"
+#  The names and not the bindings: `MessageBatch#queue` reports a queue *name*, one Worker now serves
+#  two queues, and a rename in this file without the matching var would silently route measurements
+#  into the notification fan-out. `tests/unit/phase2-api-boundary.test.ts` parses both sides of that
+#  sentence, so the pair cannot drift apart quietly.
 APP_ENV = "development"
 SUPABASE_URL = "https://REPLACE-WITH-STAGING-REF.supabase.co"
 SUPABASE_PROJECT_REF = "REPLACE-WITH-STAGING-REF"
@@ -123,6 +129,35 @@ backoff_max_delay_ms = 600000
   queue = "kicklive-notifications-failed-dev"
   max_batch_size = 10
 
+# Ad measurement (Phase 7). A second queue rather than a second message type on the notification queue
+# because the two want opposite delivery policies: a notification job is a wake-up for a row that already
+# exists (retry until the sweep catches it), while an ad event is the record itself, written once and
+# deduplicated below us. Sharing one consumer would force one retry policy on both, and the notification
+# side's `max_retries = 6` would mean a poison ad batch is replayed six times against a table whose only
+# guard is a unique key. Same Worker, so `queue` in `index.ts` discriminates by queue name.
+#
+# `max_batch_size = 100` matches the consumer's own cap: a batch the size of the insert the RPC will perform
+# means one database call per batch rather than one per message, which is the entire reason the rollup stays
+# cheap. `max_retries = 2` is small on purpose — a failed insert retries the whole batch, and the unique
+# `dedupe_key` turns the retry into a no-op for rows that did land, so more retries cost nothing but delay.
+[[queues.producers]]
+queue = "kicklive-ad-events-dev"
+binding = "AD_EVENTS_QUEUE"
+
+[[queues.consumers]]
+queue = "kicklive-ad-events-dev"
+max_batch_size = 100
+max_batch_timeout = 10
+max_retries = 2
+min_instances = 0
+max_concurrency = 5
+backoff_delay_ms = 30000
+backoff_max_delay_ms = 300000
+
+# No dead-letter queue for measurements. A message that survives two retries has already lost its day:
+# an impression is counted per UTC day, so a redelivery from a DLQ a week later would be refused by the
+# horizon check anyway, and a queue nobody reads is a cost with no recovery path behind it.
+
 [triggers]
 # The five-minute safety net (docs/NOTIFICATIONS_ARCHITECTURE.md §11): re-enqueue anything the queue lost,
 # and prune long-dead device rows on the hour. `*/5 * * * *` is UTC.
@@ -139,6 +174,12 @@ crons = ["*/5 * * * *", "17 * * * *"]
 name = "kicklive-api-staging"
 
 [env.staging.vars]
+NOTIFICATION_QUEUE_NAME = "kicklive-notifications-staging"
+AD_EVENTS_QUEUE_NAME = "kicklive-ad-events-staging"
+#  The names and not the bindings: `MessageBatch#queue` reports a queue *name*, one Worker now serves
+#  two queues, and a rename in this file without the matching var would silently route measurements
+#  into the notification fan-out. `tests/unit/phase2-api-boundary.test.ts` parses both sides of that
+#  sentence, so the pair cannot drift apart quietly.
 APP_ENV = "staging"
 SUPABASE_URL = "https://REPLACE-WITH-STAGING-REF.supabase.co"
 SUPABASE_PROJECT_REF = "REPLACE-WITH-STAGING-REF"
@@ -182,6 +223,35 @@ backoff_max_delay_ms = 600000
   queue = "kicklive-notifications-failed-staging"
   max_batch_size = 10
 
+# Ad measurement (Phase 7). A second queue rather than a second message type on the notification queue
+# because the two want opposite delivery policies: a notification job is a wake-up for a row that already
+# exists (retry until the sweep catches it), while an ad event is the record itself, written once and
+# deduplicated below us. Sharing one consumer would force one retry policy on both, and the notification
+# side's `max_retries = 6` would mean a poison ad batch is replayed six times against a table whose only
+# guard is a unique key. Same Worker, so `queue` in `index.ts` discriminates by queue name.
+#
+# `max_batch_size = 100` matches the consumer's own cap: a batch the size of the insert the RPC will perform
+# means one database call per batch rather than one per message, which is the entire reason the rollup stays
+# cheap. `max_retries = 2` is small on purpose — a failed insert retries the whole batch, and the unique
+# `dedupe_key` turns the retry into a no-op for rows that did land, so more retries cost nothing but delay.
+[[env.staging.queues.producers]]
+queue = "kicklive-ad-events-staging"
+binding = "AD_EVENTS_QUEUE"
+
+[[env.staging.queues.consumers]]
+queue = "kicklive-ad-events-staging"
+max_batch_size = 100
+max_batch_timeout = 10
+max_retries = 2
+min_instances = 0
+max_concurrency = 5
+backoff_delay_ms = 30000
+backoff_max_delay_ms = 300000
+
+# No dead-letter queue for measurements. A message that survives two retries has already lost its day:
+# an impression is counted per UTC day, so a redelivery from a DLQ a week later would be refused by the
+# horizon check anyway, and a queue nobody reads is a cost with no recovery path behind it.
+
 [env.staging.triggers]
 # The media cron string must equal MEDIA_SWEEP_CRON in src/services/mediaStore.ts (asserted in tests).
 crons = ["*/5 * * * *", "17 * * * *"]
@@ -201,6 +271,12 @@ new_sqlite_classes = ["MatchRoom"]
 name = "kicklive-api"
 
 [env.production.vars]
+NOTIFICATION_QUEUE_NAME = "kicklive-notifications"
+AD_EVENTS_QUEUE_NAME = "kicklive-ad-events"
+#  The names and not the bindings: `MessageBatch#queue` reports a queue *name*, one Worker now serves
+#  two queues, and a rename in this file without the matching var would silently route measurements
+#  into the notification fan-out. `tests/unit/phase2-api-boundary.test.ts` parses both sides of that
+#  sentence, so the pair cannot drift apart quietly.
 APP_ENV = "production"
 SUPABASE_URL = "https://REPLACE-WITH-PRODUCTION-REF.supabase.co"
 SUPABASE_PROJECT_REF = "REPLACE-WITH-PRODUCTION-REF"
@@ -243,6 +319,35 @@ backoff_max_delay_ms = 600000
   [env.production.queues.consumers.dead_letter_queue]
   queue = "kicklive-notifications-failed"
   max_batch_size = 10
+
+# Ad measurement (Phase 7). A second queue rather than a second message type on the notification queue
+# because the two want opposite delivery policies: a notification job is a wake-up for a row that already
+# exists (retry until the sweep catches it), while an ad event is the record itself, written once and
+# deduplicated below us. Sharing one consumer would force one retry policy on both, and the notification
+# side's `max_retries = 6` would mean a poison ad batch is replayed six times against a table whose only
+# guard is a unique key. Same Worker, so `queue` in `index.ts` discriminates by queue name.
+#
+# `max_batch_size = 100` matches the consumer's own cap: a batch the size of the insert the RPC will perform
+# means one database call per batch rather than one per message, which is the entire reason the rollup stays
+# cheap. `max_retries = 2` is small on purpose — a failed insert retries the whole batch, and the unique
+# `dedupe_key` turns the retry into a no-op for rows that did land, so more retries cost nothing but delay.
+[[env.production.queues.producers]]
+queue = "kicklive-ad-events"
+binding = "AD_EVENTS_QUEUE"
+
+[[env.production.queues.consumers]]
+queue = "kicklive-ad-events"
+max_batch_size = 100
+max_batch_timeout = 10
+max_retries = 2
+min_instances = 0
+max_concurrency = 5
+backoff_delay_ms = 30000
+backoff_max_delay_ms = 300000
+
+# No dead-letter queue for measurements. A message that survives two retries has already lost its day:
+# an impression is counted per UTC day, so a redelivery from a DLQ a week later would be refused by the
+# horizon check anyway, and a queue nobody reads is a cost with no recovery path behind it.
 
 [env.production.triggers]
 # The media cron string must equal MEDIA_SWEEP_CRON in src/services/mediaStore.ts (asserted in tests).

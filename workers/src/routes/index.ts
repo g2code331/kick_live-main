@@ -60,6 +60,28 @@ import {
   handleMediaUpload,
 } from "./media.ts";
 
+import {
+  handleAdvertisementStatus,
+  handleAdAdvertisers,
+  handleAdAnalytics,
+  handleAdCampaigns,
+  handleAdConfig,
+  handleAdDiagnostics,
+  handleAdEvents,
+  handleAdMaintenance,
+  handleAdPlacementToggle,
+  handleAdPlacements,
+  handleAdPreview,
+  handleAdSaveAdvertiser,
+  handleAdSaveAdvertisement,
+  handleAdSaveCampaign,
+  handleAdServe,
+  handleAdViewerKey,
+  handleAdvertiserStatus,
+  handleCampaignStatus,
+  handleAdvertisements,
+} from "./ads.ts";
+
 export interface HandlerContext {
   readonly request: Request;
   readonly env: Env;
@@ -126,6 +148,28 @@ export const HANDLERS: Record<string, RouteHandler> = {
   "GET /media/diagnostics": handleMediaDiagnostics,
   "POST /media/sweep": handleMediaSweep,
   "POST /media/migration": handleMediaMigration,
+
+  // advertising — the viewer plane first, because those three are the only routes an anonymous browser
+  // touches, and the order in this object says which ones a page depends on being up.
+  "POST /advertising/viewer-key": handleAdViewerKey,
+  "GET /advertising/placement/:code": handleAdServe,
+  "POST /advertising/events": handleAdEvents,
+  "GET /advertising/config": handleAdConfig,
+  "GET /advertising/placements": handleAdPlacements,
+  "POST /advertising/placements/:code": handleAdPlacementToggle,
+  "GET /advertising/advertisers": handleAdAdvertisers,
+  "POST /advertising/advertisers": handleAdSaveAdvertiser,
+  "POST /advertising/advertisers/:id/status": handleAdvertiserStatus,
+  "GET /advertising/campaigns": handleAdCampaigns,
+  "POST /advertising/campaigns": handleAdSaveCampaign,
+  "POST /advertising/campaigns/:id/status": handleCampaignStatus,
+  "GET /advertising/creatives": handleAdvertisements,
+  "POST /advertising/creatives": handleAdSaveAdvertisement,
+  "POST /advertising/creatives/:id/status": handleAdvertisementStatus,
+  "POST /advertising/preview": handleAdPreview,
+  "POST /advertising/analytics": handleAdAnalytics,
+  "GET /advertising/diagnostics": handleAdDiagnostics,
+  "POST /advertising/maintenance": handleAdMaintenance,
 };
 
 export async function dispatchRoute(ctx: HandlerContext, match: Matched): Promise<Response> {

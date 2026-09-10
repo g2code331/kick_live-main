@@ -86,26 +86,30 @@ create table if not exists public.media_assets (
   ready_at        TIMESTAMPTZ,
   superseded_at   TIMESTAMPTZ,
   deleted_at      TIMESTAMPTZ,
-  media_assets_kind_check check (entity_kind in
+  constraint media_assets_kind_check check (entity_kind in
     ('teams', 'players', 'competitions', 'seasons', 'news', 'team_news', 'matches', 'users')),
   -- sponsors/ and advertisements/ are documented as reserved prefixes in
   -- docs/R2_MEDIA_ARCHITECTURE.md but are deliberately NOT legal here yet:
   -- there is no table to attach them to, and a CHECK that allows a kind nothing
   -- can authorize is how orphaned objects get made. Phase 7 adds them alongside
   -- its own tables with one alter statement.
-  media_assets_variant_check    check (variant ~ '^[a-z0-9][a-z0-9_-]{0,31}$'),
-  media_assets_visibility_check check (visibility in ('public', 'private')),
-  media_assets_status_check     check (status in
+  constraint media_assets_variant_check    check (variant ~ '^[a-z0-9][a-z0-9_-]{0,31}$'),
+  constraint media_assets_visibility_check check (visibility in ('public', 'private')),
+  constraint media_assets_status_check     check (status in
     ('uploading', 'ready', 'failed', 'superseded', 'deleted', 'purged')),
   -- Only the terminal, storage-holding states carry a digest or dimensions.
   -- Allowing NULL everywhere instead makes it impossible to tell "not an image"
   -- from "nobody looked", which is exactly the question a media bug asks.
-  media_assets_digest_check     check (sha256 is null or sha256 ~ '^[0-9a-f]{64}$'),
-  media_assets_key_check        check (object_key ~ '^[a-z0-9][a-z0-9._/-]{2,509}$'),
-  media_assets_size_check       check (byte_size is null or (byte_size > 0 and byte_size <= 26214400)),
+  constraint media_assets_digest_check     check (sha256 is null or sha256 ~ '^[0-9a-f]{64}$'),
+  -- The length bound is a separate predicate, not `{2,509}` inside the regex: Postgres' regex engine
+  -- refuses a repetition count above 255 (RE_DUP_MAX) with `invalid regular expression: invalid repetition
+  -- count(s)` — and it refuses it at *first evaluation*, not at CREATE TABLE, so a CHECK written that way
+  -- installs happily and then fails every single insert.
+  constraint media_assets_key_check        check (object_key ~ '^[a-z0-9][a-z0-9._/-]{2,}$' and char_length(object_key) between 3 and 512),
+  constraint media_assets_size_check       check (byte_size is null or (byte_size > 0 and byte_size <= 26214400)),
   -- Every state transition has a timestamp and no state is silent.
-  media_assets_ready_at_check   check (status <> 'ready' or ready_at is not null),
-  media_assets_entity_id_check  check (entity_id ~ '^[0-9a-fA-F-]{1,64}$')
+  constraint media_assets_ready_at_check   check (status <> 'ready' or ready_at is not null),
+  constraint media_assets_entity_id_check  check (entity_id ~ '^[0-9a-fA-F-]{1,64}$')
 );
 comment on table public.media_assets is
   'Registry of objects in the R2 media bucket: key, owner entity, version, digest, lifecycle status. Not the render path — the *_url columns on the entities are, and they hold /api/media/assets/<key> for rows created here.';
@@ -149,7 +153,7 @@ create table if not exists public.media_operations (
   object_key   TEXT,
   detail       JSONB,
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-  media_operations_action_check check (action in
+  constraint media_operations_action_check check (action in
     ('reserve', 'finalize', 'failed', 'soft_delete', 'restore', 'purge',
      'retention_sweep', 'migration_run', 'migration_attach', 'reconcile'))
 );

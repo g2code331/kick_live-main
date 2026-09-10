@@ -40,7 +40,7 @@ export interface RouteDef {
    * handler sets `cache-control` itself and `finalise` leaves it alone (per-object media policy).
    */
   readonly cache: CacheClass;
-  readonly phase: 2 | 3 | 4 | 5 | 6;
+  readonly phase: 2 | 3 | 4 | 5 | 6 | 7;
   readonly summary: string;
   /** What the handler has to enforce beyond the capability, so it is not "discovered" later. */
   readonly invariants?: string;
@@ -651,20 +651,257 @@ export const ROUTES: readonly RouteDef[] = [
       "Only `https://<SUPABASE_PROJECT_REF>.supabase.co/storage/v1/object/{public,sign}/{media,avatars}/…` is fetched — an allowlist of one host, so a row value can never aim the Worker at an internal endpoint. External links (unsplash, YouTube) are skipped permanently by that same check. Each object is recorded through `kicklive_record_migrated_asset`, idempotent on the source URL, and an entity URL is repointed only for a successful copy.",
   },
 
-  // ── advertising (placements and delivery) ─────────────────────────────────
-  { method: "GET", pattern: "/advertising/campaigns/active", capability: "public.read", cache: "edge", phase: 6, summary: "Campaigns eligible to serve, by placement slot." },
+  // ── advertising (measurement and the admin surface) ─────────────────────
+  //
+  // Phase 6 declared three advertising routes and never built them. Two of them are replaced here rather than
+  // implemented as declared, and the reason is worth keeping next to the change:
+  //
+  //   - `POST /advertising/events` was gated on `placement_event.record`, an admin-only capability. The caller
+  //       of that route is a browser watching a match page, so the declaration would have answered 403 to every
+  //       viewer and the numbers would have been silently empty forever — the exact class of bug where a route
+  //       table is written from what a capability is *called* rather than from who stands in front of it. It
+  //       is now `public.read`, and the safety of opening it to anonymous callers lives in the payload caps,
+  //       the per-day viewer key and the database's dedupe.
+  //   - `GET /advertising/campaigns/active` ("campaigns eligible to serve, by placement slot", public) would
+  //       have published which advertisers are booked and when, before a single one of them has been shown to
+  //       anybody. What a page may legitimately ask for is one slot's current answer, which is the
+  //       `/advertising/placement/:code` route below — same information a viewer can see, none a viewer cannot.
+  //   - `PATCH /advertising/campaigns/:id` becomes a `POST …/status`: this file's own naming rule is that only
+  //       POST bodies carry intent verbs, and a status change is an intent verb.
+  //
+  // The staff routes are `campaign.manage` / `placement.manage` / `admin.settings_write`, all admin-only in the
+  // matrix, while the definer functions accept `admin` *or* `media` for saves. The edge is narrower than the
+  // database on purpose: what the API does not expose cannot be reached by a role the matrix has not been
+  // amended for, and opening a route later is a one-line review rather than a migration.
+  {
+    method: "POST",
+    pattern: "/advertising/viewer-key",
+    capability: "public.read",
+    cache: "none",
+    rateLimit: "mutation",
+    phase: 7,
+    implemented: true,
+    summary: "Today's measurement reference for this viewer, derived and never stored.",
+    invariants:
+      "A signed-in caller gets a key derived from their user id and may not supply a seed; an anonymous caller supplies a first-party id and gets the same derivation. `AD_VIEWER_KEY_SECRET` is the HMAC input, so rotating it invalidates every key ever issued — which is the whole answer to 'delete this viewer's history'. `no-store`, because a key is only meaningful for the UTC day it was minted for.",
+  },
+  {
+    method: "GET",
+    pattern: "/advertising/placement/:code",
+    capability: "public.read",
+    cache: "handler",
+    rateLimit: "public",
+    phase: 7,
+    implemented: true,
+    summary: "The one creative a slot should show, or nothing at all.",
+    invariants:
+      "`kicklive_ad_serve` decides eligibility (slot active, creative active, inside the flight's window, advertiser approved, format allowed, daily cap, targeting) and returns the creative's own disclosure label. This handler decides only the cache header: a response built for a signed-in or targeted caller is `private, no-store`, everything else is public for the seconds the function asked for (never above 90). Nothing is served for a live match the slot has agreed to yield to.",
+  },
   {
     method: "POST",
     pattern: "/advertising/events",
-    capability: "placement_event.record",
+    capability: "public.read",
     cache: "none",
     rateLimit: "mutation",
-    phase: 6,
+    phase: 7,
+    implemented: true,
     summary: "Impression/click events, deduplicated, written once and never aggregated in the browser.",
+    invariants:
+      "At most 20 events per body; every entry re-validated against the same shapes the database enforces. Handed to `AD_EVENTS_QUEUE` and written by the consumer, or inline where no queue is bound. Answers 202 whether or not the write landed and never returns a count: a client that learns a report was dropped retries it, and a retried measurement is how a number becomes a fiction. Double-reporting is impossible below us — `ad_events.dedupe_key` is one impression per viewer, slot and UTC day.",
   },
-  { method: "PATCH", pattern: "/advertising/campaigns/:id", capability: "campaign.manage", cache: "none", phase: 6, summary: "Start/pause/retarget a campaign.", rateLimit: "mutation" },
+  {
+    method: "GET",
+    pattern: "/advertising/config",
+    capability: "public.read",
+    cache: "edge",
+    rateLimit: "public",
+    phase: 7,
+    implemented: true,
+    summary: "The closed vocabularies of advertising: labels, formats, statuses, the destination rule.",
+    invariants:
+      "Reads the same constants the admin form enforces and the migration checks, so a client states the rule it will be held to rather than copying it out of a form. Carries no advertiser, campaign or slot data.",
+  },
+  {
+    method: "GET",
+    pattern: "/advertising/placements",
+    capability: "campaign.manage",
+    cache: "none",
+    rateLimit: "authenticated",
+    phase: 7,
+    implemented: true,
+    summary: "The slot registry with what each slot is carrying: assigned, serving, eligible.",
+    invariants: "A function and not a table read — every advertising table has RLS enabled with no policies, so a client-side `select` would be a door rather than a view. Lists no advertiser names.",
+  },
+  {
+    method: "POST",
+    pattern: "/advertising/placements/:code",
+    capability: "placement.manage",
+    cache: "none",
+    rateLimit: "admin-blast",
+    phase: 7,
+    implemented: true,
+    summary: "Switch one slot of the product on or off, immediately and for everyone.",
+    invariants:
+      "The global kill switch, so admin-only in the matrix *and* re-checked as `is_admin()` in SQL. Serving caches expire in seconds, not hours; a slot switched off answers `not_served/slot_disabled` and refuses to count events for what nobody could have seen.",
+  },
+  {
+    method: "GET",
+    pattern: "/advertising/advertisers",
+    capability: "campaign.manage",
+    cache: "none",
+    rateLimit: "authenticated",
+    phase: 7,
+    implemented: true,
+    summary: "The advertiser book, filtered and paginated.",
+    invariants:
+      "Staff only. Contact fields are present because the reader is the person who has to call them; the response is `no-store` and the route is rate limited like any other read of a business record.",
+  },
+  {
+    method: "POST",
+    pattern: "/advertising/advertisers",
+    capability: "campaign.manage",
+    cache: "none",
+    rateLimit: "mutation",
+    phase: 7,
+    implemented: true,
+    summary: "Create or update an advertiser, and nothing else.",
+    invariants:
+      "`kicklive_ad_save_advertiser` owns the rules: a new advertiser starts `pending`, approval is a separate route with a separate author, the terms timestamp is write-once, and suspension is refused while a flight is live. Only the listed form fields may appear in the body.",
+  },
+  {
+    method: "POST",
+    pattern: "/advertising/advertisers/:id/status",
+    capability: "campaign.manage",
+    cache: "none",
+    rateLimit: "mutation",
+    phase: 7,
+    implemented: true,
+    summary: "Approve or suspend an advertiser, recording who did it.",
+    invariants:
+      "Admin only, in the matrix and in SQL. Approving a first time also stamps the flight that was waiting on the approval; suspending pauses every live creative of every live flight, which is the difference between a business decision and a colour in a table.",
+  },
+  {
+    method: "GET",
+    pattern: "/advertising/campaigns",
+    capability: "campaign.manage",
+    cache: "none",
+    rateLimit: "authenticated",
+    phase: 7,
+    implemented: true,
+    summary: "Flights, filtered by advertiser, slot, status or text.",
+    invariants: "Staff only. `budget_amount` is returned as the reference it is — no spend is tracked, and the screen says so next to the number.",
+  },
+  {
+    method: "POST",
+    pattern: "/advertising/campaigns",
+    capability: "campaign.manage",
+    cache: "none",
+    rateLimit: "mutation",
+    phase: 7,
+    implemented: true,
+    summary: "Create or update a flight, including its overlap and cap settings.",
+    invariants:
+      "`kicklive_ad_save_campaign` refuses to activate (that is the status route), refuses a backwards window, keeps one flight per advertiser overlapping, and enforces `max_concurrent` before a creative can go active.",
+  },
+  {
+    method: "POST",
+    pattern: "/advertising/campaigns/:id/status",
+    capability: "campaign.manage",
+    cache: "none",
+    rateLimit: "mutation",
+    phase: 7,
+    implemented: true,
+    summary: "Move a flight along the flow: draft, pending, active, paused, completed, archived.",
+    invariants:
+      "`kicklive_ad_status_transitions` is the authority on both sides of the call, and going `active` requires an approved advertiser and at least one active creative in an active slot — the refusal comes back with the reason and the field to fix.",
+  },
+  {
+    method: "GET",
+    pattern: "/advertising/creatives",
+    capability: "campaign.manage",
+    cache: "none",
+    rateLimit: "authenticated",
+    phase: 7,
+    implemented: true,
+    summary: "Creatives with their slot assignments, eligibility and measured counts.",
+    invariants: "Staff only. `counts.impressions` is a distinct-viewer-day floor and is never an invoice; the response says which definition produced it.",
+  },
+  {
+    method: "POST",
+    pattern: "/advertising/creatives",
+    capability: "campaign.manage",
+    cache: "none",
+    rateLimit: "mutation",
+    phase: 7,
+    implemented: true,
+    summary: "Create or update a creative: copy, destination, slot list, rotation knobs, targeting.",
+    invariants:
+      "`kicklive_ad_save_advertisement` validates the disclosure label against the closed set, the destination against the https rule, the targeting against six known keys, the format against each slot's `allowed_formats`, and the flight's approval state before it will write `active`. A partial edit needs only the id.",
+  },
+  {
+    method: "POST",
+    pattern: "/advertising/creatives/:id/status",
+    capability: "campaign.manage",
+    cache: "none",
+    rateLimit: "mutation",
+    phase: 7,
+    implemented: true,
+    summary: "Activate, pause, expire or archive one creative.",
+    invariants:
+      "Only the declared arcs of `ad_status_transitions` are possible, so 'draft to active' is refused with the list of what is allowed; activation stamps the approver and re-checks the flight; a refusal writes `activation_error` for the row.",
+  },
+  {
+    method: "POST",
+    pattern: "/advertising/preview",
+    capability: "campaign.manage",
+    cache: "none",
+    rateLimit: "mutation",
+    phase: 7,
+    implemented: true,
+    summary: "What each listed slot would show, and the exact reason it would not.",
+    invariants:
+      "`kicklive_ad_explain` is the same eligibility code the serve route runs — a preview that agrees with production is the feature; a preview that agrees with the form is a lie. Never anonymous, because it names advertisers and exposes who is booked where.",
+  },
+  {
+    method: "POST",
+    pattern: "/advertising/analytics",
+    capability: "campaign.manage",
+    cache: "none",
+    rateLimit: "authenticated",
+    phase: 7,
+    implemented: true,
+    summary: "Rollups by creative, flight, slot or day, over a window of at most 92 days.",
+    invariants:
+      "Reads `advertisement_analytics`, never `ad_events`, so a report is not a re-scan of the log. An explicit null window means the default 30 days rather than no filter, which is the difference between an empty screen and a wrong one.",
+  },
+  {
+    method: "GET",
+    pattern: "/advertising/diagnostics",
+    capability: "admin.settings_write",
+    cache: "none",
+    rateLimit: "authenticated",
+    phase: 7,
+    implemented: true,
+    summary: "Counts of the states that must not exist, plus queue depth and retention.",
+    invariants: "Integers and short tokens only — no advertiser names, no viewer keys, no creative text — so the response is safe to keep open in a support channel.",
+  },
+  {
+    method: "POST",
+    pattern: "/advertising/maintenance",
+    capability: "admin.settings_write",
+    cache: "none",
+    rateLimit: "admin-blast",
+    phase: 7,
+    implemented: true,
+    summary: "Expire what has run out and prune what retention says is old, now rather than at the next hour.",
+    invariants:
+      "The same three steps the cron runs, in the same order, and idempotent: `kicklive_ad_expire_due`, `kicklive_ad_sweep` (bounded, raw events only, rollups kept), `kicklive_ad_diagnostics`. Admin-only in the matrix and re-checked as `is_admin()` in SQL.",
+  },
 
   // ── sponsorship (rights, not delivery) ────────────────────────────────────
+  // Still unbuilt, and Phase 7 deliberately does not touch it: rights are a contract about a season, and
+  // advertising is a machine that decides what to show per request. They share a sponsor's name and nothing
+  // else, which is why `sponsors` and `advertisers` are two tables.
   { method: "GET", pattern: "/sponsorship/packages", capability: "public.read", cache: "edge", phase: 6, summary: "Published rate card for a season." },
   {
     method: "PATCH",

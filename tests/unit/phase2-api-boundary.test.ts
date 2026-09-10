@@ -624,11 +624,47 @@ describe("phase2 · environment separation", () => {
     const bucketNames = [...toml.matchAll(/^bucket_name = "([^"]+)"$/gm)].map((m) => m[1]!);
     assert.equal(bucketNames.length, 3, "one bucket per environment, dev included");
     assert.equal(new Set(bucketNames).size, 3, "two environments sharing one bucket is how a dev upload overwrites a production logo");
-    assert.deepEqual(
-      active.filter((l) => /^\[\[queues\.(producers|consumers)\]\]$/.test(l)),
-      ["[[queues.producers]]", "[[queues.consumers]]"],
-      "exactly one queue, one producer and one consumer",
-    );
+    // Phase 5 bound one queue and Phase 7 bound a second, so the rule is no longer "exactly one of each" but
+    // "the queues the config names are the queues the code can tell apart". Both halves matter: a producer
+    // with no consumer is a message that goes nowhere, and a consumer that cannot identify its queue (see the
+    // `*_QUEUE_NAME` vars, which one Worker with two `queue` handlers needs to route a batch) delivers
+    // measurements into the notification fan-out.
+    {
+      const parsed: Record<string, { producers: string[]; consumers: string[]; vars: Record<string, string> }> = {
+        "": { producers: [], consumers: [], vars: {} },
+        "env.staging.": { producers: [], consumers: [], vars: {} },
+        "env.production.": { producers: [], consumers: [], vars: {} },
+      };
+      for (const block of toml.split(/\n(?=\[)/)) {
+        const header = block.slice(0, block.indexOf("\n"));
+        const queue = /^queue = "([^"]+)"$/m.exec(block)?.[1];
+        const pair = /^\[\[(?:(env\.[a-z]+)\.)?queues\.(producers|consumers)\]\]$/.exec(header);
+        if (pair && queue) {
+          const key = pair[1] ? `${pair[1]}.` : "";
+          parsed[key]![pair[2] as "producers" | "consumers"].push(queue);
+          continue;
+        }
+        // Single brackets, not double: `[vars]` and `[env.staging.vars]` are tables, and only the
+        // *bindings* (`[[queues.producers]]`) are array-of-tables. The distinction is why this parser reads
+        // queue blocks and var blocks with different patterns rather than one.
+        const varsHeader = /^\[(?:env\.[a-z]+\.)?vars\]$/.exec(header);
+        if (varsHeader) {
+          const key = header.includes("env.") ? `${/\[(env\.[a-z]+)\.vars\]/.exec(header)![1]}.` : "";
+          for (const m of block.matchAll(/^(\w+_QUEUE_NAME) = "([^"]+)"$/gm)) parsed[key]!.vars[m[1]!] = m[2]!;
+        }
+      }
+      for (const [key, section] of Object.entries(parsed)) {
+        const suffix = key === "" ? "-dev" : key === "env.staging." ? "-staging" : "";
+        const expected = [`kicklive-notifications${suffix}`, `kicklive-ad-events${suffix}`];
+        assert.deepEqual([...section.producers].sort(), [...expected].sort(), `${key || "development"} producers`);
+        assert.deepEqual([...section.consumers].sort(), [...expected].sort(), `${key || "development"} consumers — a producer with no consumer is a queue that fills up and never drains`);
+        assert.deepEqual(
+          [section.vars.NOTIFICATION_QUEUE_NAME, section.vars.AD_EVENTS_QUEUE_NAME],
+          [`kicklive-notifications${suffix}`, `kicklive-ad-events${suffix}`],
+          `${key || "development"} must name both queues it binds: the batch discriminator reads these, not the bindings`,
+        );
+      }
+    }
     assert.ok(
       active.some((l) => l === "[[durable_objects.bindings]]"),
       "Phase 3's live rooms are still bound",
@@ -671,7 +707,8 @@ describe("phase2 · environment separation", () => {
     assert.match(entry, /async scheduled\(/, "and the cron needs its handler");
     // Two environments on one queue is a genuine footgun, and it is invisible until a laptop running
     // `npm run worker:dev` drains production's notification fan-out (or the reverse). Every queue name in this
-    // file must therefore be unique per environment, dev included.
+    // file must therefore be unique per environment, dev included — and each environment's set of queue names
+    // is asserted as a set below rather than as a single name, because it now legitimately holds two.
     const queueNames = [...toml.matchAll(/^queue = "([^"]+)"/gm)].map((m) => m[1]!);
     // Every queue name in this file must be unique per environment, dev included. Sharing one is the footgun
     // that stays invisible until a laptop running `npm run worker:dev` drains production's fan-out — every
@@ -682,7 +719,20 @@ describe("phase2 · environment separation", () => {
       production: queueNames.filter((n) => !n.endsWith("-dev") && !n.endsWith("-staging")),
     };
     for (const [label, names] of Object.entries(namesByEnv)) {
-      assert.deepEqual(new Set(names).size === 1 && names.length === 2, true, `${label} needs a producer line and a consumer line naming one queue, got ${names.join(", ")}`);
+      // Phase 5 gave each environment one queue; Phase 7 gave it a second (ad measurement) and both must be
+      // paired. Counted per name rather than "two distinct names, four lines", because that weaker form also
+      // accepts a queue with two producers and no consumer — which is a queue that fills and never drains, and
+      // is precisely the misconfiguration a test like this exists to catch.
+      const perName = new Map<string, number>();
+      for (const name of names) perName.set(name, (perName.get(name) ?? 0) + 1);
+      assert.deepEqual(
+        [...perName.entries()].sort(),
+        [
+          [`kicklive-ad-events${label === "dev" ? "-dev" : label === "staging" ? "-staging" : ""}`, 2],
+          [`kicklive-notifications${label === "dev" ? "-dev" : label === "staging" ? "-staging" : ""}`, 2],
+        ].sort(),
+        `${label} needs each queue named exactly twice — once as a producer, once as a consumer — got ${names.join(", ")}`,
+      );
     }
     const deadLetters = [...toml.matchAll(/^\s+queue = "(kicklive-notifications-failed[^"]*)"$/gm)].map((m) => m[1]!);
     assert.equal(deadLetters.length, 3, "each environment needs its own dead-letter queue");

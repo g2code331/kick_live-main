@@ -69,6 +69,59 @@ function fnBody(name: string): string {
   return CODE.slice(start, end);
 }
 
+/**
+ * The migration files that come *after* Phase 6, in apply order.
+ *
+ * Why a test needs them: the media kind list is a CHECK constraint, and the only way to widen a CHECK is to
+ * drop and re-add it — which is exactly what Phase 7 (`advertisements`) and Phase 8 (`sponsors`) do. An
+ * assertion that read Phase 6's file alone therefore encoded "Phase 6 is the last word on the shape of the
+ * media registry", and it failed while the schema was getting *more* correct. A drift test has to compare the
+ * worker's table against the final state, so the later files are replayed here in the same order the
+ * migrator will run them.
+ */
+const LATER_MIGRATIONS = fs
+  .readdirSync(path.join(REPO, "supabase/migrations"))
+  .filter((f) => f > path.basename(MIGRATION_REL) && f.endsWith(".sql"))
+  .sort()
+  .map((f) => ({ name: f, code: sqlCode(read(`supabase/migrations/${f}`)) }));
+
+/** `media_assets`' entity-kind list as the database will finally hold it. */
+function finalEntityKinds(): string[] {
+  const kindList = (source: string): string[] | null => {
+    const m = /media_assets_kind_check\s+check \s*\(\s*entity_kind in \(([^)]*)\)/.exec(source);
+    return m
+      ? m[1]!
+          .split(",")
+          .map((k) => k.trim().replace(/^'|'$/g, ""))
+          .filter(Boolean)
+      : null;
+  };
+  let kinds = kindList(CODE) ?? [];
+  for (const file of LATER_MIGRATIONS) {
+    // A later `drop constraint` followed by an `add constraint` replaces the list; a later file that only
+    // mentions the name (in its verify block, say) must not be read as a change.
+    if (!file.code.includes("drop constraint if exists media_assets_kind_check")) continue;
+    const next = kindList(file.code);
+    if (next && next.length > 0) kinds = next;
+  }
+  return kinds;
+}
+
+/** Each kind's URL column, with the last definition of `kicklive_asset_url_column` winning. */
+function finalUrlColumns(): Map<string, string> {
+  const arms = caseArms(fnBody("kicklive_asset_url_column"), "select case p_entity_kind");
+  for (const file of LATER_MIGRATIONS) {
+    const start = file.code.indexOf("create or replace function public.kicklive_asset_url_column(");
+    if (start < 0) continue;
+    const end = file.code.indexOf("$fn$;", start);
+    for (const [kind, column] of caseArms(file.code.slice(start, end), "select case p_entity_kind")) {
+      if (column === "null") arms.delete(kind);
+      else arms.set(kind, column);
+    }
+  }
+  return arms;
+}
+
 function caseArms(source: string, marker: string): Map<string, string> {
   const body = flat(source.slice(source.indexOf(marker)));
   const arms = new Map<string, string>();
@@ -252,12 +305,15 @@ describe("phase6 · keys, paths and cache classes", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 describe("phase6 · the policy table and the SQL must agree", () => {
   it("the legal kinds are the ones the database will accept", () => {
-    const sqlKinds = stringList(/media_assets_kind_check check \(entity_kind in \(([^)]*)\)\)/, "entity_kind CHECK");
-    assert.deepEqual([...sqlKinds].sort(), [...MEDIA_KINDS].sort());
+    assert.deepEqual(finalEntityKinds().sort(), [...MEDIA_KINDS].sort(), "the registry's kind list and the worker's disagree");
+    // Phase 6's own file must still be the *base* of it, or the widening in a later file is doing something
+    // it was never meant to: the kinds this migration created have to be a subset of what ends up legal.
+    const baseKinds = stringList(/media_assets_kind_check check \(entity_kind in \(([^)]*)\)\)/, "entity_kind CHECK");
+    for (const kind of baseKinds) assert.ok(MEDIA_KINDS.includes(kind as (typeof MEDIA_KINDS)[number]), `${kind} disappeared from the worker's kinds`);
   });
 
   it("the URL column per kind is the same column on both sides", () => {
-    const arms = caseArms(fnBody("kicklive_asset_url_column"), "select case p_entity_kind");
+    const arms = finalUrlColumns();
     for (const kind of MEDIA_KINDS) {
       const expected = MEDIA_CATEGORIES[kind].urlColumn;
       const inSql = arms.get(kind);
@@ -271,7 +327,11 @@ describe("phase6 · the policy table and the SQL must agree", () => {
       const table = MEDIA_CATEGORIES[kind].table;
       const block = schema.slice(schema.indexOf(`CREATE TABLE IF NOT EXISTS public.${table}`), schema.indexOf(`CREATE TABLE IF NOT EXISTS public.${table}`) + 1600);
       assert.ok(
-        new RegExp(`\\b${expected}\\b`).test(block) || new RegExp(`ALTER TABLE public\\.${table} ADD COLUMN IF NOT EXISTS\\s+${expected}`).test(schema),
+        new RegExp(`\\b${expected}\\b`).test(block) ||
+          new RegExp(`ALTER TABLE public\\.${table} ADD COLUMN IF NOT EXISTS\\s+${expected}`).test(schema) ||
+          // A kind that arrived after this file was written has its column in that later migration instead,
+          // which is the correct place for it and not a hole in the schema authority.
+          LATER_MIGRATIONS.some((file) => new RegExp(`create table if not exists public\\.${table}[\\s\\S]{0,2400}?\\b${expected}\\b`, "i").test(file.code)),
         `${table}.${expected} is not in the schema authority`,
       );
     }

@@ -59,6 +59,33 @@ export interface Env {
   readonly RATE_LIMIT_KV?: KVNamespace | undefined;
 
   /**
+   * The HMAC input for the daily ad-measurement viewer key. A secret (`wrangler secret put
+   * AD_VIEWER_KEY_SECRET`), and the only thing standing between a stolen database dump and "which of these
+   * rows is the same person": the keys in `ad_events` are derived from this value plus a subject plus a day,
+   * so rotating it retires every key ever issued and makes the retained rows un-linkable. Rotating also
+   * splits a viewer's day-of-week counts at the rotation instant, which is the honest cost of the property.
+   */
+  readonly AD_VIEWER_KEY_SECRET?: string | undefined;
+
+  /**
+   * The ad measurement queue. Optional in the type because the consumer tolerates its absence: with no
+   * binding the Worker writes the batch inline instead of stalling a page, which is what a preview
+   * deployment and a unit run need. Declared here rather than in `wrangler.toml` alone so `tsc` is the thing
+   * that notices a missing binding — Phase 6's `MEDIA_BUCKET` comment explains why a binding with nothing
+   * behind it is worse than no binding.
+   */
+  readonly AD_EVENTS_QUEUE?: Queue<unknown> | undefined;
+
+  /**
+   * The *name* of the ad-event queue, which is what `MessageBatch#queue` reports. A name and not just a
+   * binding, because one Worker consumes two queues and the batch has nothing else to be told apart by.
+   */
+  readonly AD_EVENTS_QUEUE_NAME?: string | undefined;
+
+  /** The notification queue's name, for the same discriminator; both are checked so neither can be renamed alone. */
+  readonly NOTIFICATION_QUEUE_NAME?: string | undefined;
+
+  /**
    * Phase 3: the per-match live room (`do/MatchRoom.ts`). Declared optional because a mis-deployed
    * environment must produce "the live room is not bound on this Worker" at the first request, not a
    * `undefined.get` TypeError; `routes/live.ts` checks it before use. Set in `workers/wrangler.toml`
