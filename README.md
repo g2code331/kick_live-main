@@ -62,6 +62,14 @@ npm run check:sql        # applies every migration to a scratch database and run
 npm run gates          # the aggregate: branding, version lockstep, verify, route catalogue, query ratchet, packaging
 ```
 
+Every `node …` script above runs through `scripts/lib/ts-loader.mjs`, so the checks work on a Node build that has
+no built-in TypeScript stripping (`node -p "process.features.typescript"` → `false` on some repackaged
+`nodejs` installs).
+If a check dies with `ERR_UNKNOWN_FILE_EXTENSION`, run `node scripts/install-ts-loader.mjs --write` once — it adds
+that `--import` to the `node …` scripts in `package.json`, the only place the flag can go, because every checker
+imports its `.ts` sources statically. That is a loader, not a workaround: the checkers read `workers/src/router.ts` and
+`shared/branding.ts` on purpose, because the alternative is a duplicated manifest that drifts.
+
 There is no lint step and no `.eslintrc`: `tsc` with `strict` plus the checks above are the enforcement, and the
 repo has not acquired a linter since Phase 1 (adding one is a decision, not a default).
 

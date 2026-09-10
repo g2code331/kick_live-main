@@ -11,7 +11,9 @@ Status vocabulary, used literally and nowhere softened:
 | `NOT IMPLEMENTED`        | the capability does not exist; see the named "deliberately not done" section that explains why     |
 
 Verified in this workspace on 2026-09-10 with no Postgres, no Cloudflare login and no browser:
-`npm run typecheck` (both projects) 0 errors · `npm run build:web` succeeds (fan boot 529.8 KiB raw /
+`npm run typecheck` (all three `tsc` projects) 0 errors — re-run with exit codes preserved, after it emerged that
+an earlier pass had been piping `tsc` into `tail` and reading `tail`'s status; a claim that rested on a broken
+command is not a verification · `npm run build:web` succeeds (fan boot 529.8 KiB raw /
 156.6 KiB gzipped over 5 chunks; 74 files, 7.31 MiB total) · `npm run build:desktop` bundles main+preload ·
 `npm run test:unit` 577 pass / 0 fail · `npm run test:integration` 99 pass / 0 fail ·
 `node scripts/worker-routes.mjs --check` 101/101 · `node scripts/check-secrets.mjs` finds no committed secret
@@ -262,6 +264,13 @@ and no root in this environment, so `initdb` is impossible.** That single fact i
 - `BLOCKED` — no DR runbook exercise (RTO/RPO numbers are not measured anywhere in this repo).
 
 ## 13. DEPLOYMENT
+
+- `READY` — the toolchain no longer assumes Node's built-in TypeScript stripping: every `node …` npm script
+  imports `scripts/lib/ts-loader.mjs`, which transpiles `.ts` sources through the pinned `typescript` package and
+  propagates itself to `node --test` children through `NODE_OPTIONS`. A repackaged Node (Debian/Ubuntu
+  `nodejs`, `process.features.typescript === false`) previously turned 577 green tests into 23 identical
+  `ERR_UNKNOWN_FILE_EXTENSION` failures, which reads exactly like a broken repository. Covered by
+  `tests/unit/toolchain-ts-loader.test.ts`, including a probe that only a real `enum` compile can satisfy.
 
 - `READY` — every resource, variable and secret is listed with its command in
   [`docs/ENVIRONMENT_SETUP.md`](docs/ENVIRONMENT_SETUP.md), including the names that must match each other across

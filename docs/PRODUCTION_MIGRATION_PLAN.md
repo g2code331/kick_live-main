@@ -413,6 +413,14 @@ browser, a database or a Cloudflare login.** What shipped:
   `docs/PRODUCTION_ARCHITECTURE.md` §20 (findings, fixes, and the eight items left open with reasons) ·
   `supabase/README.md` (what `authenticated` may project) · `workers/.dev.vars.example` completed through
   Phase 7 and Phase 9 (`AD_VIEWER_KEY_SECRET`, `LOG_MODE`, and the note that there is no `ENVIRONMENT` var).
+- **The toolchain stopped assuming Node can strip TypeScript.** `process.features.typescript` is a build-time
+  feature, and a repackaged `nodejs` (Debian/Ubuntu) ships without it — the whole test suite then fails 23 files
+  at once with `ERR_UNKNOWN_FILE_EXTENSION: Unknown file extension ".ts"`, which is indistinguishable from a
+  broken checkout. Every `node …` script now runs through `scripts/lib/ts-loader.mjs`, which transpiles `.ts`
+  through the pinned `typescript` package and re-exports itself into `NODE_OPTIONS` so `node --test` children and
+  `scripts/gates.mjs` spawn chains inherit it (deduped, absolute-URL, and a no-op where stripping works).
+  `tests/unit/toolchain-ts-loader.test.ts` (5 cases) proves the hook owns the load with an `enum` probe that
+  erasure cannot satisfy.
 - **`tests/unit/phase10-hardening.test.ts`** — 14 cases: the migration is additive and contains no drop; the
   column list excludes `email`/`phone` and keeps what public surfaces need; the self function takes no argument;
   the contacts function refuses with a value and clamps; the `$verify$` block checks every privilege the change

@@ -28,6 +28,48 @@ npm run ci:install          # copies ci/*.yml into .github/workflows/ (the repo 
 git add .github/workflows && git commit -m "ci: install workflows"
 ```
 
+### If the checks die with `ERR_UNKNOWN_FILE_EXTENSION: Unknown file extension ".ts"`
+
+Your Node was built without type stripping — a repackaged `nodejs` (Debian/Ubuntu, some distro images, a few
+version-manager installs) rather than a Nodejs.org binary. The repository does not need a different Node: every
+`node …` npm script runs through `scripts/lib/ts-loader.mjs`, which transpiles the `.ts` sources the checkers read
+using the `typescript` package already installed by `npm ci`. Confirm the diagnosis, and check the loader is
+present:
+
+```bash
+node -p "process.features.typescript"          # false  -> stripping absent;  "strip" -> present (the loader is then a no-op path)
+node --import ./scripts/lib/ts-loader.mjs -e "import('workers/src/router.ts').then(m => console.log(m.ROUTES.length))"   # -> 101
+```
+
+If you need to run a `node` command directly rather than through `npm run`, pass the same flag:
+
+```bash
+NODE_OPTIONS="--import $PWD/scripts/lib/ts-loader.mjs" node scripts/run-tests.mjs unit
+```
+
+`package.json` is the only file that carries the flag, and it is the file a local clone most often has its own
+opinions about, so it is patched rather than overwritten by a merge:
+
+```bash
+node scripts/install-ts-loader.mjs            # report what is missing (exit 1 if anything is)
+node scripts/install-ts-loader.mjs --write    # add the flag to every `node …` script, idempotently
+```
+
+If you would rather not touch `package.json` at all, one shell variable does the same job for a single run:
+
+```bash
+NODE_OPTIONS="--import $PWD/scripts/lib/ts-loader.mjs" npm run test:unit
+```
+
+The cleanest fix, if you do not want to carry a loader at all, is a stock Node ≥ 22.22.2. A `v22.22.1` bundled
+with `npm 9.2.0` (Node 22 ships npm 10.x) is the signature of a repackaged build, and the `EBADENGINE` warning about
+`ini@7.0.0` wanting `^22.22.2` is the same version boundary seen from the other side.
+
+Also worth knowing: `npm ci` on that machine reported 13 vulnerabilities, and `npm audit --omit=dev` reports none
+— they are all in the desktop/packaging dev chain (`electron-builder`'s `glob`/`rimraf`/`boolean`), not in
+anything the browser or the Worker loads. Do not run `npm audit fix --force`: it breaks pinned versions, and the
+pins are load-bearing for the packaging pipeline (`docs/RELEASE-PIPELINE.md`).
+
 Then check the branch actually contains the nine migrations and the two new docs:
 
 ```bash
