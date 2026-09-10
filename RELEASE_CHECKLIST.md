@@ -263,6 +263,9 @@ and no root in this environment, so `initdb` is impossible.** That single fact i
 
 ## 13. DEPLOYMENT
 
+- `READY` — every resource, variable and secret is listed with its command in
+  [`docs/ENVIRONMENT_SETUP.md`](docs/ENVIRONMENT_SETUP.md), including the names that must match each other across
+  files (`NOTIFICATION_QUEUE_NAME` vs the `[[env.*.queues]]` blocks, and the KV id after you create it).
 - `READY` — documented order: migrations (base + nine, filename order) → Worker (`wrangler deploy`, then
   `--env staging|production` per `workers/README.md`) → web (`npm run build:web` → Vercel/static host,
   `vercel.json` for SPA + `/api` rewrite) → smoke (`GET /api/health`, the Monitoring panel, one upload, one
