@@ -245,7 +245,7 @@ describe("phase5 · the security properties, as text", () => {
       [
         "kicklive_mark_all_notifications_read",
         "kicklive_mark_notifications_read",
-        "kicklive_notification_defaults_document",
+        "kicklive_notification_preferences",
         "kicklive_notifications_page",
         "kicklive_preference_defaults",
         "kicklive_register_notification_device",
@@ -267,6 +267,10 @@ describe("phase5 · the security properties, as text", () => {
     ]) {
       assert.ok(!clientFns.includes(dangerous), `${dangerous} must be service-role only`);
     }
+    // The uuid-taking helper behind `kicklive_notification_preferences()` is the one function here whose
+    // arguments name a person. Granting it to `authenticated` would let any signed-in session read anyone's
+    // per-category flags, and "defaults" in its name is exactly what makes that look harmless in review.
+    assert.ok(!clientFns.includes("kicklive_notification_defaults_document"), "a function that takes a user id must not be client-callable");
   });
 
   it("derives identity from the session, never from the body, in every client-facing write", () => {

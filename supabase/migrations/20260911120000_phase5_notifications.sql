@@ -580,6 +580,23 @@ as $$
          );
 $$;
 
+-- The client's read of its own document. A separate zero-argument function rather than granting
+-- kicklive_notification_defaults_document(uuid) to `authenticated`: with a uuid argument, any signed-in user
+-- could read *anyone's* per-category flags, and the "defaults" in the name is exactly the kind of word that
+-- makes that look harmless in review. `auth.uid()` here, and nothing else.
+create or replace function public.kicklive_notification_preferences()
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select public.kicklive_notification_defaults_document(auth.uid());
+$$;
+
+comment on function public.kicklive_notification_preferences() is
+  'GET /notifications/preferences. The caller''s own document; a signed-out session sees the defaults and no one else''s data.';
+
 comment on function public.kicklive_notification_defaults_document(uuid) is
   'The whole preferences document for one user, defaults included. SECURITY DEFINER because a missing preference row must be answerable without granting a client select on the next user''s rows — which is what a left join across the table would otherwise need.';
 
@@ -1237,6 +1254,7 @@ begin
   -- public.kicklive_…` without arguments raises rather than silently doing nothing.
   for f, args in select * from (values
     ('kicklive_notification_defaults_document', 'uuid'),
+    ('kicklive_notification_preferences', ''),
     ('kicklive_set_notification_preferences', 'boolean,jsonb'),
     ('kicklive_register_notification_device', 'text,text,text,text,text'),
     ('kicklive_unregister_notification_device', 'uuid'),
@@ -1261,7 +1279,7 @@ begin
 
   -- The self-service set only. Everything that reads a token, claims a job, or fans out to strangers stays
   -- service-role-only, so an exposed anon key cannot queue a send or enumerate a subscriber list.
-  execute 'grant execute on function public.kicklive_notification_defaults_document(uuid) to authenticated';
+  execute 'grant execute on function public.kicklive_notification_preferences() to authenticated';
   execute 'grant execute on function public.kicklive_set_notification_preferences(boolean, jsonb) to authenticated';
   execute 'grant execute on function public.kicklive_register_notification_device(text, text, text, text, text) to authenticated';
   execute 'grant execute on function public.kicklive_unregister_notification_device(uuid) to authenticated';
@@ -1375,15 +1393,15 @@ begin
   select count(*) into v_count from pg_proc p
     join pg_namespace n on n.oid = p.pronamespace
    where n.nspname = 'public'
-     and p.proname in ('kicklive_preference_defaults','kicklive_notification_defaults_document','kicklive_set_notification_preferences',
+     and p.proname in ('kicklive_preference_defaults','kicklive_notification_defaults_document','kicklive_notification_preferences','kicklive_set_notification_preferences',
                        'kicklive_register_notification_device','kicklive_unregister_notification_device','kicklive_claim_notification_job',
                        'kicklive_notification_recipients','kicklive_notification_audience','kicklive_materialise_notifications',
                        'kicklive_record_notification_results','kicklive_finish_notification_job','kicklive_notifications_page',
                        'kicklive_mark_notifications_read','kicklive_mark_all_notifications_read','kicklive_set_match_interest',
                        'kicklive_broadcast_notification','kicklive_pending_notification_jobs','kicklive_prune_notification_devices',
                        'kicklive_notification_job_for_event');
-  if v_count <> 19 then
-    raise exception 'phase5 verification failed: expected 19 notification functions, found %', v_count;
+  if v_count <> 20 then
+    raise exception 'phase5 verification failed: expected 20 notification functions, found %', v_count;
   end if;
 
   -- 9.8 nothing is SECURITY INVOKER where it must not be, and nothing is DEFINER without a pinned path.
@@ -1425,7 +1443,7 @@ begin
     raise exception 'phase5 verification failed: kicklive_notifications_page is not callable';
   end if;
 
-  raise notice 'phase5 verification: ok — 5 tables (RLS on, force off so the owner's RPCs can write), 19 functions, 1 trigger, notifications extended and owner-scoped, tokens unselectable, 11 categories consistent across 3 CHECKs';
+  raise notice 'phase5 verification: ok — 5 tables (RLS on, force off so the owner's RPCs can write), 20 functions, 1 trigger, notifications extended and owner-scoped, tokens unselectable, 11 categories consistent across 3 CHECKs';
 end
 $verify$;
 

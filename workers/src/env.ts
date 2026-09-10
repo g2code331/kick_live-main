@@ -65,6 +65,38 @@ export interface Env {
    * per environment, which is also where the class name is registered.
    */
   readonly LIVE_MATCH_ROOM?: DurableObjectNamespace | undefined;
+
+  // ── Phase 5 · notifications ───────────────────────────────────────────────
+  //
+  // One queue binding and six plain vars, of which only the first is required. Everything secret about push
+  // lives in `FCM_SERVICE_ACCOUNT`, which is a secret and therefore absent from `wrangler.toml` entirely.
+
+  /** Queue producer binding (`queues.producers[].binding`). The queue is a wake-up, never the record (§11). */
+  readonly NOTIFICATION_QUEUE?: Queue<unknown> | undefined;
+
+  /** FCM project id — *not* the Firebase `projectId` in the SPA's config, which is the same value only by luck. */
+  readonly FCM_PROJECT_ID?: string | undefined;
+
+  /**
+   * The downloaded service-account JSON, verbatim, as a secret. Contains a private key, so: never echoed by a
+   * route, never logged, never written to `wrangler.toml`/`.dev.vars` (only to `.dev.vars` locally, git-ignored).
+   */
+  readonly FCM_SERVICE_ACCOUNT?: string | undefined;
+
+  /** How many recipients an admin blast may address before it is refused rather than truncated. */
+  readonly NOTIFICATIONS_MAX_AUDIENCE?: string | undefined;
+
+  /** Minutes before kick-off that a reminder fires. `0` switches the reminder sweep off. */
+  readonly NOTIFICATIONS_REMINDER_LEAD_MINUTES?: string | undefined;
+
+  /** Per-send timeout in ms. A hang must not consume the queue visibility window. */
+  readonly FCM_TIMEOUT_MS?: string | undefined;
+
+  /**
+   * Deep-link origin for a push tap (`https://kicklive.app` in production). A relative URL is what the service
+   * worker opens, so this is only needed when the click may land outside the SPA's own origin.
+   */
+  readonly NOTIFICATIONS_LINK_BASE?: string | undefined;
 }
 
 export class ConfigError extends Error {
