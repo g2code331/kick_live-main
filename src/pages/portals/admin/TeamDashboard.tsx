@@ -83,10 +83,11 @@ export default function TeamDashboard() {
     if (rows.length === 0) return rows;
     const ownerIds = rows.map((t: any) => t.owner_id).filter(Boolean);
     if (ownerIds.length === 0) return rows;
-    const { data: profiles } = await supabase
-      .from('profiles')
-      .select('id, username, email')
-      .in('id', ownerIds);
+    // Phase 10: `profiles.email` is not projectable by a browser any more, so the owner's contact comes from
+    // the admin-gated function. It takes the ids it is asked about, which keeps this desk reading the handful
+    // of rows it is rendering instead of a page of the directory.
+    const { data: directory } = await supabase.rpc('kicklive_profile_contacts', { p_ids: ownerIds });
+    const profiles = ((directory as unknown as { contacts?: any[] } | null)?.contacts ?? []).map((c: any) => ({ id: c.id, username: c.username, email: c.email }));
     const byId = Object.fromEntries((profiles || []).map((pr: any) => [pr.id, pr]));
     return rows.map((t: any) => ({ ...t, profiles: byId[t.owner_id] || null }));
   };

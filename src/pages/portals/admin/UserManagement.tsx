@@ -51,15 +51,15 @@ export default function UserManagement() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [{ data }, pending] = await Promise.all([
-      supabase
-        .from('profiles')
-        .select('id, email, username, role, created_at')
-        .order('created_at', { ascending: false })
-        .limit(200),
+    // `kicklive_profile_contacts` rather than a select on `profiles`: the contact column is no longer
+    // projectable by `authenticated` at all (Phase 10), and this desk is an admin-only list by intent, so the
+    // gate belongs in the function (`is_admin()` on the caller's token) rather than in a UI that could be
+    // pointed at the endpoint directly.
+    const [{ data: directory }, pending] = await Promise.all([
+      supabase.rpc('kicklive_profile_contacts', { p_limit: 200 }),
       listPendingAccessRequests(),
     ]);
-    setUsers((data || []) as RowUser[]);
+    setUsers((((directory as unknown as { contacts?: RowUser[] } | null)?.contacts) ?? []) as RowUser[]);
     setRequests(pending);
     setLoading(false);
   }, []);

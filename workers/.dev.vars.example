@@ -58,3 +58,29 @@ NOTIFICATIONS_LINK_BASE=
 # Ceiling for one uploaded file, in bytes. The per-kind caps in workers/src/lib/mediaPolicy.ts are
 # tighter and are the ones a user sees named in an error; this is the outer bound.
 MEDIA_MAX_BYTES=26214400
+
+# ── Phase 7 · advertising ────────────────────────────────────────────────────
+# The two queues and the Durable Object are *bindings* declared in workers/wrangler.toml
+# (`[[queues.producers]]`, `[[queues.consumers]]`, `[[durable_objects.bindings]]`), not variables set here —
+# `wrangler dev` provisions them locally under `.wrangler/state`. Only queue *names* appear as vars, and they
+# belong to wrangler.toml's `[vars]` block so a deploy cannot accidentally point at another environment's queue.
+
+# SECRET — the HMAC input for the per-viewer measurement reference (`POST /advertising/viewer-key`). Set with
+# `npx wrangler secret put AD_VIEWER_KEY_SECRET`. Unset, the Worker derives the key from SUPABASE_JWT_SECRET
+# instead: it works, but rotating one credential then rotates the other. Rotating this value invalidates every
+# key ever issued, which is the entire implementation of "delete this viewer's history" — no table holds a
+# viewer identity, so there is nothing to forget, and no delete endpoint to abuse.
+AD_VIEWER_KEY_SECRET=<set>
+
+# ── Phase 9 · observability ──────────────────────────────────────────────────
+# No new secrets and no new bindings: metrics are written through the same Supabase client, log lines go to
+# stdout for the platform to collect, and health rows live in `public.system_health`.
+
+# Volume of structured request logs: off | errors | slow | all. The default is `errors` — every failure and
+# every slow request, no healthy 200s — because the rollup tables already hold the counting and a raw request
+# log is the one thing this phase refused to build. The field list is closed (docs/OBSERVABILITY_ARCHITECTURE.md
+# §3): nothing you set here adds a field to a log line.
+LOG_MODE=<set>
+
+# There is deliberately no `ENVIRONMENT` variable: `isProduction(env)`, `envName(env)` and `/api/health` all
+# read `APP_ENV` above. Two names for one fact is how an environment ends up production-shaped with dev keys.

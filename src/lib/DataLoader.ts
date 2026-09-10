@@ -296,7 +296,10 @@ class DataLoader {
     // Only fetch essential user columns - NO large text/blob fields
     const { data, error } = await supabase
       .from('profiles')
-      .select('id, email, username, role, created_at')
+      // No `email`: Phase 10 narrowed the columns `authenticated` may project from `profiles`. Nothing calls
+      // this loader (see the F-01 note above), so the change is hygiene — a revived class must not come back
+      // with a query the database now refuses.
+      .select('id, username, role, created_at')
       .order('created_at', { ascending: false })
       .limit(50);
     if (error) throw error;

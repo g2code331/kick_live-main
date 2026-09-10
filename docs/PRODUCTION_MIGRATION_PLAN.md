@@ -385,7 +385,68 @@ _proven_. Before applying anywhere:
 `node scripts/check-sql.mjs --dsn "postgres://kicklive@127.0.0.1:55432/kicklive_scratch" --fresh` and require
 `runFlow`, `runSponsorshipFlow` **and** `runObservabilityFlow` to print `ALL PASS`.
 
-## Standing constraints for every phase
+## Phase 10 — final production hardening 🟡 audit done, one fix shipped, ⚠ nothing executed against Postgres
+
+The mandate was thirty steps before an external audit: architecture, security, authorization, RLS, privacy, the
+match engine, the notification/R2/cache/ad/sponsorship surfaces, performance, mobile, accessibility, errors,
+env config, SQL, deployment, then builds/tests, E2E, failure testing, integrity, docs, cleanup, a release
+checklist and an honest rating. **The audit ran; the fixing was limited to what could be verified without a
+browser, a database or a Cloudflare login.** What shipped:
+
+- **`supabase/migrations/20260916120000_phase10_privilege_tightening.sql`** — the contact columns on `profiles`
+  are no longer projectable by `authenticated` (`revoke select` + `grant select (…)`), with two definer doors for
+  the legitimate reads: `kicklive_profile_self()` (owner, no argument) and
+  `kicklive_profile_contacts(p_ids, p_limit)` (`is_admin()`, clamped 1..200). Additive, `$verify$`-gated, no
+  destructive statement, and the first migration in this repository to narrow **columns** rather than rows —
+  because a policy cannot, and Phase 1's `using (true)` for `authenticated` had survived for exactly that reason.
+- **Six call sites moved** — `AuthContext`, `src/lib/access.ts` (its `profiles(username, email)` embed deleted,
+  the two fields now read for the visible ids only), `AdminPortal`, `UserManagement`, `TeamDashboard`, and the
+  dead `DataLoader` so it cannot return with a query the database now refuses. `workers/src/services/profiles.ts`
+  dropped `email` from `PROFILE_COLUMNS`; `/me` answers `email: null` with the key kept.
+- **The deployment documents no longer instruct a privilege-escalating install** — `DEPLOYMENT_CHECKLIST.md`
+  step 3 and `DEPLOYMENT_GUIDE.md` step 4 said "paste `SUPABASE_NEW_PROJECT_SETUP.sql`", a file banner-labelled
+  SUPERSEDED whose sibling (`SUPABASE_COMPLETE_SCHEMA.sql`) has an `UPDATE` policy with no `WITH CHECK`. Both now
+  name the base schema + the nine migrations in filename order, and `supabase db push` as the equivalent.
+- **`docs/OBSERVABILITY_ARCHITECTURE.md`** (Phase 9's note, written this phase) ·
+  **`RELEASE_CHECKLIST.md`** (14 sections, every item READY / REQUIRES CONFIGURATION / REQUIRES TESTING / BLOCKED
+  / NOT IMPLEMENTED, with the commands that close them) · **`README.md`**, which did not exist ·
+  `docs/PRODUCTION_ARCHITECTURE.md` §20 (findings, fixes, and the eight items left open with reasons) ·
+  `supabase/README.md` (what `authenticated` may project) · `workers/.dev.vars.example` completed through
+  Phase 7 and Phase 9 (`AD_VIEWER_KEY_SECRET`, `LOG_MODE`, and the note that there is no `ENVIRONMENT` var).
+- **`tests/unit/phase10-hardening.test.ts`** — 14 cases: the migration is additive and contains no drop; the
+  column list excludes `email`/`phone` and keeps what public surfaces need; the self function takes no argument;
+  the contacts function refuses with a value and clamps; the `$verify$` block checks every privilege the change
+  depends on; no client file projects a contact column; the Worker's projection is `id, username, role`; the
+  migration set is nine files in filename order with phases `[1,3,4,5,6,7,8,9,10]`; and no deployment doc names a
+  superseded SQL file without a warning.
+
+Measured findings, recorded rather than fixed: `with check (true)` appears **0 times** in the repository; the six
+remaining `using (true)` are all `for select`; 101 routes with **0 `implemented: false`**; no committed secret
+(`scripts/check-secrets.mjs` runs and reports only this sandbox's unset CI secrets); 21 `console.log` left in
+`src/lib/MatchAutomation.ts`, `src/lib/CompetitionEngine.ts` and the log module itself; 5 `select('*')` in
+`MatchAutomation.ts`; `RATE_LIMIT_KV` commented out in staging and production; three overlapping match-desk
+surfaces; `AdminPortal` still reading the legacy `media` table; 407 `<button>`, 344 of them without `type`, 56
+`<div onClick>`, 8 `aria-label` / 1 `aria-modal` / 1 `aria-live` across 59 `tsx` files, 19 `<img>` all with
+`alt`. Each has a paragraph in architecture note §20.4 saying why it is still open.
+
+Verified here (no fabrication): `npm run typecheck` both projects 0 errors · `npm run build:web` succeeds, fan
+boot 529.8 KiB raw / 156.6 KiB gzipped over 5 chunks, 74 files 7.31 MiB · `npm run build:desktop` bundles
+main+preload · `npm run test:unit` **577 pass, 0 fail** · `npm run test:integration` **99 pass, 0 fail** ·
+`worker-routes --check` 101/101 · `check-secrets.mjs` clean · `prettier --check` clean · `gates` 21 pass /
+1 fail / 4 skip (the failure is the known un-installed `_github/workflows`; `npm run ci:install`). The query
+ratchet caught this change set's five query moves and `docs/data/phase4-query-inventory.md` was regenerated,
+which is the only end-to-end proof the repo can offer that a privacy fix did not silently add a read.
+
+**Cannot be verified here, and no result is claimed for it:** `npm run check:sql` (no `initdb`/`psql`, no
+container runtime, not root) — so phases 8, 9 and 10 migrations, all three `sql-flow` scripts and the
+`$verify$` blocks are **unexecuted**; `wrangler deploy` (no Cloudflare credential); E2E and failure-injection
+steps 24–25 (no browser, no Supabase project): the state model, the WS/poll fallback and the queue retry paths
+are covered by unit tests and by `scripts/sql-flow.mjs` assertions that have never run, and are marked
+`REQUIRES TESTING` in the checklist rather than assumed.
+
+**Final rating: PRODUCTION READY AFTER CONFIGURATION, AND REQUIRES FIXES IN ONE NAMED AREA** — the
+configuration list and the four things to fix before shipping are §"Final rating" in `RELEASE_CHECKLIST.md`, and
+the first line of it is "apply the nine migrations on staging and require `ALL PASS`".
 
 Additive SQL only; no destructive statement without a reviewed, backed-up, separately scheduled
 migration. No new dependency without a reason in the PR. `npm run gates` green before a push;

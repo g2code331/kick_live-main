@@ -52,14 +52,16 @@ export default function AdminPortal({ onNavigate }: { onNavigate: (page: string)
         const [teams, matches, users, competitions, pending] = await Promise.all([
           supabase.from('teams').select('id, name, short_name, city, primary_color, secondary_color'),
           supabase.from('matches').select('id, home_team_id, away_team_id, home_score, away_score, status, start_time, competition_id').limit(50),
-          supabase.from('profiles').select('id, email, username, role, created_at').limit(50),
+          supabase.rpc('kicklive_profile_contacts', { p_limit: 50 }),
           supabase.from('competitions').select('id, name, type, season, status, created_at').order('created_at', { ascending: false }).limit(20),
           supabase.from('teams').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
         ]);
         
         setTeamsList(teams.data || []);
         setMatchesList(matches.data || []);
-        setUsersList(users.data || []);
+        // The RPC answers `{ ok, count, contacts }`; a non-admin caller gets `ok: false` and an empty list,
+        // which is the degradation this desk should show rather than an error it cannot recover from.
+        setUsersList(((users.data as unknown as { contacts?: unknown[] } | null)?.contacts as any[]) || []);
         setCompetitionsList(competitions.data || []);
         setPendingTeamsCount(pending.count || 0);
         

@@ -127,7 +127,10 @@ export async function authenticate(request: Request, env: Env): Promise<Principa
   }
 
   const role = APP_ROLES.includes(row.role as AppRole) ? (row.role as AppRole) : "fan";
-  return { userId: row.id, email: row.email, username: row.username, role, token };
+  // `email` is deliberately not read any more (Phase 10 narrowed the column grant so that a fan's own JWT
+  // cannot list the directory); `Principal.email` stays on the interface because `SafeProfile` maps it, and it
+  // answers null rather than the client reaching for `profiles` itself.
+  return { userId: row.id, email: row.email ?? null, username: row.username, role, token };
 }
 
 /**

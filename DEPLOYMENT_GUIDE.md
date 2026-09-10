@@ -128,10 +128,16 @@ https://supabase.com/dashboard/project/fnefpcjeebawsebxjhcf
 - Click **"New Query"**
 
 ### **3. Run Schema Setup**
-- Copy content from `SUPABASE_NEW_PROJECT_SETUP.sql`
-- Paste into SQL Editor
-- Click **"Run"**
-- Wait for success message
+- Paste `KICKLIVE_FINAL_SCHEMA.sql` → **Run** (base schema: 15 tables, triggers, the policy set)
+- Then paste each file in `supabase/migrations/` in filename order → **Run** after each
+- Stop on the first error. The phase migrations end with a `do $verify$` block that *raises* rather than
+  installing quietly, so a red message means a policy or a grant did not land — which is what it is for
+
+**Never run `SUPABASE_NEW_PROJECT_SETUP.sql` or `SUPABASE_COMPLETE_SCHEMA.sql`.** Both are superseded, both are
+banner-labelled as such, and both are weaker than what Phase 1 hardened: `SUPABASE_COMPLETE_SCHEMA.sql` has an
+`UPDATE` policy with `USING` and no `WITH CHECK`, which is privilege escalation, and
+`SUPABASE_NEW_PROJECT_SETUP.sql` creates no `profiles` policies at all. `supabase/README.md` says which file is
+authoritative and why the others are kept.
 
 ---
 

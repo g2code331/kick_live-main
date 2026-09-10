@@ -80,7 +80,7 @@ export async function submitAccessRequest(requestedRole: "team_manager" | "media
 export async function listPendingAccessRequests(): Promise<AccessRequest[]> {
   const { data, error } = await supabase
     .from("access_requests")
-    .select("id, user_id, requested_role, reason, status, created_at, decided_at, decided_by, profiles:profiles!access_requests_user_id_fkey(username, email)")
+    .select("id, user_id, requested_role, reason, status, created_at, decided_at, decided_by")
     .eq("status", "pending")
     .order("created_at", { ascending: false })
     .limit(100);
@@ -88,7 +88,21 @@ export async function listPendingAccessRequests(): Promise<AccessRequest[]> {
     log.debug("[access] pending requests unavailable:", error.message);
     return [];
   }
-  return (data || []) as unknown as AccessRequest[];
+  const requests = (data || []) as unknown as AccessRequest[];
+  if (requests.length === 0) return requests;
+  // The applicant's contact details used to arrive as an embedded `profiles(username, email)` join. Phase 10
+  // took that column away from `authenticated`, which is the point: an embed is a select, and a select a
+  // signed-in fan can write by hand. The desk reads the same two fields through the admin-gated function, for
+  // the ids it is already showing — and a non-admin gets `[]` here exactly as they got `[]` from the table.
+  const ids = requests.map((r) => (r as unknown as { user_id?: string }).user_id).filter(Boolean) as string[];
+  const { data: directory } = await supabase.rpc("kicklive_profile_contacts", { p_ids: ids });
+  type Contact = { id: string; username: string; email: string };
+  const contacts = ((directory as unknown as { contacts?: Contact[] } | null)?.contacts ?? []) as Contact[];
+  const byId = new Map<string, Contact>(contacts.map((c) => [c.id, c]));
+  return requests.map((r) => {
+    const who = byId.get((r as unknown as { user_id?: string }).user_id ?? "");
+    return { ...r, profiles: who ? { username: who.username, email: who.email } : null } as AccessRequest;
+  });
 }
 
 /**

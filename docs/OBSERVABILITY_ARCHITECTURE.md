@@ -378,7 +378,9 @@ and require `runFlow`, `runSponsorshipFlow` **and** `runObservabilityFlow` to pr
 1. Apply the migration on staging: `supabase db push` (or `psql -f` the single file). Its §16 `do $verify$`
    block raises rather than installing silently — that is the intended failure mode.
 2. Deploy the Worker. No new bindings, no new secrets: metrics use the existing Supabase key, logs use stdout.
-   Optional vars: `LOG_MODE` (`off|errors|slow|all`, default `errors`), `ENVIRONMENT` (already required).
+   Optional var: `LOG_MODE` (`off|errors|slow|all`, default `errors`). The environment name is the existing
+   `APP_ENV` (`development|staging|production`), which is what `isProduction(env)` reads — there is no
+   `ENVIRONMENT` variable in this Worker, and `workers/src/env.ts` is the only list worth trusting.
 3. Confirm the five-minute cron is live (`wrangler tail` should show `observability` heartbeats within the
    staleness window, 900s). A `TELEMETRY_STALE` alert on a fresh install usually means the cron line was not
    deployed rather than that the app is broken.

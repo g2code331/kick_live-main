@@ -38,12 +38,18 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
  */
 async function fetchProfile(userId: string): Promise<UserProfile | null> {
   try {
-    const { data, error } = await supabase.from("profiles").select("id, email, username, phone, role, avatar_url, team_id, created_at, updated_at").eq("id", userId).limit(1);
+    // `kicklive_profile_self`, not a select on `profiles`: Phase 10 narrowed which *columns* a signed-in
+    // account may project from that table, so `email` and `phone` — the two a user is entitled to and nobody
+    // else is — come through a definer function whose selector is `auth.uid()`. There is no id argument on
+    // purpose, which is also why `userId` below is a liveness check rather than a filter.
+    if (!userId) return null;
+    const { data, error } = await supabase.rpc("kicklive_profile_self");
     if (error) {
       log.warn("Profile fetch error:", error.message);
       return null;
     }
-    return data && data.length > 0 ? (data[0] as UserProfile) : null;
+    const row = data as (UserProfile & { ok?: boolean }) | null;
+    return row && row.ok === true ? (row as UserProfile) : null;
   } catch (err) {
     log.error("Profile fetch failed:", err);
     return null;

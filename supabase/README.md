@@ -19,6 +19,17 @@ review: fixing one file left four others that recreate it.
 `repomix-output.xml` in the repository root is a stale generated dump of the whole tree. It is not
 schema and not documentation; regenerate or delete it rather than reading it.
 
+## What `authenticated` may project (Phase 10)
+
+A row policy can only answer _which rows_; `20260916120000_phase10_privilege_tightening.sql` is the first
+migration to narrow _which columns_ as well. `profiles.email` and `profiles.phone` are no longer projectable by
+`authenticated` at all, so `GET /rest/v1/profiles?select=email` answers `42501` for a signed-in fan instead of
+a directory. The owner reads their own row through `kicklive_profile_self()`; an admin desk reads a bounded
+contact projection through `kicklive_profile_contacts(p_ids, p_limit)`, gated on `is_admin()` **on the caller's
+own token** (the Phase 8 rule — a service-role call has no subject). `service_role` keeps the full table, and
+`SELECT` on every other column of `profiles` is unchanged. The migration's `do $verify$` block asserts all of
+it with `has_column_privilege`, because a grant that parses is not a grant that lands.
+
 ## Policy names in use
 
 Policies are identified by name, so the names are part of the contract. Renaming one without dropping

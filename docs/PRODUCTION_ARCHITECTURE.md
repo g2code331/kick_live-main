@@ -739,3 +739,118 @@ npm run brand:assets:check      # what gate 5 runs: committed bytes must equal w
 node scripts/bundle-budget.mjs  # measure dist/web against scripts/bundle-budget.json
 node scripts/bundle-budget.mjs --write   # move the ceilings, and read the diff in review
 ```
+
+## 20. Privileges and documents as built (Phase 10)
+
+Phase 10 is the audit phase, so this section is written as findings rather than as features: what was looked at,
+what was found, what changed, and what is left standing on purpose. The status of every item below, with the
+commands that would close it, is [`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md).
+
+### 20.1 The one leak that had a code fix: contact columns on `profiles`
+
+Phase 1's audit closed the anonymous half of `profiles` (F-05: `profiles: public read USING (true)` → the same
+policy narrowed to `to authenticated`, plus the `profiles_public` view for public pages). The authenticated half
+survived, because a row policy can only answer _which rows_: any signed-in account could still run
+`GET /rest/v1/profiles?select=email,phone` and read the directory. Nothing in the app needed that shape — six
+surfaces read those two columns, and all six are either an owner reading their own row or an admin desk listing
+users — so the correct mechanism was never a policy:
+
+- `20260916120000_phase10_privilege_tightening.sql` revokes table-wide `select` for `authenticated` and grants an
+  explicit column list (`id, username, role, avatar_url, team_id, created_at, updated_at`). Postgres checks
+  column privileges before RLS and per column, which is the only place in the database that can say "these two
+  columns, not this row". `service_role` is untouched, so `supabaseAdmin()`, Phase 5's addressing and Phase 7's
+  referee-contact projection keep working.
+- Two definer functions carry the legitimate reads: `kicklive_profile_self()` (owner-only, **no argument**,
+  selector `auth.uid()`) and `kicklive_profile_contacts(p_ids, p_limit)` (`is_admin()` on the caller's own token,
+  limit clamped 1..200, projection stops short of `phone`). Same idiom as every phase since 6 — pinned
+  `search_path`, `security definer`, decision inside the function, grant to `authenticated` and not to the
+  service key, because a service-role call has no subject and would answer `ADMIN_ONLY` forever.
+- The SPA moved accordingly: `AuthContext.fetchProfile` calls the self function; the access-request desk dropped
+  its embedded `profiles(username, email)` join (an embed is a select, and a select a fan can write by hand) and
+  reads the same two fields for the ids it is already rendering; `AdminPortal`, `UserManagement` and
+  `TeamDashboard` use the contacts function. `workers/src/services/profiles.ts` dropped `email` from
+  `PROFILE_COLUMNS`, so `authenticate()` reads `id, username, role` and `/me` answers `email: null` — the shape
+  is stable, the field is simply no longer the API's to know. The SPA has the address from its own session.
+- The migration's `do $verify$` block asserts `has_column_privilege(...)` for `email` (false), `phone` (false),
+  `username` (true), `service_role`/`email` (true), `anon` (false), that the read policy still exists, and that a
+  stranger cannot execute either function. `tests/unit/phase10-hardening.test.ts` asserts the same properties from
+  the other side — including that no client file projects a contact column, by scanning them.
+
+### 20.2 The one leak that had a documentation fix
+
+`DEPLOYMENT_CHECKLIST.md` step 3 and `DEPLOYMENT_GUIDE.md` step 4 both instructed an operator to paste
+`SUPABASE_NEW_PROJECT_SETUP.sql` into a fresh project. That file carries a "SUPERSEDED — DO NOT RUN" banner
+written in Phase 1, and `SUPABASE_COMPLETE_SCHEMA.sql` — which the guide's sibling documents also mentioned — has
+an `UPDATE` policy with `USING` and no `WITH CHECK`, i.e. the exact privilege escalation Phase 1 closed. So the
+only way to follow the deployment documents on a new project was to undo the security work. Both documents now
+name the authoritative path (`KICKLIVE_FINAL_SCHEMA.sql`, then `supabase/migrations/*` in filename order, then
+`supabase db push` as the equivalent), explain why the four root files are kept-but-forbidden, and a test fails
+if any deployment document mentions them without a `do not / never / superseded` context.
+
+This is the pattern worth naming: **a repository can be correct and still ship a vulnerability through its run
+book.** The audit that mattered this phase was of the documents, not of the SQL.
+
+### 20.3 What was reviewed and found already sound
+
+- **Wide-open policies.** `with check (true)` appears **zero times** across the base schema and all nine
+  migrations. The six remaining `using (true)` are all `for select`: the public competition catalogue (Phase 1's
+  whitelist loop), `profiles` for `authenticated` (now column-narrowed above), and `kicklive_match_transitions`
+  (Phase 3's public replay log). Each is a deliberate public read with a named policy.
+- **Public-API field exposure.** Every phase since 6 has read through an explicit projection rather than a
+  `select *`, and the phases' own tests compare the SQL `select` lists against the frontend types. The
+  Phase 9 metric path holds no identity at all; `kicklive_live_match_metrics` emits `match_id/status/
+live_updated_at/seconds_since_update`; `sponsorship`'s projection has no contact or money columns;
+  the ad viewer-key route mints a hash and stores nothing. `profiles`/`device_tokens` were the remaining
+  direct-read surfaces and §20.1 closes the first; the second was already write-only from the client.
+- **The route/privilege matrix.** `workers/src/lib/capabilities.ts` is the single matrix, every route in
+  `router.ts` names a capability and a cache class, `scripts/worker-routes.mjs --check` proves the catalogue,
+  the README table and the handler map agree at **101 routes with zero `implemented: false`**, and no browser
+  role can reach an admin capability: `roleHasCapability(null, …)` permits only `public.read`, so an anonymous
+  caller cannot pass a single gate anywhere.
+- **Retries, replay, idempotency.** Phase 3's `(match_id, sequence)` chain with a refusal on a gap, Phase 5's
+  per-(user, campaign) dedupe and DLQ, Phase 7's event ingest that counts rather than logs, and Phase 9's
+  fold-on-replay upsert are the four places a retried write could double-apply; all four are covered by unit
+  tests, and three of them by rows in `scripts/sql-flow.mjs`.
+- **Ads cannot touch the match.** `POST /advertising/events` writes to `ad_events`/`ad_analytics_daily` and
+  nothing else; there is no ad route that writes a match, a score, or a referee-visible state, and the serve path
+  is read-only with `cache: edge`. Sponsorship is separately entitled (Phase 8) with `auto_flight` accepted-and-
+  ignored rather than half-built.
+
+### 20.4 Findings left open, with the reason each is still open
+
+Recorded here because "we could not get to it" is only honest when it names the thing and the cost.
+
+1. **`RATE_LIMIT_KV` is commented out in `env.staging` and `env.production`.** The limiter therefore shapes
+   traffic per isolate, not per project. It is not a fake — it does clamp a burst inside a hot worker — but the
+   ceiling in `middleware/ratelimit.ts` is not what an operator would read it to be. Closing it is one namespace
+   and two uncommented lines, so it is configuration rather than code; shipping it inert would misrepresent §1 of
+   the checklist.
+2. **The match desk has three surfaces** (`MatchControlPro.tsx`, `MatchDashboard.tsx`, the AdminPortal match
+   tab) sharing `src/lib/MatchAutomation.ts`. Phase 10 step 9 asked for one canonical control center; merging
+   them is a product decision about which desk an operator actually opens on a match night, and the state model
+   underneath is already single-authority, so the risk of a wrong guess is workflow, not correctness.
+3. **`src/lib/MatchAutomation.ts` (5 × `select('*')`) and `src/lib/CompetitionEngine.ts` (whole-table reads,
+   `console.log` on every refresh)** are pre-Phase-4 admin code with no query spec. The ratchet in
+   `docs/data/phase4-query-inventory.md` counts them so they cannot grow; narrowing them needs the screens
+   rendered, because the honest way to know a `select('*')` may become a column list is to look at what the table
+   uses it for.
+4. **`AdminPortal.tsx` still reads the legacy `media` table** for its recent-media card, so that card shows
+   pre-Phase-6 rows while the media desk shows `media_assets`. Left as-is: Phase 6's own notes list the legacy
+   read as its follow-up, and rewiring a table in an admin card with no database to test against is how you
+   trade a cosmetic inconsistency for a broken desk.
+5. **407 `<button>` elements, 344 without a `type` attribute**; 56 `<div onClick>`; 8 `aria-label`, 1
+   `aria-modal`, 1 `aria-live` across 59 `tsx` files. All 19 `<img>` carry `alt`. In React a `button` inside a
+   `form` defaults to `submit`, so an unlabelled control on the referee desk can fire a signup form — a real
+   event, not a lint preference. A codemod (`react/button-has-type`, or a scripted `type="button"` insertion) is
+   the fix, plus a keyboard pass on the five screens named in the mandate; both need the browser.
+6. **No root `README.md` existed.** `DEPLOYMENT*.md`, five root SQL files and `docs/` were all reachable only by
+   knowing the names. Written now, pointing at `docs/PRODUCTION_ARCHITECTURE.md` and `RELEASE_CHECKLIST.md`,
+   because a new contributor's first question should not be answered by `replit.md`.
+7. **Stray generated files remain at the root** (`output.md`, `repomix-output.xml`, `replit.md`, `replit.nix`,
+   `.replit`). They are not referenced by the build; `supabase/README.md` already says the repomix dump is stale.
+   Deleting them is safe and was not done because this phase's mandate was "without deleting anything that may be
+   useful", and a stale-but-searchable tree dump is somebody's offline copy.
+8. **The last three phases have never been applied to a database.** `node scripts/check-sql.mjs` needs
+   `initdb`/`psql`, and this sandbox has neither, no container runtime, and no root. The paren linter, the
+   catalog-level `do $verify$` blocks and the flows in `scripts/sql-flow.mjs` are what a real install will run
+   first; until they pass, phases 8–10 are written-and-linted, not proven.

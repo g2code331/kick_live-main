@@ -13,12 +13,21 @@ import type { AppRole } from "../env.ts";
 import { capabilitiesFor } from "../lib/capabilities.ts";
 import type { Principal } from "../middleware/auth.ts";
 
-/** The exact columns the Worker may read out of `public.profiles` for identity purposes. */
-export const PROFILE_COLUMNS = "id, email, username, role";
+/**
+ * The exact columns the Worker may read out of `public.profiles` for identity purposes.
+ *
+ * `email` is gone as of Phase 10, and it is the reason the narrowing is possible at all: `authenticated` may
+ * no longer project the contact columns (see `20260916120000_phase10_privilege_tightening.sql`), and a Worker
+ * that read the column for everybody would be the one client allowed to — which is the shape of leak this file
+ * exists to prevent. `/me` therefore answers `email: null`; the SPA already has the address from its own
+ * session, and `kicklive_profile_self()` is the door if it ever needs the stored value.
+ */
+export const PROFILE_COLUMNS = "id, username, role";
 
 export interface ProfileRow {
   id: string;
-  email: string | null;
+  /** Present only if a deployment grants the column back; nothing reads it. */
+  email?: string | null;
   username: string | null;
   role: string;
 }
