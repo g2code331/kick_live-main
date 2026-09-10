@@ -48,6 +48,18 @@ supabase db push               # applies supabase/migrations in filename order
 Or paste a single migration into the dashboard SQL editor — every file here is wrapped in
 `begin; … commit;` so a failure rolls back instead of half-applying.
 
+In order, and each one safe to re-run:
+
+| file                                           | what it does                                                                                                                                          | reads it changes behaviour for                               |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `20260909120000_phase1_security_hardening.sql` | RLS + privilege hardening; the capability matrix                                                                                                      | everything                                                   |
+| `20260909210000_phase3_live_match_engine.sql`  | the live engine: assignments, transitions, sequences, corrections, guards                                                                             | `src/lib/live/*`, `MatchControlCenter`, `MatchDetails`       |
+| `20260910120000_phase4_read_aggregates.sql`    | three read aggregates (`kicklive_competition_standings`, `kicklive_squad_sizes`, `kicklive_is_final_status`); **indexes deliberately left commented** | `src/lib/data/queries.ts` (`/tables`, `/team/:id`, `/teams`) |
+
+Phase 4's file adds no table, no column and no index. The index block is commented because the phase's rule
+is that an index needs a plan, and no database was available to plan against — see
+`../docs/PHASE4_DATA_ARCHITECTURE.md` §4.8 and `node scripts/query-audit.mjs --explain`.
+
 Rules for files in this directory:
 
 1. **Additive.** No `DROP TABLE`, `DROP COLUMN`, or `DELETE`. Dropping something is a separate,

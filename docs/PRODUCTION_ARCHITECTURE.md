@@ -180,8 +180,10 @@ question, each with a cache key, a tag set, a bound and a freshness class, serve
 ## 8. Database: schema, RLS, migrations
 
 Authoritative base: `KICKLIVE_FINAL_SCHEMA.sql` (15 tables; every other root SQL file is a subset of
-it and is marked superseded). New deltas: `supabase/migrations/`, first entry
-`20260909120000_phase1_security_hardening.sql`. `supabase/README.md` records which file wins, the full
+it and is marked superseded). New deltas: `supabase/migrations/` — `…phase1_security_hardening`,
+`…phase3_live_match_engine`, and (Phase 4) `20260910120000_phase4_read_aggregates.sql`, which adds three
+read aggregates and **no** indexes: the index block in that file is commented, because the rule is a plan
+before an index and this repository has never run one (`scripts/query-audit.mjs --explain`). `supabase/README.md` records which file wins, the full
 policy-name list, and the rules for new migrations (additive, idempotent, self-checking, no destructive
 statements, `notify pgrst` after catalogue changes).
 

@@ -206,11 +206,19 @@ cache, and every write (Phase 2's route-by-route migration).
 
 ### 4.8 Database and indexes
 
-No schema change without a measurement. `--explain` prints the EXPLAIN statements for the canonical reads;
-the candidate index set in the generated SQL is derived from the three WHERE/ORDER shapes the audit shows
-over and over (`status,start_time`, `competition_id,start_time`, `team_id`, `created_at desc`, `goals desc`).
-Whether each is added is decided by the plan, not by the count — a 60-row `matches` table does not need
-four indexes, a season with 3 000 of them does. Migrations only; nothing drops or rewrites data.
+No schema change without a measurement. Applied: `supabase/migrations/20260910120000_phase4_read_aggregates.sql`
+— three read aggregates (`kicklive_is_final_status`, `kicklive_competition_standings`, `kicklive_squad_sizes`),
+`SECURITY INVOKER` so RLS still decides which rows enter them, `search_path` pinned, `execute` granted to
+`anon`/`authenticated` after a `revoke all from public`, `begin;…commit;`, a verification block that raises,
+and `notify pgrst`. That is the whole change: no table, no column, no row, no policy.
+
+**Not applied: indexes.** `node scripts/query-audit.mjs --explain` prints an
+`explain (analyze, buffers, settings)` for each canonical read plus the `create index` it would justify, and
+§5 of the migration carries that same six-name list as comments. The names are checked against each other by
+test (`tests/unit/query-ratchet.test.ts`), because two lists that drift are two lists nobody applies. Whether
+each one is added is decided by its plan — a 60-row `matches` table does not need four indexes, a season with
+3 000 of them does — and this environment has no database to plan against, which is stated in §6 rather than
+argued away.
 
 ### 4.9 What is deliberately not deleted
 
@@ -278,6 +286,26 @@ Deliberate limits of this unit, stated as such:
   mounted on demand rather than on every visit; folding it into one `adminOverview` key is a small, separate
   change and mixing it in here would have made the diff harder to review than the win is worth.
 - The standings and squad-count specs call `kicklive_competition_standings` / `kicklive_squad_sizes` and fall
-  back to the browser rule until the Phase 4 migration is applied. The fallback is counted in the
-  diagnostics, and `42501` does **not** fall back — a refusal is not the same as an absence, and the test for
-  that distinction is the reason the fallback matcher matches codes rather than substrings.
+  back to the browser rule **until §6's migration is applied to the project** — it is written, not executed;
+  this sandbox has no Postgres. The fallback is counted in the diagnostics, and `42501` does **not** fall
+  back: a refusal is not the same as an absence, and the test for that distinction is why the fallback
+  matcher matches codes rather than substrings.
+
+## 6. The migration, and the one honest gap
+
+`20260910120000_phase4_read_aggregates.sql` exists and is _not_ applied anywhere, because there is nothing
+here to apply it to. What was verified instead:
+
+| property                          | how it is verified here                                                                                                                                                                                                                                           |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| the SQL rule = the client rule    | `tests/unit/phase4-data.test.ts` parses the function bodies and compares the status list, the 3/1/0 points, the tie-break ladder, the participant set and the `active`-club filter against `src/lib/data/standings.ts`                                            |
+| output shape matches `fromSqlRow` | same file, against the declared `out` parameters, in order                                                                                                                                                                                                        |
+| no privilege widening             | INVOKER (not DEFINER), pinned `search_path`, `revoke all from public` before `grant execute`, all asserted in the test and again inside the migration                                                                                                             |
+| additive only                     | no `create/alter/drop table`, no `update`, no `delete` — asserted over the comment-stripped file                                                                                                                                                                  |
+| no unmeasured index               | every `create index` line is a comment, and the six names match `--explain`'s candidates                                                                                                                                                                          |
+| syntax                            | **not verified.** No `psql`, no `pg` parser in this sandbox (`libpg-query` does not install here), and `npm run ci:install` has no SQL step. The file was reviewed by hand, statement by statement; the first real execution of it is a reviewable act on staging |
+| it does not hang a deploy         | `notify pgrst, 'reload schema'` so the new RPCs resolve, and the client's `isMissingOnServer` fallback covers the window before it lands                                                                                                                          |
+
+Until it is applied, `/tables` and `/team/:id` are correct through the browser rule and `/teams` through the
+counted fallback — nothing in the app depends on the functions existing. That asymmetry is on purpose: a
+performance migration must not be the reason a page stops working.
