@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { X, Calendar, MapPin, Edit2, Search, Filter, Loader2, Play, RotateCcw } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
 import { CompetitionEngine } from '../../../lib/CompetitionEngine';
-import MatchControlComplete from './MatchControlComplete';
+import MatchControlCenter from './MatchControlCenter';
 
 interface FixturesViewerProps {
   competition: any;
@@ -230,7 +230,7 @@ export default function FixturesViewer({ competition, isOpen, onClose }: Fixture
       </div>
 
       {isMatchControlOpen && (
-        <MatchControlComplete 
+        <MatchControlCenter 
           match={selectedMatch} 
           isOpen={isMatchControlOpen} 
           onClose={() => setIsMatchControlOpen(false)} 

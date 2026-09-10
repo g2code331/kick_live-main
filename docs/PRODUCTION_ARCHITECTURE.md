@@ -226,13 +226,72 @@ call site is greppable (`grep -rn supabaseAdmin( workers/src`).
 
 ## 9. Live match architecture
 
+> **Status: built in Phase 3.** §9.1 describes what ships; the "Today:" block that follows is the
+> pre-Phase-3 state, kept because §10's audit and the migration notes refer to it.
+
+### 9.1 As built (Phase 3)
+
+```
+controller's browser ── POST /api/matches/:id/events ──▶ Cloudflare Worker route
+   (no score, no status,     (authn → authz → validation)          │
+    no minute of the clock,                                        ▼
+    no sequence)                                          MatchRoom Durable Object
+   ▲                                                       (per match: state + sockets)
+   │  snapshot / frames                                          │  one writer, in order
+   │  (MATCH_SNAPSHOT, MATCH_EVENT,                              ▼
+   │   MATCH_STATUS, MATCH_CLOCK,                        POST /rpc/kicklive_record_match_event
+   │   SYNC_CONFLICT, CONTROLLERS, PING/PONG)                    │  Postgres: allocate live_seq,
+   │                                                              │  insert the row, recompute the
+  Fans ── WebSocket (ticket) ─┐                                   │  score, write matches.minute,
+   └──── SSE fallback ────────┴──── the same frames ◀── broadcast ─┘  audit
+              │                                     │
+              │                                     ▼
+              └── reducer: src/lib/live/machine.ts   Supabase PostgreSQL = the permanent record
+```
+
+Decisions that define it:
+
+- **Postgres is the authority for everything a match means.** `kicklive_record_match_event` allocates the
+  per-match `sequence` from `matches.live_seq`, inserts the row, recomputes the score from the surviving
+  active events (`kicklive_match_score`), writes `matches.minute`, and audits. The Durable Object holds the
+  live state and the sockets; it is _not_ the database, and it never acks an event the database refused.
+- **A client cannot send an authoritative number.** `POST /events` accepts an event's own minute, team,
+  players and optional metadata; score, status, the match clock, the sequence and "who recorded this" are
+  all server-derived. `kicklive_guard_match_result_columns` makes a browser-role `UPDATE` of
+  `home_score/away_score/minute/status/is_locked/live_seq` fail with `42501` for any match the engine has
+  written (a fixture the engine never touched keeps the legacy behaviour — the ratchet that made this safe
+  to apply to a live database).
+- **The vocabulary is the schema's.** 14 statuses from `matches.status`'s CHECK list, 27 event types from
+  `match_events.event_type`, `goal_type` as declared. Legal moves live in one seeded table,
+  `kicklive_match_transitions` (49 rows, with `requires_admin`/`reason_required`), which both the SQL
+  functions and `workers/src/lib/matchLifecycle.ts` are pinned against by `tests/unit/live-match-engine.test.ts`.
+- **Corrections, never deletions.** An event is `active` or `corrected`; a correction records who, when,
+  why, links to the original (`corrects_event_id`) and re-derives the score. `match_events` has
+  `revoke update, delete` from client roles plus a trigger, so no client can rewrite history — including
+  the ~27 legacy screens that still insert rows.
+- **Ordering, idempotency and reconnect.** Every frame carries `sequence`; a client only ever says "I have
+  seen N". Reconnect sends `{type:"resume", after_sequence:N}`; the room answers with the ≤60 retained
+  events or, if it cannot bridge the hole, a fresh `MATCH_SNAPSHOT`. Idempotency is
+  `unique (match_id, client_event_id)`, so a retry is a no-op that returns `{duplicate:true}`.
+- **Offline is a first-class state.** A controller's tap is written to a durable local queue _before_ the
+  fetch, is stamped with its idempotency key at send time, is retried with backoff, and is never discarded
+  silently: a refusal becomes a visible `refused` row with the server's words. Status changes and
+  finalization are deliberately **not** queueable — half time must happen when the referee taps it, not when
+  the signal returns.
+- **Fans never end up silently wrong.** WS → SSE → polling in that order, with the same reducer and the same
+  sequences on every rung, a 20 s staleness budget while the clock runs, and a self-repair that fetches the
+  authoritative snapshot. A degraded pipe is labelled on screen, not hidden.
+
+Notifications and standings recalculation stay in Phase 5: finalizing freezes the result and writes
+`confirmed_at`; it does not fan out to `match_notifications` or the league table yet.
+
 Today: an operator's tab owns the clock. `MatchControl*` components `setInterval` a minute counter
 (60 s in `Complete`, 1 s in `Pro`), write `matches.home_score/away_score/minute/status` on button press,
 insert `match_events`/`match_commentary` rows, and optionally run `MatchAutomation` (standings,
 notifications) **in that browser**. If the tab closes mid-match the clock stops, the score on disk is
 whatever was last saved, and no other operator can tell.
 
-Target:
+Pre-Phase-3 target (kept for the record — §9.1 says what actually shipped, and where it differs):
 
 - **Event-sourced truth, aggregate in Postgres.** `match_events` is the record of what happened;
   `matches.score/minute` are a derived cache. The write path (`POST /v1/matches/:id/events`) validates
@@ -285,6 +344,23 @@ Consolidation plan (Phase 2/3, and why nothing was deleted in Phase 1):
    change, then delete the 8 unreachable ones + the 2 superseded reachable ones in a single
    "remove match control variants" PR with `docs/` updated. Deleting them now would destroy nothing
    at runtime but would erase the reference implementations the extraction depends on.
+
+**Consolidation outcome (Phase 3).** Step 1 and 2 happened, and step 3 happened except for the deletion:
+
+- `MatchControlCenter.tsx` was rewritten as the canonical console (`useMatchRoom` + `eventCatalog`), and
+  `FixturesViewer` and `MultiMatchQueue` — the only two live entry points in the table — now render it.
+  `AdminPortal`'s dead import of `MatchControlComplete` was removed. No component in the tree calls
+  `supabase.from('match_events')` or `supabase.from('matches').update(...)` for a live match any more, which
+  is what step 2 required; `tests/unit/live-client.test.ts` pins it (the console must contain no
+  `.update(`/`.insert(`/`setInterval`, and the fan page must not read `match_events` directly).
+- The 10 superseded files and `EventModal.tsx` are **still on disk with a `SUPERSEDED` header** naming this
+  section. They are unreachable from routing and from every portal, so a rollback is a one-line import
+  change, and the deletion decision (with the answer to "is anything still owed from `Pro`?") is left to a
+  human rather than taken on the strength of a grep.
+- The pad's vocabulary is not a copy: `src/lib/live/eventCatalog.ts` mirrors
+  `workers/src/lib/matchEvents.ts` field for field (`team`, `players`, `goalType`, `cardReason`, `group`)
+  and is checked against it by test, so the console cannot offer an event the database refuses, and a
+  future edit to the spec that skips the browser shows up as a failing build.
 
 ## 11. Notifications and automation
 
@@ -490,3 +566,87 @@ Honesty list, because each line below is a thing a reader might otherwise assume
 - The Worker has not been executed against Cloudflare from this working session: `wrangler` is not
   installed here, so `GET /api/health` has been proven against the real handler in tests, not against a
   deployed Worker. Treat "deployed and probed" as a Phase 2 exit task, not as done.
+
+## 17. The live match engine as built (Phase 3)
+
+Same purpose as §16: separate "in the tree and tested" from "planned". Route-by-route detail lives in
+`workers/README.md`; the event/state rules are pinned by `tests/unit/live-match-engine.test.ts` (SQL ↔ TS)
+and `tests/unit/live-client.test.ts` (the browser mirror, the reducer, the draft queue).
+
+### 17.1 One chain, two transports, one reducer
+
+```
+fan / console  ──▶  src/lib/live/useMatchRoom.ts
+                        │  REST (auth, rate limits, envelope)      WS/SSE (read-only frames)
+                        ▼                                            ▼
+              workers/src/routes/live.ts  ──serialise──▶  MatchRoom Durable Object
+                        │                                        │  writer queue, one at a time
+                        ▼                                        ▼
+              services/matchAccess.ts (assignment proof)   services/matchPersistence.ts
+                        │                                        │  rpc
+                        └────────────────────────────────────────▶ Supabase Postgres
+                                                                   kicklive_* functions (the decision-maker)
+                                                                   match_events = the ledger
+                                                                   matches = the derived cache + clock
+```
+
+The socket never writes, by construction: `handleLiveSocket` accepts an upgrade only after verifying a
+short-lived HS256 ticket (`liveTicket.ts`, `aud: "kicklive-live"`, 6 h for a viewer / 15 min for a
+controller), and the only client frames the room reads are `{type:"resume"|"ping"|"snapshot"}`. A controller
+writes with REST, where `authenticate → authorizeForRoute → resolveMatchAccess → the SQL function` all run
+again. The ticket is not a credential with privileges; it names an audience.
+
+### 17.2 Durability model, stated exactly
+
+| Step                                           | Where                         | If it fails                                                                      |
+| ---------------------------------------------- | ----------------------------- | -------------------------------------------------------------------------------- |
+| tap                                            | `useMatchRoom` → `DraftQueue` | persisted locally first; the UI shows it as queued                               |
+| authn + authz + shape validation               | Worker route                  | 4xx to the console, entry marked `refused`, never dropped                        |
+| ordering, `expected_sequence` race check       | MatchRoom DO                  | 409 + `SYNC_CONFLICT` to controllers only; fans see nothing                      |
+| `live_seq` allocation, insert, score recompute | Postgres function             | 503 `DEPENDENCY_FAILED`, **nothing broadcast**, client retries with the same key |
+| broadcast + ack                                | DO → sockets → `MutationAck`  | an ack implies a durable row; a lost ack is a re-send, not a lost event          |
+
+There is no write-behind batching and no local-first commit: the database is the durability point, so an
+accepted event is a committed row. The DO's retained buffer (60 events) exists to serve resumes, not to
+stand in for the ledger — after eviction the room rehydrates from `kicklive_match_live_state` and every
+client that reconnects gets a snapshot instead of a hole.
+
+### 17.3 Commands that work here
+
+```bash
+npm ci
+node scripts/worker-local.mjs          # :8787, real MatchRoom in-process, DO storage in memory
+npm run dev                            # :5000, proxies /api (ws:true) to the Worker
+curl -s localhost:8787/api/health
+node scripts/run-tests.mjs all         # 365 tests, incl. the Phase 3 pins
+npx tsc -p tsconfig.workers.json --noEmit
+node scripts/gates.mjs                 # release gates
+npm run build                          # web + renderer + desktop
+```
+
+Against `worker-local` with no `workers/.dev.vars`, live routes answer `503 DEPENDENCY_FAILED` with
+`MIGRATION_HINT` — that is the intended failure (no Postgres to be authoritative), not a crash. To exercise
+the room end-to-end you need a Supabase project with `20260909210000_phase3_live_match_engine.sql` applied;
+the SSE route (`GET /api/matches/:id/stream`) is the way to watch frames without a Cloudflare runtime, and
+`scripts/worker-routes.mjs` prints the route/capability table the router holds.
+
+### 17.4 What Phase 3 did **not** do
+
+- **The migration has never been executed.** This sandbox has no `psql`/`postgres`/`initdb`; the SQL layer is
+  parsed by `libpg-query` (118 statements, clean) but plpgsql bodies are opaque to it and were reviewed by
+  reading, not running. `supabase db push` against a throwaway project is a hard prerequisite for anything
+  live. The migration is additive-only by design and ends with a verification `DO` block that raises
+  `hardening failed:` rather than half-applying.
+- **No WebSocket transport test.** `worker-local`'s Node http server cannot complete an upgrade handshake,
+  and `wrangler` cannot be installed here, so the socket path is proven by unit tests of the room's
+  handlers and by the SSE route carrying the same frames — not by a real browser socket. The dev proxy now
+  sets `ws:true` so that first real test is one `wrangler dev` away.
+- **`useMatchRoom` has not run in a browser.** Its inputs (the ladder, the reducer, the queue) are unit
+  tested; React-level behaviour, ticket expiry mid-match, and a real iOS background-tab resume are not.
+- No notifications or standings recalculation on finalize (Phase 5), no `match_commentary` write path
+  (still legacy), no R2 for media, no FCM, no D1, no ads or sponsorships.
+- Squad reads in the console (`supabase.from('players')`) still use the legacy read path: the Worker has no
+  squad route, and adding one was outside this phase's goal. Same for the fan page's commentary/statistics/
+  lineups reads, which are now event-driven instead of on a timer but still Supabase-direct.
+- `recorded_by_name` is visible to an admin only (`kicklive_event_frame` gates it on `is_admin()`); the REST
+  timeline leaves it `null` rather than leaking a username to fans.

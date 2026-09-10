@@ -1,3 +1,13 @@
+/**
+ * The old event form. NOT superseded-and-forgotten: it is still the *shape* the canonical console's pad
+ * mirrors (one sheet, team + player + minute + the optional goal type or card reason), and it is what
+ * `MatchControlFull`/`Pro`/`Dashboard` still render.
+ *
+ * It writes nothing itself — its parent did, straight to Supabase — but its parent's path is gone, so this
+ * file is reachable only from the superseded screens listed in `docs/PHASE3_MATCH_CONTROL_AUDIT.md`. The
+ * live console uses `src/lib/live/eventCatalog.ts` for its vocabulary so that the pad cannot offer an event
+ * type the database's CHECK list refuses.
+ */
 import { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
 

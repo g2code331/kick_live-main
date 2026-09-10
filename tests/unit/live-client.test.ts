@@ -20,6 +20,41 @@ import { isLiveMessage, parseFrame, PROTOCOL_VERSION, type LiveEvent, type Match
 
 const REPO = path.resolve(import.meta.dirname, "../..");
 const read = (...parts: string[]): string => fs.readFileSync(path.join(REPO, ...parts), "utf8");
+const sread = read;
+
+/** Re-parses `workers/src/lib/matchEvents.ts` so the catalogue is compared to the spec, not to a copy of it. */
+function workerEventSpecs(): { type: string; recordable: boolean; lifecycle: boolean; team: string; players: string; group: string; goalType: boolean; cardReason: boolean }[] {
+  const src = read("workers", "src", "lib", "matchEvents.ts");
+  const out: { type: string; recordable: boolean; lifecycle: boolean; team: string; players: string; group: string; goalType: boolean; cardReason: boolean }[] = [];
+  for (const m of src.matchAll(/^ {2}([a-z_]+): spec\("([a-z_]+)", \{/gm)) {
+    const open = src.indexOf("{", (m.index ?? 0) + m[0].length - 1);
+    let depth = 0;
+    let end = open;
+    for (let i = open; i < src.length; i++) {
+      if (src[i] === "{") depth += 1;
+      else if (src[i] === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+    const inner = src.slice(open + 1, end);
+    const grab = (re: RegExp, dflt: string): string => re.exec(inner)?.[1] ?? dflt;
+    out.push({
+      type: m[2] ?? "",
+      recordable: !inner.includes("recordable: false"),
+      lifecycle: inner.includes("lifecycle: true"),
+      team: grab(/team: "([a-z_]+)"/, "required"),
+      players: grab(/players: "([a-z_]+)"/, "none"),
+      group: grab(/group: "([a-z_]+)"/, "play"),
+      goalType: inner.includes("goalType: true"),
+      cardReason: inner.includes("cardReason: true"),
+    });
+  }
+  return out;
+}
 
 const SERVER_LIVE = read("workers", "src", "types", "live.ts");
 const SERVER_API = read("workers", "src", "types", "api.ts");
@@ -187,6 +222,45 @@ describe("live client · the protocol mirror cannot drift", () => {
     }
     assert.ok(CLIENT_HOOK.includes('"resume"') && CLIENT_HOOK.includes("after_sequence"), "the hook must resume with the sequence it last applied");
     assert.ok(CLIENT_HOOK.includes('"snapshot"'), "and must be able to ask for a whole snapshot when its history is not trustworthy");
+  });
+
+  it("the controller pad is the Worker's event spec, row for row", () => {
+    const specs = workerEventSpecs();
+    const recordable = specs
+      .filter((r) => r.recordable && !r.lifecycle)
+      .map((r) => r.type)
+      .sort();
+    const catalogue = [...sread("src", "lib", "live", "eventCatalog.ts").matchAll(/^  \{ type: "([a-z_]+)"/gm)].map((m) => m[1] ?? "");
+    assert.deepEqual(catalogue.slice().sort(), recordable, "the pad must offer exactly the events a controller may submit");
+    for (const type of recordable) {
+      const server = specs.find((r) => r.type === type);
+      const line = new RegExp(`  \\{ type: "${type}", .*\\},`).exec(sread("src", "lib", "live", "eventCatalog.ts"))?.[0] ?? "";
+      assert.ok(line.length > 0, `${type} must be one line in the catalogue`);
+      for (const field of ["team", "players"] as const) {
+        const fromCatalogue = new RegExp(`${field}: "([^"]+)"`).exec(line)?.[1] ?? "";
+        assert.equal(fromCatalogue, server?.[field], `${type}.${field}: the pad says ${fromCatalogue}, the spec says ${String(server?.[field])}`);
+      }
+      // `group` is the one field the pad may relabel, because its groups are the rows it renders and the
+      // union they belong to. Exactly one type is affected: `extra_time_half_time`, lifecycle-shaped in the
+      // spec and tappable in the UI. If a second one ever needs this, that is a decision to make in
+      // `matchEvents.ts` first, not an allowance to widen here.
+      const relabelled = ["extra_time_half_time"];
+      const padGroup = /group: "([a-z_]+)"/.exec(line)?.[1] ?? "";
+      if (relabelled.includes(type)) {
+        assert.equal(server?.group, "lifecycle", `${type} must be lifecycle in the spec for the pad's "play" row to be the documented exception`);
+        assert.equal(padGroup, "play");
+      } else {
+        assert.equal(padGroup, server?.group, `${type}.group: the pad says ${padGroup}, the spec says ${String(server?.group)}`);
+      }
+      for (const flag of ["goalType", "cardReason"] as const) {
+        const fromCatalogue = new RegExp(`${flag}: (true|false)`).exec(line)?.[1];
+        assert.equal(String(fromCatalogue), String(Boolean(server?.[flag])), `${type}.${flag} differs between the pad and the spec`);
+      }
+    }
+    // The types a tap may never write must be absent from the pad, not merely greyed out.
+    for (const r of specs.filter((x) => !x.recordable || x.lifecycle)) {
+      assert.ok(!catalogue.includes(r.type), `${r.type} is written by the state machine, so the pad must not offer it`);
+    }
   });
 
   it("the REST payloads the SPA reads are the Worker's, field for field", () => {
@@ -643,5 +717,56 @@ describe("live client · the transport ladder in useMatchRoom", () => {
       ].sort(),
       "these are the writes, and no others",
     );
+  });
+});
+
+describe("phase3 · the console is the one implementation, and the fan page is on the room", () => {
+  const console = read("src", "pages", "portals", "admin", "MatchControlCenter.tsx");
+  const details = codeOnly(read("src", "pages", "MatchDetails.tsx"));
+  const fixtures = read("src", "pages", "portals", "admin", "FixturesViewer.tsx");
+  const queue = read("src", "pages", "portals", "admin", "MultiMatchQueue.tsx");
+  const portal = read("src", "pages", "portals", "AdminPortal.tsx");
+
+  it("every reachable entry point lands on the canonical console", () => {
+    assert.ok(fixtures.includes("import MatchControlCenter from './MatchControlCenter';"), "FixturesViewer must render the canonical console");
+    assert.ok(fixtures.includes("<MatchControlCenter"), "and pass it the same props");
+    assert.ok(queue.includes("import MatchControlCenter from './MatchControlCenter';"), "the multi-match queue must not keep a second implementation");
+    assert.ok(queue.includes("<MatchControlCenter match={selectedMatch} onBack="), "including its navigate-instead-of-overlay shape");
+    for (const file of [fixtures, queue, portal]) {
+      assert.ok(!/MatchControlComplete|MatchControlFull|MatchControlPro|MatchControlRoom|MatchControlDashboard/.test(file), "no superseded console may still be wired in");
+    }
+  });
+
+  it("the console writes through the engine and never to a row", () => {
+    const body = codeOnly(console);
+    assert.ok(body.includes('useMatchRoom(matchId, { mode: "controller"'), "the console must be built on the room, not on its own polling");
+    for (const forbidden of [".update(", ".insert(", ".delete(", "supabase.from('matches')", 'supabase.from("matches")', "setInterval"]) {
+      assert.ok(!body.includes(forbidden), `the console must not ${forbidden === "setInterval" ? "own a timer" : `write ${forbidden}`}`);
+    }
+    assert.ok(body.includes('supabase.from("players")'), "squad reads stay on the legacy read path (the Worker has no squad route yet) — documented, not hidden");
+    for (const needle of ["actions.record(", "actions.transition(", "actions.correct(", "actions.finalize(", "actions.lock(", "actions.assign("]) {
+      assert.ok(body.includes(needle), `the console must offer ${needle.split(".")[1]}`);
+    }
+    assert.ok(body.includes("rights?.canFinalize !== true") && body.includes("rights?.canLock !== true"), "authority gates are rendered disabled with the server's words");
+    assert.ok(body.includes("access?.allowed_transitions"), "and its lifecycle buttons come from the server's legal moves, not a client list");
+    assert.ok(body.includes("reason_required"), "the reason a transition needs is demanded by the server's flag");
+  });
+
+  it("the fan page reads live state from the room, with no timer of its own", () => {
+    assert.ok(details.includes("useMatchRoom("), "the page must use the room");
+    assert.ok(!details.includes("setInterval"), "the 10-second poll is gone");
+    assert.ok(!/supabase\s*\.from\(['"]match_events/.test(details), "the timeline no longer comes from a direct table read");
+    assert.ok(!/from\(['"]matches['"]\)\s*\.\s*select\(\s*\*\s*,/.test(details), "the live columns are no longer read off the row with `*`");
+    assert.ok(details.includes("state.score.home") && details.includes("clock.minute"), "score and minute come from the room");
+    assert.ok(details.includes("connection.stale"), "and a stalled pipe is admitted on screen rather than showing a confident lie");
+    assert.ok(details.includes("state.sequence"), "the non-engine panels refresh from the sequence, not a clock");
+  });
+
+  it("the access payload the console renders is the payload the Worker sends", () => {
+    const server = interfaceFields(read("workers", "src", "types", "api.ts"), "MatchAccessData").get("allowed_transitions") ?? "";
+    const client = interfaceFields(CLIENT_API, "MatchAccessData").get("allowed_transitions") ?? "";
+    assert.ok(server.length > 0 && server === client, "allowed_transitions must be declared identically on both sides");
+    assert.ok(server.includes("reason_required"), "the reason flag must be part of the contract, not inferred by the UI");
+    assert.ok(read("workers", "src", "routes", "live.ts").includes("reason_required: move?.reasonRequired === true"), "and filled from the transition table");
   });
 });

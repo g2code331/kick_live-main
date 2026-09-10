@@ -115,7 +115,7 @@ export interface MatchAccessData {
   is_locked: boolean;
   protocol_version: number;
   rights: MatchRights;
-  allowed_transitions: { to: MatchStatus; label: string; requires_confirmation: boolean; requires_closing_authority: boolean }[];
+  allowed_transitions: { to: MatchStatus; label: string; requires_confirmation: boolean; requires_closing_authority: boolean; reason_required: boolean }[];
   assignments: { id: string; role: string; status: string; user_id: string; username: string | null; assigned_at: string }[];
   reason: string | null;
 }

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Play, Pause, Clock, CheckCircle, AlertCircle } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
-import MatchControlFull from './MatchControlFull';
+import MatchControlCenter from './MatchControlCenter';
 
 export default function MultiMatchQueue() {
   const [matches, setMatches] = useState<any[]>([]);
@@ -58,7 +58,7 @@ export default function MultiMatchQueue() {
   );
 
   if (selectedMatch) {
-    return <MatchControlFull match={selectedMatch} onBack={() => setSelectedMatch(null)} />;
+    return <MatchControlCenter match={selectedMatch} onBack={() => setSelectedMatch(null)} />;
   }
 
   const getStatusIcon = (status: string) => {

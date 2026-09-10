@@ -30,7 +30,7 @@ import type { AppRole } from "../env.ts";
 import type { HandlerContext } from "./index.ts";
 import { ApiError, ok } from "../lib/response.ts";
 import { Fields, readJsonBody, readQuery, MATCH_EVENT_TYPES, GOAL_TYPES } from "../lib/validation.ts";
-import { allowedNextStatuses, describe, MATCH_STATUS_VALUES, type MatchStatus } from "../lib/matchLifecycle.ts";
+import { allowedNextStatuses, describe, MATCH_STATUS_VALUES, transitionsFrom, type MatchStatus } from "../lib/matchLifecycle.ts";
 import { eventSpec } from "../lib/matchEvents.ts";
 import { issueLiveTicket, verifyLiveTicket, type LiveTicketKind } from "../lib/liveTicket.ts";
 import { assertCanClose, assertCanControl, assertNotLocked, isAssignmentRole, resolveMatchAccess, type MatchAccess, type MatchRights } from "../services/matchAccess.ts";
@@ -262,12 +262,18 @@ export async function handleMatchAccess(ctx: HandlerContext): Promise<Response> 
     is_locked: access.match.is_locked === true,
     protocol_version: 1,
     rights: access.rights,
-    allowed_transitions: allowedNextStatuses(access.match.status as MatchStatus, isAdmin).map((to) => ({
-      to,
-      label: describe(to),
-      requires_confirmation: CONFIRM_REQUIRED.includes(to),
-      requires_closing_authority: CLOSING_TARGETS.includes(to),
-    })),
+    allowed_transitions: allowedNextStatuses(access.match.status as MatchStatus, isAdmin).map((to) => {
+      // `reason_required` rides along so the console can demand the reason the transition row asks for.
+      // It is a UX affordance only: `kicklive_transition_match` refuses the same way if a client skips it.
+      const move = transitionsFrom(access.match.status as MatchStatus).find((t) => t.to === to);
+      return {
+        to,
+        label: describe(to),
+        requires_confirmation: CONFIRM_REQUIRED.includes(to),
+        requires_closing_authority: CLOSING_TARGETS.includes(to),
+        reason_required: move?.reasonRequired === true,
+      };
+    }),
     assignments: assignments.map((a) => ({ id: a.id, role: a.role, status: a.status, user_id: a.user_id, username: a.username, assigned_at: a.assigned_at })),
     /** Why control is off, in the console's words. Null when control is on. */
     reason: access.rights.canControl ? null : (access.rights.reason ?? "This account may not control this match."),

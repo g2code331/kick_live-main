@@ -1,85 +1,89 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Calendar, Users, MessageSquare, Activity, TrendingUp, Clock } from 'lucide-react';
+import { ArrowLeft, Calendar, Users, MessageSquare, Activity, TrendingUp, Wifi, WifiOff } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
+import { useMatchRoom } from '../lib/live/useMatchRoom.ts';
+
+/**
+ * The fan page. Phase 3 moved its *live* half onto the room (`useMatchRoom`), replacing the 10-second
+ * `setInterval` that used to re-query `matches`, `match_events`, commentary, statistics and both squads —
+ * five queries per ten seconds per open tab, and a score the browser read out of a row someone else had
+ * typed into.
+ *
+ * What is left on the legacy path is what the engine does not own: commentary text, the statistics the
+ * ledger cannot answer (possession, shots, fouls), squad lists and the fixture's static identity. Those
+ * refresh *event-driven* — when the room's sequence moves, throttled — rather than on a timer, so an idle
+ * pre-match page asks the database nothing at all.
+ */
 export default function MatchDetails() {
   const { matchId } = useParams<{ matchId: string }>();
   const navigate = useNavigate();
-  const [match, setMatch] = useState<any>(null);
-  const [events, setEvents] = useState<any[]>([]);
+  const id = Number(matchId);
+  const { state, clock, connection, secondsSinceFrame } = useMatchRoom(Number.isFinite(id) ? id : 0, { mode: 'viewer', enabled: Number.isFinite(id) && id > 0 });
+
+  const [fixture, setFixture] = useState<any>(null);
   const [commentary, setCommentary] = useState<any[]>([]);
   const [stats, setStats] = useState<any>(null);
   const [lineups, setLineups] = useState<any>({ home: [], away: [] });
   const [loading, setLoading] = useState(true);
+  const lastAux = useRef(0);
 
+  // The fixture's static identity: names, colours, kickoff, competition. Read once; it does not change
+  // while a fan is watching, and the live fields on the same row are no longer read from here.
   useEffect(() => {
-    if (matchId) {
-      loadMatchData();
-      // Poll for live matches every 10 seconds
-      const pollInterval = setInterval(() => {
-        loadMatchData();
-      }, 10000);
-      return () => clearInterval(pollInterval);
-    }
-  }, [matchId]);
-
-  async function loadMatchData() {
-    try {
-      // Fetch match details
-      const { data: matchData } = await supabase
+    if (!Number.isFinite(id) || id <= 0) return;
+    let cancelled = false;
+    void (async () => {
+      const { data } = await supabase
         .from('matches')
         .select(`
-          *,
+          id, status, venue, start_time, match_start_time, home_team_id, away_team_id,
           homeTeam:teams!home_team_id(id, name, short_name, primary_color, secondary_color),
           awayTeam:teams!away_team_id(id, name, short_name, primary_color, secondary_color),
           competitions(name)
         `)
-        .eq('id', matchId)
+        .eq('id', id)
         .single();
-      setMatch(matchData);
-
-      // Fetch events
-      const { data: eventsData } = await supabase
-        .from('match_events')
-        .select('*, player:players(name), team:teams(short_name)')
-        .eq('match_id', matchId)
-        .order('minute', { ascending: true });
-      setEvents(eventsData || []);
-
-      // Fetch commentary
-      const { data: commentaryData } = await supabase
-        .from('match_commentary')
-        .select('*')
-        .eq('match_id', matchId)
-        .order('minute', { ascending: true });
-      setCommentary(commentaryData || []);
-
-      // Fetch statistics
-      const { data: statsData } = await supabase
-        .from('match_statistics')
-        .select('*')
-        .eq('match_id', matchId)
-        .single();
-      setStats(statsData);
-
-      // Fetch lineups (players from both teams)
-      if (matchData) {
-        const { data: playersData } = await supabase
-          .from('players')
-          .select('id, name, number, position, team_id')
-          .in('team_id', [matchData.home_team_id, matchData.away_team_id]);
-        
-        const homeLineup = playersData?.filter((p: any) => p.team_id === matchData.home_team_id) || [];
-        const awayLineup = playersData?.filter((p: any) => p.team_id === matchData.away_team_id) || [];
-        setLineups({ home: homeLineup, away: awayLineup });
-      }
-    } catch (err) {
-      console.error('Error loading match data:', err);
-    } finally {
+      if (cancelled) return;
+      setFixture(data);
       setLoading(false);
-    }
-  }
+    })();
+    return () => { cancelled = true; };
+  }, [id]);
+
+  // Commentary, statistics and lineups: refreshed when the ledger moves, never on their own timer.
+  useEffect(() => {
+    if (!Number.isFinite(id) || id <= 0) return;
+    const now = Date.now();
+    if (state.sequence > 0 && now - lastAux.current < 5000) return;
+    lastAux.current = now;
+    let cancelled = false;
+    void (async () => {
+      const [commentaryResult, statsResult, teamIds] = await Promise.all([
+        supabase.from('match_commentary').select('*').eq('match_id', id).order('minute', { ascending: true }),
+        supabase.from('match_statistics').select('*').eq('match_id', id).single(),
+        Promise.resolve([fixture?.home_team_id, fixture?.away_team_id].filter((v: any) => typeof v === 'number') as number[]),
+      ]);
+      const playersResult = teamIds.length > 0 ? await supabase.from('players').select('id, name, number, position, team_id').in('team_id', teamIds) : { data: null };
+      if (cancelled) return;
+      setCommentary(commentaryResult.data || []);
+      setStats(statsResult.data);
+      if (playersResult.data) {
+        setLineups({
+          home: (playersResult.data as any[]).filter((p) => p.team_id === teamIds[0]),
+          away: (playersResult.data as any[]).filter((p) => p.team_id === teamIds[1]),
+        });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [fixture?.away_team_id, fixture?.home_team_id, id, state.sequence]);
+
+  // The engine's own ordering is newest-first, which is right for a console and wrong for a timeline a
+  // fan reads top-to-bottom from kickoff.
+  const events = [...state.events].reverse();
+  const status = state.clock?.status ?? state.status;
+  const isLive = ['live', 'first_half', 'second_half', 'extra_time', 'half_time', 'penalty_shootout', 'suspended'].includes(status);
 
   if (loading) {
     return (
@@ -92,7 +96,7 @@ export default function MatchDetails() {
     );
   }
 
-  if (!match) {
+  if (!loading && fixture === null && !state.ready) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
@@ -102,8 +106,6 @@ export default function MatchDetails() {
       </div>
     );
   }
-
-  const isLive = match.status === 'first_half' || match.status === 'second_half' || match.status === 'extra_time' || match.status === 'live';
 
   return (
     <div className="min-h-screen pb-20">
@@ -120,24 +122,32 @@ export default function MatchDetails() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4 flex-1">
               <div className="text-right">
-                <p className="font-bold text-lg">{match.homeTeam?.name}</p>
-                <p className="text-xs text-white/40">{match.homeTeam?.short_name}</p>
+                <p className="font-bold text-lg">{state.match?.home_team_name ?? fixture?.homeTeam?.name}</p>
+                <p className="text-xs text-white/40">{fixture?.homeTeam?.short_name}</p>
               </div>
               <div className="text-center px-6">
-                <p className="text-4xl font-black text-brand-green">{match.home_score} - {match.away_score}</p>
+                <p className="text-4xl font-black text-brand-green">{state.ready ? `${state.score.home} - ${state.score.away}` : '- -'}</p>
+                {state.score.shootout ? (
+                  <p className="text-[10px] uppercase tracking-widest text-white/40">shoot-out {state.score.shootout.home}-{state.score.shootout.away}</p>
+                ) : null}
                 {isLive && (
                   <p className="text-xs text-brand-green flex items-center justify-center gap-1">
                     <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
-                    {match.minute}' LIVE
+                    {clock.minute}{clock.extra > 0 ? `+${clock.extra}` : ''}' LIVE
+                    <span className="text-white/30 flex items-center gap-1 ml-2">
+                      {connection.status === 'live' ? <Wifi size={11} /> : <WifiOff size={11} />}
+                      {secondsSinceFrame !== null ? `${secondsSinceFrame}s ago` : 'connecting'}
+                    </span>
                   </p>
                 )}
                 {!isLive && (
-                  <p className="text-xs text-white/40">{match.status === 'completed' || match.status === 'full_time' ? 'Full Time' : new Date(match.start_time).toLocaleString()}</p>
+                  <p className="text-xs text-white/40">{['completed', 'full_time'].includes(status) ? 'Full Time' : state.statusLabel ?? status.replace(/_/g, ' ')}</p>
                 )}
+                {connection.stale ? <p className="text-[10px] text-amber-300 uppercase tracking-widest">reconnecting — showing the last confirmed score</p> : null}
               </div>
               <div className="flex-1">
-                <p className="font-bold text-lg">{match.awayTeam?.name}</p>
-                <p className="text-xs text-white/40">{match.awayTeam?.short_name}</p>
+                <p className="font-bold text-lg">{state.match?.away_team_name ?? fixture?.awayTeam?.name}</p>
+                <p className="text-xs text-white/40">{fixture?.awayTeam?.short_name}</p>
               </div>
             </div>
           </div>
@@ -156,17 +166,24 @@ export default function MatchDetails() {
               </div>
               {events.length > 0 ? (
                 <div className="space-y-3">
-                  {events.map((event, i) => (
-                    <div key={event.id} className="flex items-center gap-4 p-4 rounded-xl bg-white/5">
-                      <span className="text-lg font-black text-brand-green w-12">{event.minute}'</span>
+                  {events.map((event) => (
+                    <div key={`${event.id}-${event.client_event_id ?? ''}`} className={`flex items-center gap-4 p-4 rounded-xl ${event.status === 'corrected' ? 'bg-white/[0.02] opacity-45' : 'bg-white/5'}`}>
+                      <span className="text-lg font-black text-brand-green w-12">{event.minute}{event.extra_minute > 0 ? `+${event.extra_minute}` : ''}'</span>
                       <div className="w-10 h-10 rounded-lg flex items-center justify-center text-xl">
-                        {event.event_type === 'goal' ? '⚽' : event.event_type === 'yellow_card' ? '🟨' : event.event_type === 'red_card' ? '' : '🔄'}
+                        {event.event_type === 'goal' || event.event_type === 'penalty_goal' || event.event_type === 'own_goal' ? '⚽' : event.event_type === 'yellow_card' || event.event_type === 'second_yellow' ? '🟨' : event.event_type === 'red_card' ? '🟥' : event.event_type.startsWith('substitution') ? '🔄' : '📍'}
                       </div>
                       <div className="flex-1">
-                        <p className="font-bold capitalize">{event.event_type.replace('_', ' ')}</p>
-                        {event.player && (
-                          <p className="text-sm text-white/60">{event.player.name} {event.team && `(${event.team.short_name})`}</p>
+                        <p className={`font-bold capitalize ${event.status === 'corrected' ? 'line-through' : ''}`}>{event.event_type.replace(/_/g, ' ')}</p>
+                        {event.player_name && (
+                          <p className="text-sm text-white/60">
+                            {event.player_name}
+                            {event.team_name ? ` (${event.team_name})` : ''}
+                            {event.assist_player_name ? ` — ${event.event_type === 'substitution' ? 'off' : 'assist'}: ${event.assist_player_name}` : ''}
+                          </p>
                         )}
+                        {event.status === 'corrected' ? (
+                          <p className="text-xs text-amber-300/80">corrected{event.correction_reason ? `: ${event.correction_reason}` : ''}</p>
+                        ) : null}
                       </div>
                     </div>
                   ))}
@@ -213,7 +230,7 @@ export default function MatchDetails() {
               </div>
               <div className="space-y-6">
                 <div>
-                  <h3 className="text-sm font-black uppercase text-white/40 mb-3">{match.homeTeam?.name}</h3>
+                  <h3 className="text-sm font-black uppercase text-white/40 mb-3">{state.match?.home_team_name ?? fixture?.homeTeam?.name}</h3>
                   <div className="space-y-2">
                     {lineups.home.slice(0, 11).map((player: any) => (
                       <div key={player.id} className="flex items-center gap-3 p-2 rounded-lg bg-white/5"
@@ -227,7 +244,7 @@ export default function MatchDetails() {
                   </div>
                 </div>
                 <div>
-                  <h3 className="text-sm font-black uppercase text-white/40 mb-3">{match.awayTeam?.name}</h3>
+                  <h3 className="text-sm font-black uppercase text-white/40 mb-3">{state.match?.away_team_name ?? fixture?.awayTeam?.name}</h3>
                   <div className="space-y-2">
                     {lineups.away.slice(0, 11).map((player: any) => (
                       <div key={player.id} className="flex items-center gap-3 p-2 rounded-lg bg-white/5"
@@ -283,19 +300,19 @@ export default function MatchDetails() {
               <div className="space-y-4 text-sm">
                 <div>
                   <p className="text-white/40 mb-1">Competition</p>
-                  <p className="font-bold">{match.competitions?.[0]?.name || 'N/A'}</p>
+                  <p className="font-bold">{state.match?.competition ?? fixture?.competitions?.[0]?.name ?? fixture?.competitions?.name ?? 'N/A'}</p>
                 </div>
                 <div>
                   <p className="text-white/40 mb-1">Venue</p>
-                  <p className="font-bold">{match.venue || 'TBD'}</p>
+                  <p className="font-bold">{state.match?.venue ?? fixture?.venue ?? 'TBD'}</p>
                 </div>
                 <div>
                   <p className="text-white/40 mb-1">Date & Time</p>
-                  <p className="font-bold">{new Date(match.start_time).toLocaleString()}</p>
+                  <p className="font-bold">{fixture?.start_time ? new Date(fixture.start_time).toLocaleString() : 'TBD'}</p>
                 </div>
                 <div>
                   <p className="text-white/40 mb-1">Status</p>
-                  <p className="font-bold capitalize">{match.status.replace('_', ' ')}</p>
+                  <p className="font-bold capitalize">{(state.statusLabel ?? status).replace(/_/g, ' ')}</p>
                 </div>
               </div>
             </div>

@@ -1,3 +1,18 @@
+/**
+ * SUPERSEDED — kept on purpose, not wired in. (Phase 3, `docs/PHASE3_MATCH_CONTROL_AUDIT.md`)
+ *
+ * The live match console is `src/pages/portals/admin/MatchControlCenter.tsx`: one screen, the same
+ * `useMatchRoom` the fan page uses, a score derived from the event ledger instead of typed into a box, a
+ * server-owned clock, and writes that go through the Worker's guarded routes. Everything in this file that
+ * is worth keeping is in there.
+ *
+ * This file is NOT deleted because the audit's own rule was "a filename is not evidence of disuse": it
+ * holds UI experiments the canonical console may still want (see the audit table for what came from where),
+ * and nothing may be thrown away just because it looks unused. It is unreachable from routing and from the
+ * admin portal as of Phase 3, and it must not be wired back to Supabase writes: it drives `matches.status`,
+ * `home_score`, `away_score` and a browser `setInterval` directly, which is the exact behaviour Phase 3
+ * exists to remove. Delete it in a separate commit, once a human has agreed what, if anything, is still owed.
+ */
 import { useState, useEffect } from 'react';
 import { Trophy, Play } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';

@@ -9,7 +9,6 @@ import { supabase } from '../../lib/supabase';
 import CompetitionWizard from './admin/CompetitionWizard';
 import CompetitionEditor from './admin/CompetitionEditor';
 import FixturesViewer from './admin/FixturesViewer';
-import MatchControlComplete from './admin/MatchControlComplete';
 import PlayerCreator from './shared/PlayerCreator';
 import MediaPublisher from './shared/MediaPublisher';
 import AppSettingsDashboard from './admin/AppSettingsDashboard';

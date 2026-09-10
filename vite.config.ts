@@ -45,11 +45,18 @@ export default defineConfig(() => {
       // Phase 2: `/api` in the dev server means a local build talks to a *local* Worker
       // (`npm run worker:dev`, wrangler on 8787) and can never reach production by accident.
       // Relative URLs also keep working behind the preview host, which proxies by port, not by path.
+      //
+      // Phase 3 turns `ws` on, because `GET /api/live/matches/:id` is a WebSocket upgrade and without it a
+      // dev console would fall back to SSE/polling and nobody would notice the socket path was broken until
+      // deployment. It is a proxy of the same `/api` prefix, so no second port, no CORS exception and no
+      // dev-only URL appear anywhere in the app. Under `scripts/worker-local.mjs` the upgrade still cannot
+      // complete (Node's plain http server has no upgrade handling) — that is expected, and the room is
+      // exercised there over SSE instead.
       proxy: {
         "/api": {
           target: process.env["KICKLIVE_WORKER_ORIGIN"] ?? "http://127.0.0.1:8787",
           changeOrigin: false,
-          ws: false,
+          ws: true,
         },
       },
     },
