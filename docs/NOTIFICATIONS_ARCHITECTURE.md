@@ -192,17 +192,28 @@ notification_deliveries: id, job_id, device_id, user_id, status CHECK (sent,fail
 
 ### 4.5 Policies (the part that must be read carefully)
 
-| table                                          | who may do what                                                                                                                                                                                                                                                                                                                                                                                            |
-| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `notifications`                                | select: `user_id = (select auth.uid()) or user_id is null` — the **replacement** for `notifications: public read`, so a fan still sees broadcasts and sees nobody else's inbox; insert/update: owner or admin, with the owner derived by the Worker (service-role writes bypass RLS; the policy exists so a _direct_ client call cannot forge a row for someone else); delete: owner, admin for broadcasts |
-| `notification_preferences`                     | select/insert/update for `user_id = auth.uid()` only; admin select for support                                                                                                                                                                                                                                                                                                                             |
-| `notification_devices`                         | select/insert/update/delete for `user_id = auth.uid()` only. **No admin read of tokens**: an admin can revoke (delete) via the Worker route, and the route's response omits the token — RLS on the columns a browser can reach, plus a view `notification_devices_public` (`id, platform, provider, app_id, active, created_at, last_seen_at`) for the settings screen                                     |
-| `notification_jobs`, `notification_deliveries` | `to authenticated using (public.is_admin())` for select and **nothing else**: no client insert path at all, so the only writer is the Worker's service-role client. A fan cannot enumerate jobs, and a leaked anon key cannot queue a send                                                                                                                                                                 |
+| table                                          | who may do what                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `notifications`                                | select: `user_id = (select auth.uid()) or user_id is null` — the **replacement** for `notifications: public read`, so a fan still sees broadcasts and sees nobody else's inbox; insert/update: owner or admin, with the owner derived by the Worker (service-role writes bypass RLS; the policy exists so a _direct_ client call cannot forge a row for someone else); delete: owner, admin for broadcasts                                                                                                                                                                                   |
+| `notification_preferences`                     | select/insert/update for `user_id = auth.uid()` only, **no delete** (a missing row already means "the default", so deleting is not a meaningful user action and would look like an opt-out); admin read for support                                                                                                                                                                                                                                                                                                                                                                          |
+| `notification_devices`                         | select **denied outright** (`using (false)`) and delete for `user_id = auth.uid()`; **no INSERT or UPDATE policy at all**, because registration is a function that derives the user from `auth.uid()` and a client with a direct insert path could point any token at any account. **No admin read of tokens**: an admin can revoke (delete) via the Worker route, and the route's response omits the token — RLS on the columns a browser can reach, plus a view `notification_devices_public` (`id, platform, provider, app_id, active, created_at, last_seen_at`) for the settings screen |
+| `notification_jobs`, `notification_deliveries` | `to authenticated using (public.is_admin())` for select and **nothing else**: no client insert path at all, so the only writer is the Worker's service-role client. A fan cannot enumerate jobs, and a leaked anon key cannot queue a send                                                                                                                                                                                                                                                                                                                                                   |
 
-Every new table gets `alter table … enable row level security` **and** `alter table … force row level
-security` (so the table owner is also filtered — the phase-1 lesson), `revoke all … from public`, and narrow
-grants. No `alter default privileges … revoke update, delete` anywhere: that pattern broke writes in an
-earlier phase and is still forbidden.
+Every new table gets `alter table … enable row level security` and `revoke all … from anon, authenticated`
+in one `do $$ … foreach t in array […] $$` block (a loop, so the sixth table cannot be forgotten the way a
+hand-written fifth was), plus narrow grants.
+
+**RLS is enabled, never forced.** `force row level security` also applies to the table owner, and every RPC in
+this phase is `security definer` running as the owner — so forcing it would make each function insert zero
+rows into its own table. That is not a hypothetical here: Phase 1 recorded it for `access_requests`
+("Deliberately NOT `force row level security`") and Phase 3 repeated it for `match_assignments`. Client-side
+protection does not come from FORCE: it comes from the revokes plus the _absence_ of INSERT/UPDATE policies,
+both of which apply to `anon`/`authenticated` regardless. The migration's verification block asserts
+`relrowsecurity and not relforcerowsecurity` on all five tables, and raises if a later hardening pass adds
+FORCE — because the failure mode is invisible from the API (a 200 from a function that wrote nothing).
+
+No `alter default privileges … revoke update, delete` anywhere: that pattern broke writes in an earlier phase
+and is still forbidden.
 
 ### 4.6 `match_interest` — the only relationship table this phase adds
 
@@ -282,16 +293,33 @@ is a new table, not a change to this one.
 ## 8. Where match events create jobs
 
 Phase 3's authoritative write path is `POST /matches/:matchId/events` (and `PUT …/state` for transitions,
-`POST …/finalize`) with the DO in front. Jobs are created **inside the Postgres RPC that records the event**,
-in the same transaction:
+`POST …/finalize`) with the DO in front. Jobs are created by an **`AFTER INSERT` trigger on `match_events`**,
+in the same transaction as the event row:
 
 ```sql
--- inside kicklive_record_match_event(...), after the event row and the derived score are written
-insert into notification_jobs (dedupe_key, kind, match_id, title, body, metadata)
-values (format('match:%s|seq:%s|kind:%s', new_match_id, v_sequence, v_kind), v_kind, new_match_id, …)
-on conflict (dedupe_key) do nothing
-returning id into v_job_id;
+create or replace function public.kicklive_notification_job_for_event()
+returns trigger … as $$
+begin
+  if new.corrects_event_id is not null then return new; end if;      -- a correction stays silent
+  if new.event_status <> 'active' then return new; end if;           -- a voided row stays silent
+  v_kind := case new.event_type when 'goal' then 'goal' … else null end;
+  if v_kind is null then return new; end if;                         -- not every event is a push
+  …
+  insert into public.notification_jobs (dedupe_key, kind, match_id, …)
+  values (format('match:%s|seq:%s|kind:%s', new.match_id, coalesce(new.sequence, -new.id), v_kind), …)
+  on conflict (dedupe_key) do nothing;                                -- replayed event → no second job
+  return new;                                                         -- never null: an AFTER trigger's
+end; $$;                                                              --   return is ignored, and a BEFORE
+                                                                      --   one would drop the referee's write
+create trigger kicklive_notification_job
+  after insert on public.match_events
+  for each row execute function public.kicklive_notification_job_for_event();
 ```
+
+(The alternative considered was a line inside `kicklive_record_match_event()`. Rejected: that function is not
+the only writer of `match_events` — the Durable Object's write-behind, an admin correction and any future
+importer also insert — and a notification rule that lives in one caller is a rule the next caller forgets. A
+trigger cannot be forgotten.)
 
 Three reasons, in order of how much they matter:
 
@@ -311,25 +339,34 @@ brief's "only from authoritative server-side events"; a client that renders a sc
 write gets nothing, and a browser tab that replays its click gets one job because the key came from the
 sequence the server assigned.
 
-**No job is created while the migration is unapplied.** The RPC insert is guarded by
-`if to_regclass('public.notification_jobs') is not null`, exactly as Phase 3's guards work, so an event on a
-project that has not run the Phase 5 migration still succeeds. A notification system that can break
-recording a goal is not a production notification system.
+**No job is created while the migration is unapplied**, because the job row is created by a trigger that the
+same migration installs: no migration, no trigger, no notification — and never a failed event. The trigger
+also never returns NULL (it returns `NEW` on every early exit) because on a `BEFORE` trigger a NULL would
+discard a referee's goal event; the return value of an `AFTER` trigger is ignored, and the comment in the SQL
+says so, because "ignored" is a property of the timing, not of the function.
 
 ## 9. The policy, in one file
 
 `workers/src/lib/notificationPolicy.ts` is the only place that decides who gets what. `router.ts`, the DO and
 the frontend do not know any of it.
 
-| authoritative fact                                                                | kind                       | audience (resolved in SQL, §13)                                                              | push?                                                                                                                              | copy                                                                                  |
-| --------------------------------------------------------------------------------- | -------------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| event `goal` (own goal counted against the conceding side, as Phase 3 derives it) | `goal`                     | users following either team **or** the competition **or** with an open `match:<id>` interest | yes                                                                                                                                | `⚽ GOAL!` / `Team 2 – 1 Team` + scorer when `player_id` resolves                     |
-| status → `half_time`                                                              | `half_time`                | same                                                                                         | only if the category is on                                                                                                         | `Half time`                                                                           |
-| status → `second_half`                                                            | `match_start`              | same, silent-inbox default                                                                   | no                                                                                                                                 | `Second half under way`                                                               |
-| status → `full_time` / `completed`                                                | `full_time`                | same                                                                                         | yes                                                                                                                                | `Full time` / final score                                                             |
-| event `red_card`                                                                  | `red_card`                 | same                                                                                         | **no by default** (preference default false — the brief's "do not force users to enable every type" applied to the noisy category) | `🟥 Red card`                                                                         |
-| `scheduled → waiting/first_half` (kick-off)                                       | `match_start`              | followers of either team                                                                     | yes                                                                                                                                | `Kick-off: Team v Team`                                                               |
-| admin route `POST /admin/notifications/broadcast`                                 | `announcement` or `system` | the audience the admin selected, capped (§14)                                                | yes                                                                                                                                | admin-supplied title/body, validated (length, no URL in `metadata` beyond known keys) |
+| authoritative fact                                                                | kind          | audience (resolved in SQL, §13)                                                              | push?                                                                                                                              | copy                                                              |
+| --------------------------------------------------------------------------------- | ------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| event `goal` (own goal counted against the conceding side, as Phase 3 derives it) | `goal`        | users following either team **or** the competition **or** with an open `match:<id>` interest | yes                                                                                                                                | `⚽ GOAL!` / `Team 2 – 1 Team` + scorer when `player_id` resolves |
+| event `half_time` / `extra_time_half_time`                                        | `half_time`   | same                                                                                         | only if the category is on                                                                                                         | `Half time` / `Half time, extra time`                             |
+| event `second_half_start`                                                         | `match_start` | same                                                                                         | yes — it rides the "tell me when this match is happening" category rather than inventing a twelfth one                             | `Second half` / `Second half under way: Team v Team`              |
+| event `full_time`                                                                 | `full_time`   | same                                                                                         | yes                                                                                                                                | `Full time` / `Final: Team 2 – 1 Team`                            |
+| event `red_card`                                                                  | `red_card`    | same                                                                                         | **no by default** (preference default false — the brief's "do not force users to enable every type" applied to the noisy category) | `🟥 Red card`                                                     |
+| event `kickoff` (written by the transition, never by a client)                    | `match_start` | same                                                                                         | yes                                                                                                                                | `Kick-off: Team v Team`                                           |
+
+Two things this table refuses to do. It does not key off `matches.status`, because a status is a summary and a
+notification is about a moment — and the moments already arrive as `match_events` rows, including the lifecycle
+ones (`kicklive_lifecycle_event_for` writes `half_time` / `second_half_start` / `full_time`), so one trigger on
+the event table covers every row here and no second hook on `matches` is needed. And it does not notify on
+`match_abandoned`, even though abandonment is arguably the most serious moment of all: the brief's
+authoritative list stops at `MATCH_ENDED`, so adding it would be a notification nobody asked for. It is listed
+in §21 as a Phase 6 decision with its own category and default, not slipped in under `system`.
+| admin route `POST /admin/notifications/broadcast` | `announcement` or `system` | the audience the admin selected, capped (§14) | yes | admin-supplied title/body, validated (length, no URL in `metadata` beyond known keys) |
 
 Deliberately **not** in this table: goal-of-the-week marketing, "someone else scored in your league" (that is
 `competition_update`, opt-in, and only ever generated by the cron sweep), and anything derived from
@@ -353,9 +390,22 @@ harmless: `sequence` is assigned once, by the server, and is what Phase 3 alread
 so a client that reconnects, refetches and re-posts still refers to the same server-side event, and the
 constraint is the thing that decides, not a cache.
 
-Claiming a job is separately idempotent: `update … set status='running', started_at=now() where id=$1 and
-status in ('pending','retry') returning *` under `for update skip locked`, so two consumers (a queue redelivery
-racing the cron sweep) never both send the same job (§11).
+Claiming a job is separately idempotent, and by a predicate rather than a lock:
+
+```sql
+update public.notification_jobs
+   set status = 'running', started_at = coalesce(started_at, now()), attempts = attempts + 1
+ where id = $1 and status in ('pending','retry') and next_attempt_at <= now() and attempts < max_attempts
+returning *
+```
+
+Two consumers (a queue redelivery racing the cron sweep) both run that statement; one gets a row, the other
+gets zero and returns `NOT_CLAIMABLE`. `attempts` is incremented **here** rather than at completion, so a
+consumer that crashes mid-batch still burns an attempt instead of retrying forever — and
+`kicklive_finish_notification_job` refuses to write a `retry` onto a job that has run out of budget, which is
+the second half of "no infinite retry". (`for update skip locked` was the first design; it is equivalent here
+and worse in one respect: a lock is released when the transaction ends, while a status of `running` outlives
+it, which is exactly what a consumer that dies mid-batch needs to leave behind for the sweep to find.)
 
 ## 11. Queue, retries, DLQ, and the sweep
 
@@ -418,29 +468,61 @@ retention window is a constant in the migration, not a policy the Worker can sil
 The naive version — one query per user to resolve preferences, one insert per notification, one FCM call per
 device — is what the brief's performance step forbids. The shape here:
 
-1. **One recipient query per job**, in SQL: the audience is a `select` over `notification_preferences`
-   joined to the follow relationships, filtered by `enabled and 'push' = any(channels)` and
-   `device.active`, returning `(user_id, device_id, token, platform)` rows. For goal/full-time that is
-   "who follows either team or this competition", i.e. one join over `team_follows`/
-   `competition_follows` — **which do not exist yet** (§18 of Phase 4's audit; `players.team_id` and
-   `matches.competition_id` are the only relationships today). So v1 resolves the audience as: every user
-   with a device that has that category enabled **and** a `match_interest` row for this match (the
-   lightweight table this phase _does_ add: `(user_id, match_id, created_at)`, written by the fan UI's
-   "notify me" button), plus — for `full_time` and `match_start` — users whose `notifications` history shows
-   they opened a match of that competition in the last 30 days. When a follow model lands, the audience
-   function gains a union; nothing else changes. Documented in §20 as a known narrowing, not a hidden one.
-2. **Set-based insert of inbox rows**: `insert into notifications (user_id, kind, title, body, dedupe_key,
-metadata) select … on conflict (user_id, dedupe_key) do nothing returning id` — the whole fan-out is one
-   statement, and the conflict clause is what makes a re-run cheap instead of wrong.
-3. **Token batches of 500** with a per-batch concurrency of 5 (`max_concurrency`), each FCM call awaited
-   individually but issued in parallel, and the batch's results written back in one `insert … values (…)`
-   per status group.
-4. `recipient_count` is recorded before sending, so "this goal reached 12 431 devices" is a fact in the
-   database and the latency metric (§18) has a denominator.
+1. **One entitlement rule, in `kicklive_notification_audience(kind, match_id, competition_id, team_id)`**, and
+   three callers of it: the device query the Worker sends to, the inbox insert, and the audience count an admin
+   sees before a blast is accepted. The rule is `profiles.notifications_enabled` **and** the per-kind
+   preference, where a **missing preference row is the default, not an opt-out** — `left join` plus
+   `coalesce(p.enabled, (kicklive_preference_defaults() ->> kind)::boolean)`. An inner join there is the single
+   easiest way to make every account that never opened the settings screen silently un-notifiable, and it looks
+   identical to "nobody wants notifications" in the metrics.
+
+   Scoped how? For a match-linked job, every user with a `match_interest` row for that match (the lightweight
+   table this phase _does_ add, written by the fan UI's "notify me" button); `announcement`/`system`/`news` go
+   globally. There is no `team_follows`/`competition_follows` table (§18 of Phase 4's audit), so this v1
+   audience is **narrower** than "everyone who follows either team": it is "everyone who asked about this
+   match". An earlier draft also widened `full_time`/`match_start` to users whose history showed they opened a
+   match of that competition in the last 30 days; that is **not implemented** — inferring an audience from
+   browsing history to widen a push list reads like surveillance to the person being pushed at, and it would
+   have made the §20 narrowing invisible in exactly the way this document exists to prevent. When a follow
+   model lands, the union goes in this one function and nowhere else.
+
+2. **The device query** (`kicklive_notification_recipients(job_id)`) joins that audience to
+   `notification_devices` filtered by `active`, `provider = 'fcm'`, `failure_count < 5` and the `push` channel,
+   **and** by `not exists (… notification_deliveries job_id + device_id …)` — the last clause is the replay
+   guard that turns a queue redelivery into a no-op _before_ FCM is called. It is the only query in the system
+   that returns a token; it is `security definer`; it is granted to no client role.
+3. **Set-based insert of inbox rows** (`kicklive_materialise_notifications`): one `insert … select` over the
+   audience with `on conflict (user_id, dedupe_key) … do nothing`, keyed `job.dedupe_key || '|u:' || user_id`.
+   It reads the audience and **not** the device list, which is what makes history independent of push success —
+   deriving it from the device query would tie the record of a goal to the state of someone's phone.
+4. **Token batches of 500** with a per-batch concurrency of 5 (`max_concurrency`), each FCM call awaited
+   individually but issued in parallel, and the batch's outcomes written back in **one**
+   `kicklive_record_notification_results(job_id, results[])` call. That single function writes the delivery rows
+   (`on conflict (job_id, device_id) do update`), retires the devices FCM said are gone, strikes the ones that
+   failed for another reason, and forgives the ones that succeeded — the consumer makes no round trip per
+   device, which would make the bookkeeping the slow part of a goal.
+5. `recipient_count` is recorded when the job is created, and `kicklive_finish_notification_job` recomputes
+   sent/failed **from the delivery rows** rather than from what the caller believes it sent, so "this goal
+   reached 12 431 devices" is a fact the evidence supports, and the latency metric (§18) has a denominator.
 
 There is no per-user `for` loop in the consumer, and no `for` loop around FCM either: the only loop is over
 batches, and its body is two awaited calls. The brief's "do not make match-control operations wait" is
 satisfied structurally, because fan-out never runs in a request handler at all.
+
+**The SQL surface, by who may call it.** 19 functions: nine self-service (`register/unregister device`,
+`set_notification_preferences`, `notification_defaults_document`, `notifications_page`, `mark_notifications_read`,
+`mark_all_notifications_read`, `set_match_interest`, `preference_defaults`) — every one of them deriving the user
+from `auth.uid()` and taking no user id as an argument; eight service-role (`claim_notification_job`,
+`materialise_notifications`, `notification_audience`, `notification_recipients`,
+`record_notification_results`, `finish_notification_job`, `pending_notification_jobs`,
+`prune_notification_devices`); one reachable by no role at all because it is a trigger
+(`notification_job_for_event`); and one admin-only (`broadcast_notification`). The line is drawn so that
+everything which touches a token, or another user's rows, is on the side a browser cannot call. §9.7 of the
+migration counts the functions at runtime and `tests/unit/phase5-notifications.test.ts` counts them in the
+file, so the two numbers cannot drift apart.
+
+Read the whole section as one sentence: **the database decides who is told, the Worker decides when, and the
+queue is only what makes "when" not mean "inside the referee's request".**
 
 ## 14. Security
 
@@ -624,7 +706,7 @@ Required before any push leaves this code, in order, each one verifiable:
    `VERIFY` queries: the audience function returns a row for a seeded device, and
    `select polname from pg_policies where tablename='notifications'` shows the owner-scoped policy and not
    `notifications: public read`. A deployment where step 5 has not happened still works — jobs are simply
-   never created (§8's guard), which is the intended fail-safe.
+   never created (there is no trigger to create them), which is the intended fail-safe.
 6. `VITE_FIREBASE_*` at build time **or** the five `FIREBASE_*` Worker vars (the route serves whichever
    exists). Leaving both unset is supported and shows "push not configured" in the UI.
 7. Confirm in the Firebase console that a test message is addressed to `topic: none` of the kind this app
