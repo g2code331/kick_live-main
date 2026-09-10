@@ -176,9 +176,9 @@ AD_EVENTS_QUEUE_NAME = "kicklive-ad-events-staging"
 #  into the notification fan-out. `tests/unit/phase2-api-boundary.test.ts` parses both sides of that
 #  sentence, so the pair cannot drift apart quietly.
 APP_ENV = "staging"
-SUPABASE_URL = "https://REPLACE-WITH-STAGING-REF.supabase.co"
-SUPABASE_PROJECT_REF = "REPLACE-WITH-STAGING-REF"
-SUPABASE_ANON_KEY = "REPLACE-WITH-STAGING-PUBLISHABLE-KEY"
+SUPABASE_URL = "https://fnefpcjeebawsebxjhcf.supabase.co"
+SUPABASE_PROJECT_REF = "fnefpcjeebawsebxjhcf"
+SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZuZWZwY2plZWJhd3NlYnhqaGNmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQwNDAyMTQsImV4cCI6MjA5OTYxNjIxNH0.YkPu5IxtEPZHK9i0oiMTRROrwCT3ZdF1RgCEhaqDhwo"
 # The staging SPA origin, plus the Arena/preview hosts used during review, each spelled exactly.
 ALLOWED_ORIGINS = "https://staging.kicklive.football"
 
@@ -268,9 +268,9 @@ AD_EVENTS_QUEUE_NAME = "kicklive-ad-events"
 #  into the notification fan-out. `tests/unit/phase2-api-boundary.test.ts` parses both sides of that
 #  sentence, so the pair cannot drift apart quietly.
 APP_ENV = "production"
-SUPABASE_URL = "https://REPLACE-WITH-PRODUCTION-REF.supabase.co"
-SUPABASE_PROJECT_REF = "REPLACE-WITH-PRODUCTION-REF"
-SUPABASE_ANON_KEY = "REPLACE-WITH-PRODUCTION-PUBLISHABLE-KEY"
+SUPABASE_URL = "https://fnefpcjeebawsebxjhcf.supabase.co"
+SUPABASE_PROJECT_REF = "fnefpcjeebawsebxjhcf"
+SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZuZWZwY2plZWJhd3NlYnhqaGNmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQwNDAyMTQsImV4cCI6MjA5OTYxNjIxNH0.YkPu5IxtEPZHK9i0oiMTRROrwCT3ZdF1RgCEhaqDhwo"
 # The packaged desktop renderer must be listed too, or desktop builds fail on every API call while
 # the web app works — the worst possible shape for a bug report. Add its origin when Phase 2 ships
 # the API to the desktop shell.
