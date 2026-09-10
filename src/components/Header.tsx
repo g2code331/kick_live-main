@@ -116,7 +116,7 @@ export default function Header() {
             aria-hidden="true"
           />
           <img
-            src={assetUrl("kicklive-icon.png")}
+            src={assetUrl("brand/icon-192.png")}
             alt="Refresh"
             className={`relative h-14 sm:h-16 md:h-20 w-auto object-contain drop-shadow-[0_0_14px_rgba(57,255,20,0.5)] transition-transform duration-300 ${
               isRefreshing ? 'animate-spin' : 'group-hover:rotate-[25deg] group-active:scale-90'
@@ -134,7 +134,7 @@ export default function Header() {
             aria-hidden="true"
           />
           <img
-            src={assetUrl("kicklive-wordmark.png")}
+            src={assetUrl("brand/wordmark-312.png")}
             alt="KickLive"
             className="relative h-9 sm:h-11 md:h-[3.25rem] w-auto object-contain drop-shadow-[0_0_10px_rgba(0,212,255,0.55)] hover:drop-shadow-[0_0_20px_rgba(255,0,212,0.7)] transition-all duration-300"
           />

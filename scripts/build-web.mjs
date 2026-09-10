@@ -47,6 +47,25 @@ export async function main() {
     process.exitCode = 1;
     return;
   }
+  // Phase 4's budget: the boot graph, not the total. Enforced here rather than in a document because this is
+  // the command that produces the artifact, and `node scripts/gates.mjs` already treats a non-zero exit from
+  // build:web as a failed release gate.
+  const { checkBudget, measureBoot, outDirForTarget } = await import("./bundle-budget.mjs");
+  const budgetFile = path.join(REPO_ROOT, "scripts/bundle-budget.json");
+  if (fs.existsSync(budgetFile)) {
+    const measured = measureBoot(outDirForTarget("web"));
+    const problems = checkBudget(measured, JSON.parse(fs.readFileSync(budgetFile, "utf8")));
+    const kb = (n) => `${(n / 1024).toFixed(1)} KiB`;
+    console.log(
+      `build:web: a fan loads ${kb(measured.boot.bytes)} raw / ${kb(measured.boot.gz)} gzipped across ${String(measured.fan.length)} boot chunks, of ${String(measured.chunkCount)} JS chunks in the build`,
+    );
+    if (problems.length) {
+      console.error(`build:web: BUNDLE BUDGET FAILED\n  ${problems.join("\n  ")}`);
+      process.exitCode = 1;
+    }
+  } else {
+    console.log("build:web: no scripts/bundle-budget.json — skipped the budget (create it with `node scripts/bundle-budget.mjs --write`)");
+  }
   const hasSw = manifest.files.some((f) => f.path === "/sw.js");
   if (!hasSw) {
     console.error("build:web: sw.js missing — the PWA surface cannot self-update");

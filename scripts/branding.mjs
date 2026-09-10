@@ -130,14 +130,64 @@ function readPngSize(root, rel) {
   return pngDimensions(abs, fs);
 }
 
+/**
+ * Which files under `public/` a browser is actually asked to load.
+ *
+ * Only the shapes that mean "this path lives in public/" are read: `assetUrl("…")` (the app's helper for
+ * web-vs-`file://` paths), CSS `url(…)`, and `index.html`'s own `src`/`href`. A Vite `import logo from
+ * "./logo.png"` is deliberately *not* one of them — those resolve against `src/` and are bundled, so treating
+ * them as public files would report a missing asset that nothing is missing.
+ */
+function referencedPublicAssets(root) {
+  const refs = new Set();
+  const add = (raw) => {
+    const clean = raw.trim().replace(/^\.?\//, "");
+    if (clean && !/^https?:|^data:|^blob:/i.test(clean) && !clean.includes("${")) refs.add(clean);
+  };
+  for (const file of [...walk(path.join(root, "src")), path.join(root, "index.html")]) {
+    if (!/\.(tsx?|css|html)$/i.test(file)) continue;
+    const body = fs
+      .readFileSync(file, "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/<!--[^>]*-->/g, "")
+      .replace(/^\s*\/\/.*$/gm, "");
+    for (const m of body.matchAll(/assetUrl\(\s*["'`]([^"'`]+)["'`]/g)) add(m[1]);
+    for (const m of body.matchAll(/url\(\s*['"]?([^'")]+)['"]?\s*\)/g)) add(m[1]);
+    for (const m of body.matchAll(/(?:src|href)=["']([^"']+)["']/g)) add(m[1]);
+  }
+  return refs;
+}
+
 function checkPublicAssets(root, f) {
+  const refs = referencedPublicAssets(root);
+  const refBases = new Map([...refs].map((rel) => [rel.split("/").pop(), rel]));
+  const declaredMasters = new Set([BRAND.masterIcon, BRAND.logo].filter(Boolean));
+  const missing = new Map();
+  for (const rel of refs) {
+    if (!/\.(png|jpe?g|gif|webp|svg|ico)$/i.test(rel)) continue;
+    if (!fs.existsSync(path.join(root, "public", rel))) missing.set(rel, path.posix.join("public", rel));
+  }
   for (const file of walk(path.join(root, "public"))) {
     const rel = path.relative(root, file).split(path.sep).join("/");
     const base = path.basename(rel);
     if (/\.(png|jpe?g|gif|webp|svg)\.(png|jpe?g|gif|webp|svg)$/i.test(base)) f.error("public.double-extension", `${rel} — mis-named asset; nothing should ship "foo.png.png"`);
     const bytes = fs.statSync(file).size;
-    if (bytes > 1024 * 1024) f.warn("public.heavy-asset", `${rel} is ${(bytes / 1024 / 1024).toFixed(2)} MiB and is served on first paint`);
+    if (bytes > 1024 * 1024) {
+      // "served on first paint" used to be asserted from the file's size, which is how a check ends up
+      // describing a state that no longer exists: the heavy brand PNGs are now the *masters* `branding.mjs`
+      // derives icons from, and `scripts/brand-assets.mjs` writes the sizes a browser loads. So the size only
+      // matters when something references it, and the reference is what this reports.
+      if (declaredMasters.has(rel)) continue;
+      if (refBases.has(base))
+        f.warn("public.heavy-asset", `${rel} is ${(bytes / 1024 / 1024).toFixed(2)} MiB and is referenced by a page (${refBases.get(base)}), so a browser downloads it before first paint`);
+      else
+        f.warn(
+          "public.heavy-unreferenced",
+          `${rel} is ${(bytes / 1024 / 1024).toFixed(2)} MiB and nothing in src/ or index.html loads it; if it is source artwork for scripts/branding.mjs that is correct and only the deployment pays for it, if it is not then it is dead weight`,
+        );
+    }
   }
+  for (const [ref, expected] of missing) f.error("public.missing-asset", `${ref} is referenced by a page but ${expected} does not exist — run "npm run brand:assets" or fix the path`);
   const icon = readPngSize(root, BRAND.masterIcon);
   if (!icon) f.error("branding.master-icon", `${BRAND.masterIcon} is missing`);
   else if (!icon.ok) f.error("branding.master-icon", `${BRAND.masterIcon}: ${icon.error}`);

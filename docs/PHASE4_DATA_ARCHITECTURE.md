@@ -40,7 +40,7 @@ Per-page network cost at a cold visit (counted from the call sites, comments str
 | `/tables`            | 2 sequential                                         | none (recomputes the whole table in the browser on every visit) |
 | `/team/:id`          | 3 sequential                                         | none, and 2 of them fan out per competition                     |
 | `/news`              | 1 (paginated ✓)                                      | none                                                            |
-| `/portal/fan`        | 4 in parallel                                        | + the same 4 every 30 s, never paused                           |
+| `/portal/fan`†       | 4 in parallel                                        | + the same 4 every 30 s, never paused                           |
 | header (all pages)   | 0                                                    | 2 per search pause, 1 per notifications open, no cache          |
 
 ## 3. Findings
@@ -91,11 +91,12 @@ Numbered so the code and the report can point at them.
   `onAuthStateChange` event (`:34`, `:89`), which on a token refresh is a full-row read for four fields.
 - **F-11 · the SPA bundle is one chunk with the portals inside it.** `App.tsx` imports 8 portals and 12
   pages statically; `TeamOwnerPortal.tsx` alone is 1505 lines and is unreachable for 95 % of visitors.
-  `npm run build:web` reports 908 KiB of JS in 20 files / 7.45 MiB total.
+  `npm run build:web` reports 908 KiB of JS in 20 files / 7.45 MiB total. **→ §7.**
 - **F-12 · 2.4 MB of brand PNG on the critical path.** `kicklive-icon.png` (2 456 662 bytes) is the
   loading spinner on every cold start, the header mark on every page and the auth-screen logo, rendered at
   32–128 px; `kicklive-wordmark.png` adds 2.1 MB. The install/manifest sizes already exist
   (`web-app-manifest-192x192.png`, `favicon-96x96.png`) but nothing small enough for an `<img>` does.
+  **→ §7.**
 - **F-13 · the Worker's public read routes are 501 stubs** — `GET /matches` (`cache: edge`,
   "max limit 100"), `GET /teams`, `GET /media/feed` are declared and unimplemented, so the one place a
   shared, cacheable, validated read could live is empty, and every fan's list request is an authenticated
@@ -250,16 +251,16 @@ does not own.
 
 What a fan's visit costs now:
 
-| screen        | cold load                               | warm (Back/Forward, second visitor) | while open                              |
-| ------------- | --------------------------------------- | ----------------------------------- | --------------------------------------- |
-| any page      | 1 (`auth.getSession`) + 1 (`profiles`)  | same                                | nothing                                 |
-| `/`           | 3 keys, in parallel                     | 0 reads, served from cache          | 1 read / 30 s (the strip only)          |
-| `/matches`    | 1                                       | 0                                   | 1 read / 30 s, `filter`-keyed           |
-| `/tables`     | 2 (competition index is `slow`, cached) | 0–1                                 | none                                    |
-| `/team/:id`   | 5 keys, one per question                | 0                                   | none                                    |
-| `/news`       | 1 per page                              | 0 for a page already read           | none                                    |
-| `/portal/fan` | 4 keys                                  | 0                                   | 1 read / 30 s for the match window only |
-| header search | 1 per distinct query                    | 0 for a query already typed         | none                                    |
+| screen         | cold load                               | warm (Back/Forward, second visitor) | while open                              |
+| -------------- | --------------------------------------- | ----------------------------------- | --------------------------------------- |
+| any page       | 1 (`auth.getSession`) + 1 (`profiles`)  | same                                | nothing                                 |
+| `/`            | 3 keys, in parallel                     | 0 reads, served from cache          | 1 read / 30 s (the strip only)          |
+| `/matches`     | 1                                       | 0                                   | 1 read / 30 s, `filter`-keyed           |
+| `/tables`      | 2 (competition index is `slow`, cached) | 0–1                                 | none                                    |
+| `/team/:id`    | 5 keys, one per question                | 0                                   | none                                    |
+| `/news`        | 1 per page                              | 0 for a page already read           | none                                    |
+| `/portal/fan`† | 4 keys                                  | 0                                   | 1 read / 30 s for the match window only |
+| header search  | 1 per distinct query                    | 0 for a query already typed         | none                                    |
 
 Six `DataLoader` queries per cold start and six per five minutes per visible tab are gone for every screen,
 which is where most of that reduction is.
@@ -309,3 +310,116 @@ here to apply it to. What was verified instead:
 Until it is applied, `/tables` and `/team/:id` are correct through the browser rule and `/teams` through the
 counted fallback — nothing in the app depends on the functions existing. That asymmetry is on purpose: a
 performance migration must not be the reason a page stops working.
+
+† `src/pages/portals/FanPortal.tsx` is migrated and works, but no `<Route>` in `src/App.tsx` has ever
+rendered it — the screen is unreachable in the shipped app. Its reads are listed because the cost is real
+whenever a route is added, and because Phase 4 changed the file; it is not evidence that anyone pays that
+cost today, and it is why the row is marked rather than counted as a win.
+
+---
+
+## 7. Frontend load, as built (unit 4)
+
+Two findings, one mechanism each, and both measurable from the repo without a browser.
+
+### 7.1 Brand art (F-12)
+
+`public/kicklive-icon.png` is the **master**: 1254², 2 456 662 bytes, and `shared/branding.ts` names it as
+the source `branding.mjs` derives `.ico`, `.icns`, hicolor PNGs and PWA icons from. That is the correct file
+for that job and the wrong file for a tab favicon, which is what it was: `index.html` linked it as `rel=icon`,
+the header drew it at 80 px, three auth screens and the boot splash at 128 px, and `AppBackground` tiled it at
+1.5 % opacity — ~4.9 MB of PNG downloaded and then scaled _down_ by 6–40× before first paint.
+
+`scripts/brand-assets.mjs` now writes the sizes the UI draws into `public/brand/`, using the repository's own
+PNG codec (`scripts/lib/png.mjs`, the file `branding.mjs` already uses, so this adds no dependency and no
+second encoder). The masters are untouched and still in place.
+
+| file                                       | drawn as                                               | before                    | after              |
+| ------------------------------------------ | ------------------------------------------------------ | ------------------------- | ------------------ |
+| `brand/icon-32.png`                        | tab favicon (`index.html`)                             | 2 456 662 B               | 2 422 B            |
+| `brand/icon-64.png` + `public/favicon.svg` | the SVG icon                                           | 330 091 B                 | 10 649 B + 7 777 B |
+| `brand/icon-192.png`                       | header mark, boot splash, auth screens, route fallback | — (same 2 456 662 B file) | 32 106 B           |
+| `brand/pattern-192.png`                    | the 1.5 % background tile                              | — (same file again)       | 17 130 B           |
+| `brand/wordmark-312.png`                   | header wordmark                                        | 2 160 185 B               | 24 790 B           |
+| **what a cold visit pulls**                |                                                        | **4 946 938 B**           | **87 097 B**       |
+
+The `before` column counts each file once (a browser caches by URL, so the master was fetched once and
+re-used by six call sites); the `after` column is the sum of the five files a page now asks for. 98.2 %
+smaller, and the largest remaining file is 31 KiB.
+
+Three things make that defensible rather than merely smaller:
+
+- **It is derived, not hand-shrunk.** `npm run brand:assets` regenerates every byte from the master;
+  `brand:assets:check` fails if the committed files differ from what the pipeline writes, and `gates.mjs`
+  gate 5 runs the check. Editing the master without regenerating is a failed gate, not a slow discovery.
+- **The encoder proves what it wrote.** `decodePng(encodePng(x))` is compared pixel-for-pixel with the pixels
+  the pipeline chose to keep, per target, before a byte is committed. The codec also gained the two changes
+  that made this reduction possible without a palette: colour type follows the pixels (the master carries no
+  alpha, and writing RGBA anyway cost a quarter of every file) and Paeth joins the per-row filter choice.
+- **The loss is chosen per file and recorded.** `bits` is kept bits per channel: 8 for the favicons (a tab
+  icon is seen at 1:1), 6 for the header mark and wordmark, 4 for a layer rendered at 1.5 % opacity. The
+  ceilings (`maxBytes` per file, 96 KiB for everything a first paint pulls) live in the pipeline, so the
+  check reports a doubled asset as a failure instead of a surprise in the release notes.
+
+`branding.mjs check`'s `public.heavy-asset` warning used to infer "served on first paint" from a file's size,
+which after this change would have been a false statement about the masters. It reads the references now: a
+heavy file _loaded by a page_ warns, a heavy file nothing loads reports as unreferenced, and a path a page
+references with no file under `public/` is an error (`public.missing-asset` — verified by deleting a derived
+file and watching the check fail, then restoring it).
+
+### 7.2 Route split (F-11)
+
+`React.lazy` on every route except `HomePage` (which is what the first paint renders, so it stays a static
+import), one `<Suspense>` boundary around `<Routes>` with the shell above it, and a fallback
+(`src/components/RouteFallback.tsx`) in the app's existing loading language that reuses `brand/icon-192.png` —
+already downloaded by the header, so waiting for a chunk costs no bytes. `prefers-reduced-motion` still
+suppresses the animation, because a new animation inherits that rule.
+
+`tools/vite-shared.ts` gained `kickliveManualChunks`, spread by both browser builds:
+react / react-dom / react-is / scheduler / use-sync-external-store → `vendor-react`, `@supabase/*` →
+`vendor-supabase`. That is a _cache-lifetime_ change, not a byte reduction: a copy edit used to invalidate
+190 KB of framework for every visitor. React stays one chunk on purpose — splitting `react` from `react-dom`
+is the classic way to ship two copies of React and get "Invalid hook call" at runtime, which is why
+`bundle-budget.mjs` counts `Symbol.for("react.element")` occurrences in the built chunks rather than trusting
+the config.
+
+`scripts/bundle-budget.mjs` measures what a fan downloads, and `npm run build:web` enforces it after every
+build:
+
+| metric (from `node scripts/bundle-budget.mjs`)             | before  | after       |
+| ---------------------------------------------------------- | ------- | ----------- |
+| JS a visitor needs to render `/` (raw)                     | 917 KiB | **514 KiB** |
+| …gzipped                                                   | —       | 152 KiB     |
+| portal / live-room code a fan never fetches                | 0 KiB   | 408 KiB     |
+| JS chunks in the build                                     | 20      | 49          |
+| **total** JS (goes _up_, by ~15 KiB of per-chunk overhead) | 917 KiB | 923 KiB     |
+
+The budget is a ceiling with ~8–10 % headroom (`scripts/bundle-budget.json`, regenerated with `--write`), and
+it gates on the fan's set rather than the total: the split _raised_ total bytes, so a gate on the wrong metric
+would have recorded the improvement as a regression. `mustBeOwnChunk` is the other half — `AdminPortal`,
+`TeamOwnerPortal`, `MediaPortal`, `TeamPortal`, `MatchDetails`, `StandingsPage` must each still be a file of
+their own, which is what fails if anyone re-imports a portal statically. Source-level pins (lazy-vs-static
+imports in `App.tsx`, the manual-chunk function itself, the budget file's shape) are in
+`tests/unit/bundle-split.test.ts`, so both failure modes are caught without needing a build.
+
+`App.tsx` also stopped importing `FanPortal`, which has no route: under `lazy()` that import would have
+emitted an orphan chunk and hidden the fact. The screen, its data-layer reads and its tests stay; wiring a
+route to it is a product decision, not a build fix.
+
+### 7.3 What this unit did not do, and cannot claim
+
+- **No browser was run against any of it.** No headless Chrome, no Lighthouse, no real device. The numbers
+  above are byte counts from `vite build` and from the asset pipeline; the PNGs were inspected as images.
+  Nobody measured paint time, and "first paint" here names a set of files, not a moment on a screen.
+- The **Supabase client is now the largest thing a fan downloads** (206 KiB of the 514). Shrinking that means
+  not building a `supabase-js` client during boot — a change to the auth path, not a build flag.
+- `public/kicklive-icon.png`, `kicklive-logo.png` and `kicklive-wordmark.png` (5.5 MB together) remain **in
+  the deployment**, because `branding.mjs` reads them from there and Vite copies `publicDir` verbatim.
+  `branding check` says so as one `public.heavy-unreferenced` warning. Moving them to a directory that is not
+  `publicDir` is a small change with a packaging decision attached; it is listed rather than taken quietly.
+- No image was converted to WebP or AVIF: this repository encodes PNG in pure JS and the sandbox cannot
+  install a native encoder. The same appearance at a third of the bytes is available to whoever adds one.
+- PWA/Workbox (step 13) was **not** extended to precache `public/brand/*`. `scripts/build-pwa.mjs` has no
+  asset list to add them to, and inventing one means a cache-version decision the desktop shell must also
+  respect; the header and wordmark are already fetched on every page anyway, so the precache would win
+  nothing on a first visit and the deployment is `immutable`-cacheable per hashed path.

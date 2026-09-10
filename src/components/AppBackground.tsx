@@ -1,3 +1,5 @@
+import { assetUrl } from "../lib/app-shell.ts";
+
 export default function AppBackground() {
   return (
     <div className="fixed inset-0 -z-10 pointer-events-none">
@@ -8,7 +10,9 @@ export default function AppBackground() {
       <div 
         className="absolute inset-0 opacity-[0.015]"
         style={{
-          backgroundImage: `url('/kicklive-icon.png')`,
+          // Derived asset, not the 2.4 MB master (see scripts/brand-assets.mjs). And via `assetUrl`, because
+          // an absolute `/…` path becomes `file:///…` in the desktop shell — this component renders on both.
+          backgroundImage: `url('${assetUrl("brand/pattern-192.png")}')`,
           backgroundRepeat: 'repeat',
           backgroundSize: '300px 300px'
         }}

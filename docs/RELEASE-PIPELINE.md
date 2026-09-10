@@ -80,6 +80,13 @@ VERSION → package.json .version → dist/web/version.json → dist/web/sw.js (
 the CSP, the `StartupWMClass`, and that no `src="/…"` absolute asset URL exists anywhere in `src/`
 (absolute URLs resolve to the filesystem root under `file://` and break the desktop build).
 
+`scripts/brand-assets.mjs` (`npm run brand:assets`, `brand:assets:check`) owns the _other_ half of the same
+directory: the sizes a browser loads (`public/brand/*.png`, and `public/favicon.svg` rebuilt from them). It
+uses the same codec as `branding.mjs` — `scripts/lib/png.mjs`, which gained colour-type selection and Paeth
+filtering for the job — and it never edits a master, so the two scripts write disjoint files. Gate 5 runs the
+`--check`, and `scripts/bundle-budget.mjs` gates the built bundle's fan-visible bytes from inside
+`npm run build:web`.
+
 `check` is read-only (what CI runs); `write` regenerates. Both are idempotent — gate 5 hashes all
 generated files before and after a `write` and requires byte-identical output.
 
@@ -397,9 +404,13 @@ node scripts/gates.mjs --only=6           # clean-clone rehearsal (needs a commi
   assets is not mitigated (no minisign/Ed25519). If that matters, extend the schema with
   `signature` and verify in `shared/update-manifest.ts` — the type already rejects unknown fields, so
   the schema change is a deliberate edit, not an accident.
-- `public/kicklive-icon.png` is 2.34 MiB and is served on first paint (branding `check` WARNs about
-  it, and about the two other large PNGs). Not a release blocker, but it is the first thing worth
-  shrinking.
+- ~~`public/kicklive-icon.png` is 2.34 MiB and is served on first paint~~ — fixed in Phase 4: the masters
+  stay (they are `branding.mjs`'s inputs) and nothing a browser loads references them any more; the sizes the
+  UI draws are derived by `npm run brand:assets` into `public/brand/`, gated by `brand:assets:check` in
+  gate 5. `branding check` now distinguishes "heavy and referenced" from "heavy and unreferenced" rather than
+  inferring it from size, and the two remaining facts it reports are that 5.5 MB of master artwork still
+  ships inside `public/` (moving it out is a packaging decision, recorded in `docs/PHASE4_DATA_ARCHITECTURE.md`
+  §7.3) and that WebP/AVIF were unavailable in a pure-JS sandbox.
 - The repo root contains a stale `repomix-output.xml` and duplicated Supabase values in
   `DEPLOYMENT*.md` / `.replit`; nothing in this pipeline reads them.
 

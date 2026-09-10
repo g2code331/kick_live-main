@@ -1,26 +1,45 @@
 import { HashRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
-import { useEffect } from "react";
+import { Suspense, lazy, useEffect } from "react";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { ToastProvider } from "./contexts/ToastContext";
 import AppBackground from "./components/AppBackground";
 import HomePage from "./pages/HomePage";
-import MatchesPage from "./pages/MatchesPage";
-import StandingsPage from "./pages/StandingsPage";
-import TeamsPage from "./pages/TeamsPage";
-import PredictionsPage from "./pages/PredictionsPage";
-import LoginPage from "./pages/auth/LoginPage";
-import SignupPage from "./pages/auth/SignupPage";
-import ForgotPasswordPage from "./pages/auth/ForgotPasswordPage";
-import AdminPortal from "./pages/portals/AdminPortal";
-import FanPortal from "./pages/portals/FanPortal";
-import TeamPortal from "./pages/portals/TeamPortal";
-import TeamOwnerPortal from "./pages/portals/TeamOwnerPortal";
-import MediaPortal from "./pages/portals/MediaPortal";
-import TeamProfile from "./pages/TeamProfile";
-import PlayerProfile from "./pages/PlayerProfile";
-import MatchDetails from "./pages/MatchDetails";
-import ProfilePage from "./pages/ProfilePage";
-import NewsPage from "./pages/NewsPage";
+import RouteFallback from "./components/RouteFallback";
+
+/**
+ * Phase 4 split the route bundle. `HomePage` stays a static import because it is what a fan's first paint
+ * renders, and everything else is `lazy()`: before this, `vite build` emitted one 735 KiB app chunk
+ * containing the admin portal, the team-owner portal, the media portal, the match-control surfaces and every
+ * profile page, and a visitor reading the scores downloaded all of it. A chunk per route is also what makes
+ * the *next* visit cheap — the file a returning visitor needs is already in cache, and the one they do not
+ * need never loads at all.
+ *
+ * Two rules, both from the split actually having to help: nothing above the `Suspense` boundary moved
+ * (providers and `AppBackground` render immediately, so the shell never blanks), and no route's component is
+ * imported statically anywhere else — `import()` a module the entry also pulls in and the bundler merges it
+ * back into the entry chunk, which silently undoes the split while still "working".
+ */
+const MatchesPage = lazy(() => import("./pages/MatchesPage"));
+const StandingsPage = lazy(() => import("./pages/StandingsPage"));
+const TeamsPage = lazy(() => import("./pages/TeamsPage"));
+const PredictionsPage = lazy(() => import("./pages/PredictionsPage"));
+const LoginPage = lazy(() => import("./pages/auth/LoginPage"));
+const SignupPage = lazy(() => import("./pages/auth/SignupPage"));
+const ForgotPasswordPage = lazy(() => import("./pages/auth/ForgotPasswordPage"));
+const AdminPortal = lazy(() => import("./pages/portals/AdminPortal"));
+// No `FanPortal` here on purpose: `src/pages/portals/FanPortal.tsx` has never been reachable — the static
+// import above App's route table imported it, and no `<Route>` ever rendered it. Under `lazy()` an unused
+// entry would emit an orphan chunk instead of dead weight inside a shared one, so the import is gone rather
+// than deferred. The screen and its data-layer reads stay in the tree (docs/PHASE4_DATA_ARCHITECTURE.md §5);
+// wiring a route to it is a product decision, not a build fix.
+const TeamPortal = lazy(() => import("./pages/portals/TeamPortal"));
+const TeamOwnerPortal = lazy(() => import("./pages/portals/TeamOwnerPortal"));
+const MediaPortal = lazy(() => import("./pages/portals/MediaPortal"));
+const TeamProfile = lazy(() => import("./pages/TeamProfile"));
+const PlayerProfile = lazy(() => import("./pages/PlayerProfile"));
+const MatchDetails = lazy(() => import("./pages/MatchDetails"));
+const ProfilePage = lazy(() => import("./pages/ProfilePage"));
+const NewsPage = lazy(() => import("./pages/NewsPage"));
 import { initDataLayer } from "./lib/data";
 import { log } from "./lib/log";
 import { assetUrl } from "./lib/app-shell.ts";
@@ -51,7 +70,7 @@ function AppContent() {
         <div className="relative min-h-screen flex items-center justify-center">
           <div className="text-center z-10">
             <div className="w-32 h-32 mx-auto mb-6 animate-spin">
-              <img src={assetUrl("kicklive-icon.png")} alt="KickLive" className="w-full h-full object-contain" />
+              <img src={assetUrl("brand/icon-192.png")} alt="KickLive" className="w-full h-full object-contain" />
             </div>
             <p className="text-[#39FF14] font-black uppercase tracking-[0.3em] animate-pulse">Loading...</p>
             <div className="flex gap-2 mt-4 justify-center">
@@ -68,6 +87,7 @@ function AppContent() {
   return (
     <div className="overflow-x-hidden">
       <AppBackground />
+      <Suspense fallback={<RouteFallback />}>
       <Routes>
         {/* Public Routes */}
         <Route path="/" element={<HomePage />} />
@@ -102,6 +122,7 @@ function AppContent() {
         {/* Catch all */}
         <Route path="*" element={<HomePage />} />
       </Routes>
+      </Suspense>
     </div>
   );
 }

@@ -1,0 +1,15 @@
+{
+  "bootBytesMax": 568320,
+  "bootGzippedBytesMax": 172032,
+  "bootCssBytesMax": 129024,
+  "mustBeOwnChunk": [
+    "AdminPortal",
+    "TeamOwnerPortal",
+    "MediaPortal",
+    "TeamPortal",
+    "MatchDetails",
+    "StandingsPage"
+  ],
+  "recordedAt": "2026-09-10T01:26:16.205Z",
+  "note": "Ceilings, not targets: ~8-10% of headroom so a normal dependency bump does not fail a build, while a re-merged portal or an eager chart library does. Regenerate with `node scripts/bundle-budget.mjs --write` and read the diff before committing it."
+}

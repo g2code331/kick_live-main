@@ -258,30 +258,96 @@ export function padToSquare(img, size, rgb) {
   return { width: size, height: size, data: canvas, alpha: false };
 }
 
-export function encodePng(img) {
+/**
+ * Encode an RGBA image into PNG bytes.
+ *
+ * Two things this does that a naive writer does not, because these bytes ship — inside the `.deb` for the
+ * desktop app and to every visitor for the web brand assets:
+ *
+ *  - **Colour type follows the pixels.** Grayscale when every pixel has r=g=b, RGB when nothing is
+ *    translucent, RGBA only when the image actually needs an alpha channel. Writing the master mark
+ *    (1254², no alpha at all) as RGBA wasted a quarter of every file.
+ *  - **Per-row filter choice**, all five filters, ranked by summed absolute residual (Paeth included).
+ *    Filter 0 alone costs ~8× on the 512px icons.
+ *
+ * `posterize` (bits kept per channel, 1-8, default 8 = lossless) exists because gradient-heavy art
+ * compresses terribly: the brand mark at 192px is 35 KB lossless and 12 KB at six bits, and six bits is
+ * 64 levels per channel in a glyph nobody views at 1:1. Only the sizes a browser downloads opt in; the
+ * packaging icons stay bit-exact, since an installer icon nobody measures and the master artwork is the
+ * source of truth for both.
+ */
+export function encodePng(img, { posterize = 8 } = {}) {
   const { width, height, data } = img;
-  const stride = width * 4;
+  if (posterize < 1 || posterize > 8 || !Number.isInteger(posterize)) {
+    throw new Error(`posterize must be an integer 1-8, got ${String(posterize)}`);
+  }
+  const lossy = posterize < 8;
+  const step = 1 << (8 - posterize); // bucket width in 8-bit space
+  const mid = step >> 1;
+  const q = lossy ? (v) => Math.min(255, ((v / step) | 0) * step + mid) : (v) => v;
+
+  // Measure the channel reduction on the values that will actually be written, so the header cannot lie.
+  let opaque = true;
+  let gray = true;
+  for (let i = 0; i < width * height; i++) {
+    if (data[i * 4 + 3] !== 255) {
+      opaque = false;
+      break;
+    }
+  }
+  if (opaque) {
+    for (let i = 0; i < width * height; i++) {
+      const r = q(data[i * 4]);
+      const g = q(data[i * 4 + 1]);
+      const b = q(data[i * 4 + 2]);
+      if (r !== g || g !== b) {
+        gray = false;
+        break;
+      }
+    }
+  }
+  const colorType = opaque && gray ? 0 : opaque ? 2 : 6;
+  const channels = colorType === 0 ? 1 : colorType === 2 ? 3 : 4;
+
+  const stride = width * channels;
   const raw = Buffer.alloc((stride + 1) * height);
-  // Per-row filter choice (none/sub/up/average, ranked by summed |residual|). Filter 0 alone
-  // costs ~8x on the 512px app icons, and these bytes ship inside the .deb.
   const prevRow = Buffer.alloc(stride);
   const cur = Buffer.alloc(stride);
-  const candidates = [[], [], [], []];
+  const candidates = [[], [], [], [], []];
   for (let y = 0; y < height; y++) {
-    data.copy(cur, 0, y * stride, (y + 1) * stride);
+    for (let x = 0; x < width; x++) {
+      const src = (y * width + x) * 4;
+      const r = q(data[src]);
+      const g = q(data[src + 1]);
+      const b = q(data[src + 2]);
+      if (colorType === 0) {
+        cur[x] = r;
+      } else if (colorType === 2) {
+        cur[x * 3] = r;
+        cur[x * 3 + 1] = g;
+        cur[x * 3 + 2] = b;
+      } else {
+        cur[x * 4] = r;
+        cur[x * 4 + 1] = g;
+        cur[x * 4 + 2] = b;
+        cur[x * 4 + 3] = data[src + 3];
+      }
+    }
     for (const c of candidates) c.length = 0;
     for (let i = 0; i < stride; i++) {
       const v = cur[i];
-      const a = i >= 4 ? cur[i - 4] : 0;
+      const a = i >= channels ? cur[i - channels] : 0;
       const b = prevRow[i];
+      const c = i >= channels ? prevRow[i - channels] : 0;
       candidates[0].push(v);
       candidates[1].push((v - a) & 0xff);
       candidates[2].push((v - b) & 0xff);
       candidates[3].push((v - ((a + b) >> 1)) & 0xff);
+      candidates[4].push((v - paeth(a, b, c)) & 0xff);
     }
     let best = 0;
     let bestScore = Infinity;
-    for (let k = 0; k < 4; k++) {
+    for (let k = 0; k < 5; k++) {
       let score = 0;
       for (const byte of candidates[k]) score += byte < 128 ? byte : 256 - byte;
       if (score < bestScore) {
@@ -297,9 +363,23 @@ export function encodePng(img) {
   ihdr.writeUInt32BE(width, 0);
   ihdr.writeUInt32BE(height, 4);
   ihdr[8] = 8; // bit depth
-  ihdr[9] = 6; // RGBA
+  ihdr[9] = colorType;
   ihdr[10] = 0;
   ihdr[11] = 0;
   ihdr[12] = 0;
   return Buffer.concat([PNG_MAGIC, chunk("IHDR", ihdr), chunk("IDAT", zlib.deflateSync(raw, { level: 9 })), chunk("IEND", Buffer.alloc(0))]);
+}
+
+/**
+ * The same image, posterized, as pixels — the definition `encodePng({posterize})` must agree with, so the
+ * asset pipeline can assert "what I wrote decodes back to exactly what I chose to keep".
+ */
+export function posterizeRgba(img, bits) {
+  const out = Buffer.from(img.data);
+  const step = 1 << (8 - bits);
+  const mid = step >> 1;
+  for (let i = 0; i < out.length; i += 4) {
+    for (const ch of [0, 1, 2]) out[i + ch] = Math.min(255, ((out[i + ch] / step) | 0) * step + mid);
+  }
+  return { width: img.width, height: img.height, data: out, alpha: img.alpha };
 }

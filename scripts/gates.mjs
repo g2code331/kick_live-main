@@ -128,6 +128,10 @@ async function gate4() {
 
 async function gate5() {
   step(5, "branding check", process.execPath, ["scripts/branding.mjs", "check"]);
+  // The browser-facing brand assets are derived files, so they are gated as such: the committed bytes must
+  // be what `scripts/brand-assets.mjs` writes today. Master artwork edited without regenerating is exactly
+  // the drift a "logo looks slightly off in prod" bug report cannot explain.
+  step(5, "brand assets are in sync with the pipeline", process.execPath, ["scripts/brand-assets.mjs", "--check"]);
   step(5, "version lockstep", process.execPath, ["scripts/version.mjs", "check"]);
   step(5, "verify (aggregate)", process.execPath, ["scripts/verify.mjs", "check"]);
   // The "write is idempotent" mode: regenerate and prove the *generated* files do not change. A

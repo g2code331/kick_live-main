@@ -10,6 +10,27 @@ import { fileURLToPath } from "node:url";
 
 export const REPO_ROOT = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 
+/**
+ * Chunk split shared by both browser builds (web and the desktop renderer).
+ *
+ * `manualChunks` here is about *cache lifetime*, not total bytes: react-dom and the Supabase client change
+ * when a dependency is bumped, and the app changes when a page is edited. Left in one chunk — which is what
+ * a bundler does by default with `modulePreload` off — a one-line copy edit invalidates 300 KB of vendor
+ * code for every visitor. Two stable vendor chunks and the app chunk is the only thing that re-downloads.
+ *
+ * The react family is matched as one group on purpose: splitting `react` from `react-dom` or from
+ * `scheduler` produces two React instances in one page and "Invalid hook call" at runtime, which is a worse
+ * outcome than a cache miss. Match on the package directory rather than a substring, or anything with
+ * "react" in its name (`react-is`, a router's `react-router-dom`) joins the group by accident.
+ */
+export function kickliveManualChunks(id: string): string | undefined {
+  if (!id.includes("node_modules")) return undefined;
+  if (/node_modules[\\/](?:react|react-dom|react-is|scheduler|use-sync-external-store)[\\/]/.test(id)) return "vendor-react";
+  if (/node_modules[\\/](?:@supabase)[\\/]/.test(id)) return "vendor-supabase";
+  if (/node_modules[\\/](?:@mui|@emotion)[\\/]/.test(id)) return "vendor-mui";
+  return undefined;
+}
+
 export const KICKLIVE_BUILD_DEFAULTS = {
   target: "es2022",
   assetsDir: "assets",
@@ -17,6 +38,7 @@ export const KICKLIVE_BUILD_DEFAULTS = {
   cssCodeSplit: true,
   reportCompressedSize: false,
   modulePreload: { polyfill: false },
+  rollupOptions: { output: { manualChunks: kickliveManualChunks } },
 } as const;
 
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;

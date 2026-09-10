@@ -596,7 +596,7 @@ npm ci
 node scripts/worker-local.mjs          # :8787, real MatchRoom in-process, DO storage in memory
 npm run dev                            # :5000, proxies /api (ws:true) to the Worker
 curl -s localhost:8787/api/health
-node scripts/run-tests.mjs all         # 365 tests, incl. the Phase 3 pins
+node scripts/run-tests.mjs all         # 431 tests, incl. the Phase 3 and Phase 4 pins
 npx tsc -p tsconfig.workers.json --noEmit
 node scripts/gates.mjs                 # release gates
 npm run build                          # web + renderer + desktop
@@ -690,3 +690,38 @@ source}`; a refresh that fails keeps the previous value _and_ reports the error,
   the commands to justify or reject it, not a decision.
 - No browser-level verification: like the Phase 3 client, `useQuery` and the ticker are unit-tested against
   the same primitives they use in production and have not been driven in a real tab here.
+
+---
+
+## 19. Frontend load as built (Phase 4)
+
+The data layer (§18) is about how many questions a page asks. This is about how many bytes it must download
+before it can ask them, and it is the half of Phase 4 with the larger measured effect.
+
+**Brand art.** `public/kicklive-icon.png` is the master `branding.mjs` derives installer and PWA icons from
+(1254², 2.34 MiB) and it was also, at once, the tab favicon, the header mark, the boot spinner, the auth-screen
+logo and the tiled background — ~4.9 MB of PNG fetched before first paint and then scaled down 6–40×.
+`scripts/brand-assets.mjs` now derives `public/brand/*` at the sizes actually drawn, with the repository's
+existing pure-JS codec (`scripts/lib/png.mjs`, which gained colour-type selection and Paeth filtering), and
+`npm run brand:assets:check` gates that the committed bytes are what the pipeline writes. 85 KiB of brand art
+per cold visit instead of 4.7 MiB, with a per-file ceiling and a first-paint budget in the script itself. The
+masters are untouched, still in `public/`, and referenced by no page.
+
+**Route split.** `React.lazy` on every route but `HomePage`, one `<Suspense>` boundary with `AppBackground`
+above it, and `kickliveManualChunks` giving React and the Supabase client their own stable chunks. A visitor to
+`/` downloads 514 KiB of JS (152 KiB gzipped) where the build used to require 917 KiB in two files, and 408
+KiB of portal and live-room code is now a set of files a fan never requests. `scripts/bundle-budget.mjs`
+enforces that from inside `npm run build:web`, and counts `Symbol.for("react.element")` to prove the vendor
+split did not create a second React. `tests/unit/bundle-split.test.ts` pins the source-level shapes that make
+it work, so a re-merged portal fails a unit test rather than only a build.
+
+Full tables, the reasoning behind each `bits`/size choice, and the four things this unit did not do (no browser
+measurement, the Supabase client is still the largest boot chunk, the masters still ship inside `public/`, and
+no WebP/AVIF because the sandbox has no encoder): `docs/PHASE4_DATA_ARCHITECTURE.md` §7.
+
+```bash
+npm run brand:assets            # regenerate public/brand/* and public/favicon.svg from the masters
+npm run brand:assets:check      # what gate 5 runs: committed bytes must equal what the pipeline writes
+node scripts/bundle-budget.mjs  # measure dist/web against scripts/bundle-budget.json
+node scripts/bundle-budget.mjs --write   # move the ceilings, and read the diff in review
+```

@@ -17,7 +17,7 @@ export default function Loading({ text = 'LOADING...', size = 'md' }: LoadingPro
       <div className="relative">
         {/* Rotating Logo */}
         <div className={`${sizeClasses[size]} animate-spin`}>
-          <img src={assetUrl("kicklive-icon.png")} alt="KickLive" className="w-full h-full object-contain" />
+          <img src={assetUrl("brand/icon-192.png")} alt="KickLive" className="w-full h-full object-contain" />
         </div>
         
         {/* Pulsing Glow Effect */}
