@@ -151,13 +151,7 @@ export class FcmTransport implements DeliveryTransport {
     const header = base64url(encoder.encode(JSON.stringify({ alg: "RS256", typ: "JWT" })));
     const payload = base64url(encoder.encode(JSON.stringify(claims)));
     const signingInput = `${header}.${payload}`;
-    const key = await crypto.subtle.importKey(
-      "pkcs8",
-      pkcs8Der(this.privateKey),
-      { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
-      false,
-      ["sign"],
-    );
+    const key = await crypto.subtle.importKey("pkcs8", pkcs8Der(this.privateKey), { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]);
     const signature = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, encoder.encode(signingInput));
     return `${signingInput}.${base64url(new Uint8Array(signature))}`;
   }
@@ -170,7 +164,7 @@ function buildMessage(input: SendInput): Record<string, unknown> {
     token: input.token,
     notification: { title: input.title, body: input.body },
     webpush: {
-      headers: { "Urgency": "high" },
+      headers: { Urgency: "high" },
       notification: {
         title: input.title,
         body: input.body,
@@ -238,13 +232,15 @@ function base64url(bytes: Uint8Array): string {
  * error path obeys it too — that is where credentials surface.
  */
 export function redact(text: string): string {
-  return text
-    .replace(/eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+/g, "[redacted jwt]")
-    .replace(/(Bearer\s+)[A-Za-z0-9._-]{12,}/gi, "$1[redacted]")
-    // FCM registration tokens are 140+ chars ending in a `-` or `_`; a bare regex on length is the honest
-    // version of "we do not know the format", so we match the format we actually see and nothing else.
-    .replace(/[A-Za-z0-9_-]{120,}(?:-[A-Za-z0-9_-]+)?/g, (m) => `[token ${m.slice(0, 8)}…]`)
-    .replace(/("token"\s*:\s*")[^"]+(")/g, "$1[redacted]$2");
+  return (
+    text
+      .replace(/eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+/g, "[redacted jwt]")
+      .replace(/(Bearer\s+)[A-Za-z0-9._-]{12,}/gi, "$1[redacted]")
+      // FCM registration tokens are 140+ chars ending in a `-` or `_`; a bare regex on length is the honest
+      // version of "we do not know the format", so we match the format we actually see and nothing else.
+      .replace(/[A-Za-z0-9_-]{120,}(?:-[A-Za-z0-9_-]+)?/g, (m) => `[token ${m.slice(0, 8)}…]`)
+      .replace(/("token"\s*:\s*")[^"]+(")/g, "$1[redacted]$2")
+  );
 }
 
 /** Records instead of sending. The default when `FCM_PROJECT_ID` is unset, and the whole basis of §18's tests. */

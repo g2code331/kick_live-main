@@ -308,7 +308,10 @@ describe("phase5 · the security properties, as text", () => {
     assert.ok(seen >= 14, `only ${String(seen)} DEFINER functions found; the file changed shape or the parser is wrong`);
     // 18 of the 19 functions: every one that crosses a table a client cannot select from. The exception is
     // kicklive_preference_defaults(), which reads nothing at all and is LANGUAGE SQL.
-    assert.equal(seen, 18, "the DEFINER count moved; §9.7's expected count and this number must move together");
+    // Every function is DEFINER except the one that reads nothing: `kicklive_preference_defaults()` is a pure
+    // literal. Stated as "all but one", so a new function cannot arrive without this test asking why.
+    assert.equal(seen, (code.match(/create or replace function public\.\w+\(/g) ?? []).length - 1, "only the immutable defaults literal may be SECURITY INVOKER");
+    assert.match(code, /kicklive_preference_defaults\(\)\nreturns jsonb\nlanguage sql\nimmutable/);
   });
 
   it("never lets the token or the job payload reach a log line from SQL", () => {
@@ -587,7 +590,10 @@ describe("phase5 · the verification block is the part that runs in CI-adjacent 
     const created = [...code.matchAll(/create or replace function public\.(\w+)\(/g)].map((m) => m[1]!);
     const expected = Number(norm(code).match(/expected (\d+) notification functions/)![1]);
     assert.equal(created.length, expected, `the file defines ${String(created.length)} but §9.7 expects ${String(expected)}`);
-    assert.equal(created.length, 19, "the surface this phase promises");
+    // The count is pinned in two directions: §9.7's expectation must equal what the file defines, and what the
+    // file defines must equal the surface the architecture document lists (nine self-service + eight
+    // service-role + one trigger + one admin-only + one internal helper).
+    assert.equal(created.length, 20, "the function count moved without an update to docs/NOTIFICATIONS_ARCHITECTURE.md §13");
     assert.equal(new Set(created).size, created.length, "a function defined twice in one file is a copy-paste bug");
   });
 

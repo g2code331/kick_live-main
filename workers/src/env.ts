@@ -51,10 +51,9 @@ export interface Env {
   readonly TURNSTILE_SECRET_KEY?: string | undefined;
 
   /**
-   * The only optional binding Phase 2 declares, because `middleware/ratelimit.ts` reads it and
-   * degrades to an in-isolate counter when it is absent. R2 (media) and Queues (background jobs) remain
-   * deliberately undeclared: scaffolding a binding with no code behind it produces a config that looks
-   * real and a deploy that fails.
+   * Declared in Phase 2, because `middleware/ratelimit.ts` reads it and degrades to an in-isolate counter when
+   * it is absent. R2 (media) remains deliberately undeclared: scaffolding a binding with no code behind it
+   * produces a config that looks real and a deploy that fails. Queues became real in Phase 5, below.
    */
   readonly RATE_LIMIT_KV?: KVNamespace | undefined;
 

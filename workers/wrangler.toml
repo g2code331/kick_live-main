@@ -60,6 +60,54 @@ new_sqlite_classes = ["MatchRoom"]
 # ─────────────────────────────────────────────────────────────────────────
 # STAGING — the rehearsal environment. Same schema, different project, different keys.
 # ─────────────────────────────────────────────────────────────────────────
+# Phase 5 · the notification queue and the sweep. Declared here, at the top level, and then repeated per
+# environment below — TOML tables are positional, so an active `[[queues.producers]]` written *after*
+# `[env.staging]` would silently become `env.staging.queues.producers` instead of the top-level one. That is a
+# whole class of "works locally, absent in production" bug, and
+# `tests/unit/phase2-api-boundary.test.ts` now asserts the ordering.
+#
+# The queue is a wake-up, never the record (§11 of docs/NOTIFICATIONS_ARCHITECTURE.md), so the numbers below are
+# sized for a goal, not for a demo: 25 jobs per batch (one message is one job), 5 concurrent batches, and a
+# retry budget that matches the job's own so a message cannot outlive its record.
+# ─────────────────────────────────────────────────────────────────────────
+# Phase 5 activated the queue. It is bound because code depends on it now — `index.ts` exports `queue` and
+# `scheduled`, and the notification jobs are fanned out by `queues/notifications.ts` — and the two numbers
+# Cloudflare lets you tune are set for a goal, not for a demo:
+#
+#   max_batch_size    the queue carries *job ids*; one message is one job, so 25 messages is 25 notifications
+#                     (the 500-token batches are inside `deliverJob`; Cloudflare caps this at 100 anyway).
+#   max_concurrency   5 batches in flight per instance; FCM's per-project rate is the reason it is not 50.
+#   max_retries +     the consumer never drops a message on the floor: a job that keeps failing is left
+#   backoff           `retry` in the database and the sweep re-enqueues it, so the DLQ is for poison messages.
+
+[[queues.producers]]
+queue = "kicklive-notifications-dev"
+binding = "NOTIFICATION_QUEUE"
+
+[[queues.consumers]]
+queue = "kicklive-notifications-dev"
+max_batch_size = 25
+max_batch_timeout = 20
+max_retries = 6
+min_instances = 0
+max_concurrency = 5
+backoff_delay_ms = 10000
+backoff_max_delay_ms = 600000
+
+# Poison messages only, by the rule above. The queue itself must be created first
+# (`npx wrangler queues create <name>-dev` etc. as well), or the deploy fails with a
+# "queue not found" that has nothing to do with the code.
+  [queues.consumers.dead_letter_queue]
+  queue = "kicklive-notifications-failed-dev"
+  max_batch_size = 10
+
+[triggers]
+# The five-minute safety net (docs/NOTIFICATIONS_ARCHITECTURE.md §11): re-enqueue anything the queue lost,
+# and prune long-dead device rows on the hour. `*/5 * * * *` is UTC.
+crons = ["*/5 * * * *"]
+#
+
+# ─────────────────────────────────────────────────────────────────────────
 [env.staging]
 name = "kicklive-api-staging"
 
@@ -80,7 +128,30 @@ ALLOWED_ORIGINS = "https://staging.kicklive.football"
 # binding = "RATE_LIMIT_KV"
 # id = "create with: npx wrangler kv namespace create RATE_LIMIT_KV --env staging"
 
-# Named environments do not inherit top-level bindings, so the room is declared per environment.
+# Named environments do not inherit top-level bindings, so the room is declared per environment.# The queue and the cron are repeated per environment rather than inherited — `[[env.staging.*]]` blocks see
+# no top-level bindings, so declaring them once would mean notifications work in dev and are silently absent in
+# staging. This is the same reason `durable_objects.bindings` is repeated above.
+[[env.staging.queues.producers]]
+queue = "kicklive-notifications-staging"
+binding = "NOTIFICATION_QUEUE"
+
+[[env.staging.queues.consumers]]
+queue = "kicklive-notifications-staging"
+max_batch_size = 25
+max_batch_timeout = 20
+max_retries = 6
+min_instances = 0
+max_concurrency = 5
+backoff_delay_ms = 10000
+backoff_max_delay_ms = 600000
+
+  [env.staging.queues.consumers.dead_letter_queue]
+  queue = "kicklive-notifications-failed-staging"
+  max_batch_size = 10
+
+[env.staging.triggers]
+crons = ["*/5 * * * *"]
+
 [[env.staging.durable_objects.bindings]]
 name = "LIVE_MATCH_ROOM"
 class_name = "MatchRoom"
@@ -112,6 +183,29 @@ ALLOWED_ORIGINS = "https://kicklive.football,https://www.kicklive.football"
 # [[env.production.kv_namespaces]]
 # binding = "RATE_LIMIT_KV"
 # id = "create with: npx wrangler kv namespace create RATE_LIMIT_KV --env production"
+# The queue and the cron are repeated per environment rather than inherited — `[[env.staging.*]]` blocks see
+# no top-level bindings, so declaring them once would mean notifications work in dev and are silently absent in
+# staging. This is the same reason `durable_objects.bindings` is repeated above.
+[[env.production.queues.producers]]
+queue = "kicklive-notifications"
+binding = "NOTIFICATION_QUEUE"
+
+[[env.production.queues.consumers]]
+queue = "kicklive-notifications"
+max_batch_size = 25
+max_batch_timeout = 20
+max_retries = 6
+min_instances = 0
+max_concurrency = 5
+backoff_delay_ms = 10000
+backoff_max_delay_ms = 600000
+
+  [env.production.queues.consumers.dead_letter_queue]
+  queue = "kicklive-notifications-failed"
+  max_batch_size = 10
+
+[env.production.triggers]
+crons = ["*/5 * * * *"]
 
 [[env.production.durable_objects.bindings]]
 name = "LIVE_MATCH_ROOM"
@@ -134,9 +228,8 @@ invocation_logs = true
 # ─────────────────────────────────────────────────────────────────────────
 # PLANNED BINDINGS — deliberately inactive until the phase that owns them.
 #
-# [[r2_buckets]]      # Phase 4 — media plane (replaces inline URLs / unsplash hotlinks)
-# [[queues.producers]]# Phase 4 — standings recompute, notification fan-out
-# [[queues.consumers]]# max_batch_size = 10, max_retries = 3, dead-letter queue
+# [[r2_buckets]]      # media plane (replaces inline URLs / unsplash hotlinks) — still not needed: no
+#                     # upload path exists, and a bucket with no writer is config theatre.
 # (Phase 3 shipped the block above: [durable_objects.bindings] + [migrations].)
 #
 # [[d1_databases]]    # INTENTIONALLY ABSENT — do not "helpfully" add one.

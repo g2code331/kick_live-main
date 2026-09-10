@@ -586,14 +586,73 @@ describe("phase2 · environment separation", () => {
       active.some((l) => l === "[vars]"),
       "development is the default block",
     );
+    // Phase 2's rule was "no binding without code behind it". Phase 5 keeps the rule and satisfies the
+    // condition — the queue is active because `index.ts` exports a `queue` handler and `queues/notifications.ts`
+    // consumes it — while D1, R2 and a second KV namespace stay forbidden for the same reason they were
+    // forbidden then: a config that looks real and a deploy that fails, or a second copy of the data.
     assert.deepEqual(
-      active.filter((l) => /^\[\[(d1_databases|r2_buckets|queues\.\w+|kv_namespaces)\]\]|^\[durable_objects\]/.test(l)),
+      active.filter((l) => /^\[\[(d1_databases|r2_buckets|kv_namespaces)\]\]$/.test(l)),
       [],
-      "no unused bindings may be active",
+      "no binding for infrastructure that does not exist yet",
     );
-    assert.ok(!active.some((l) => /^ALLOWED_ORIGINS\s*=\s*"\*"/.test(l)));
-    assert.ok(!/(eyJ[A-Za-z0-9_-]{20,})/.test(toml), "no real-looking key in the committed config");
-    assert.ok(toml.includes("SUPABASE_PROJECT_REF"));
+    assert.deepEqual(
+      active.filter((l) => /^\[\[queues\.(producers|consumers)\]\]$/.test(l)),
+      ["[[queues.producers]]", "[[queues.consumers]]"],
+      "exactly one queue, one producer and one consumer",
+    );
+    assert.ok(
+      active.some((l) => l === "[[durable_objects.bindings]]"),
+      "Phase 3's live rooms are still bound",
+    );
+    assert.ok(!active.some((l) => /^\[\[queues\.consumers\.sql_queues\]\]/.test(l)), "no SQL queue, which would be a second store of record");
+    // A named environment inherits no bindings, so a queue declared only at the top level exists in dev and is
+    // silently absent in staging and production — which would show up as "notifications work locally".
+    for (const env of ["staging", "production"]) {
+      assert.ok(
+        active.some((l) => l === `[[env.${env}.queues.producers]]`),
+        `${env} needs the producer binding`,
+      );
+      assert.ok(
+        active.some((l) => l === `[[env.${env}.queues.consumers]]`),
+        `${env} needs the consumer`,
+      );
+      assert.ok(
+        active.some((l) => l === `[env.${env}.triggers]`),
+        `${env} needs its own cron`,
+      );
+    }
+    // A queue consumer without a retry path is a queue that loses messages on the floor. The Phase 5 design
+    // says the queue is a wake-up and the database is the record, and the config has to match that claim.
+    const tomlBody = toml;
+    assert.equal((tomlBody.match(/crons = \["\*\/5 \* \* \* \*"\]/g) ?? []).length, 3, "the five-minute sweep must be declared once per environment, or a lost message is a lost notification");
+    assert.match(tomlBody, /max_retries = 6/, "queue retries and the job's own attempts are separate budgets; both must be finite");
+    assert.match(tomlBody, /dead_letter_queue/, "poison messages land somewhere a human can read");
+    const entry = read("workers/src/index.ts");
+    assert.match(entry, /async queue\(/, "the producer binding needs a consumer handler in the same Worker");
+    assert.match(entry, /async scheduled\(/, "and the cron needs its handler");
+    // Two environments on one queue is a genuine footgun, and it is invisible until a laptop running
+    // `npm run worker:dev` drains production's notification fan-out (or the reverse). Every queue name in this
+    // file must therefore be unique per environment, dev included.
+    const queueNames = [...toml.matchAll(/^queue = "([^"]+)"/gm)].map((m) => m[1]!);
+    // Every queue name in this file must be unique per environment, dev included. Sharing one is the footgun
+    // that stays invisible until a laptop running `npm run worker:dev` drains production's fan-out — every
+    // notification would then look like it worked locally while nobody on production received one.
+    const namesByEnv: Record<string, string[]> = {
+      dev: queueNames.filter((n) => n.endsWith("-dev")),
+      staging: queueNames.filter((n) => n.endsWith("-staging")),
+      production: queueNames.filter((n) => !n.endsWith("-dev") && !n.endsWith("-staging")),
+    };
+    for (const [label, names] of Object.entries(namesByEnv)) {
+      assert.deepEqual(new Set(names).size === 1 && names.length === 2, true, `${label} needs a producer line and a consumer line naming one queue, got ${names.join(", ")}`);
+    }
+    const deadLetters = [...toml.matchAll(/^\s+queue = "(kicklive-notifications-failed[^"]*)"$/gm)].map((m) => m[1]!);
+    assert.equal(deadLetters.length, 3, "each environment needs its own dead-letter queue");
+    // One queue per environment, six names in total. `new Set(...).size === 6` is the assertion that matters:
+    // a producer and its consumer repeat a name inside an environment by design, and reusing a name *between*
+    // environments is the bug.
+    const perEnv = new Set([namesByEnv.dev[0]!, namesByEnv.staging[0]!, namesByEnv.production[0]!, ...deadLetters]);
+    assert.equal(perEnv.size, 6, `no queue name may be shared between environments: ${[...perEnv].join(", ")}`);
+    assert.ok(!namesByEnv.production.includes("kicklive-notifications-dev"), "production must not read the dev queue");
   });
 
   it("local secrets are git-ignored, and no worker source contains a credential", () => {

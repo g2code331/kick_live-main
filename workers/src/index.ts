@@ -25,6 +25,7 @@ import { authenticate, type Principal } from "./middleware/auth.ts";
 import { authorizeForRoute } from "./middleware/authorization.ts";
 import { applyCors, corsOriginFor, preflightResponse } from "./middleware/cors.ts";
 import { BUDGETS, clientAddress, createRateLimiter, limitKeyFor, rateLimitHeaders, type RateDecision } from "./middleware/ratelimit.ts";
+import { handleNotificationQueue, sweepNotifications, type QueueBatch } from "./queues/notifications.ts";
 import { matchRoute, stripApiPrefix, type RouteDef } from "./router.ts";
 import { dispatchRoute } from "./routes/index.ts";
 
@@ -46,6 +47,29 @@ export default {
       // One log line carrying the request id; the response carries the safe envelope and nothing else.
       logError(requestId, err);
       return finalise({ response: fail(err, { exposeDetail: !isProduction(env), requestId }), corsOrigin, requestId, cache: "none" });
+    }
+  },
+
+  // Phase 5 adds two non-HTTP entry points, and they are here rather than in a second Worker because a second
+  // Worker would need its own secrets, its own CORS story and its own deploy — for a job that shares all of
+  // this Worker's configuration. A queue failure is invisible to a user (the push arrives late, or the sweep
+  // finds it), so neither handler may turn into an unhandled rejection: they log with a join key and rethrow,
+  // which leaves the messages un-acked for redelivery instead of swallowing them.
+
+  /** Fan-out for notification jobs. `queues.consumers` in wrangler.toml decides what a failure costs. */
+  async queue(batch: MessageBatch<unknown>, env: Env): Promise<void> {
+    await handleNotificationQueue(batch as unknown as QueueBatch, env);
+  },
+
+  /** The five-minute safety net: re-enqueue what the queue lost, prune dead device rows hourly. */
+  async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    try {
+      await sweepNotifications(env, ctx);
+    } catch (err) {
+      // A sweep that throws because the Phase 5 migration has not been applied is a configuration state, not an
+      // outage: log it once per run with enough to name it, and let the next run try again.
+      logError(controller.cron ? `notification-sweep-${controller.cron}` : "notification-sweep", err);
+      throw err;
     }
   },
 };

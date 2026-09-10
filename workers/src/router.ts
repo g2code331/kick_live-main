@@ -368,18 +368,126 @@ export const ROUTES: readonly RouteDef[] = [
     summary: "Delete an article. Admin-only, unlike the current media-role policy.",
   },
 
-  // ── notifications ─────────────────────────────────────────────────────────
+  // ── notifications (Phase 5) ───────────────────────────────────────────────
+  //
+  // The self-service half and the admin half, and the difference between them is the whole design: a user may
+  // describe *their own* device and *their own* categories, and only an admin may cause a send. Nine of these
+  // routes are `implemented` against `SECURITY DEFINER` functions that derive the user from `auth.uid()`; the
+  // tenth queues a job and returns 202 without ever calling FCM in the request.
+  //
+  // `GET /notifications/subscriptions` never existed as a route — it was the declared stub below, named for a
+  // table nobody had. `devices` is the honest name, and renaming a 501 nobody could call costs nothing.
   {
     method: "POST",
-    pattern: "/notifications/subscriptions",
+    pattern: "/notifications/devices",
     capability: "profile.read_own",
     cache: "none",
     rateLimit: "mutation",
     phase: 5,
-    summary: "Register an FCM/APNs device token for the caller.",
-    invariants: "Tokens are per-user and per-device; never stored on profiles.",
+    implemented: true,
+    summary: "Register the caller's FCM/web-push device token. Identity comes from the JWT, never the body.",
+    invariants:
+      "Rejects an undeclared `user_id`; caps 10 active devices per account in SQL; a token that already belongs to another account moves here rather than duplicating; returns no token in any response.",
   },
-
+  {
+    method: "GET",
+    pattern: "/notifications/devices",
+    capability: "profile.read_own",
+    cache: "none",
+    rateLimit: "authenticated",
+    phase: 5,
+    implemented: true,
+    summary: "List the caller's devices, without the token column.",
+    invariants: "Served from notification_devices_public, which does not select `token`; no admin path returns a token.",
+  },
+  {
+    method: "DELETE",
+    pattern: "/notifications/devices/:id",
+    capability: "profile.read_own",
+    cache: "none",
+    rateLimit: "mutation",
+    phase: 5,
+    implemented: true,
+    summary: "Revoke one of the caller's devices.",
+    invariants: "The row is addressed by id AND owner in the statement; an id that is not yours answers the same as one that does not exist.",
+  },
+  {
+    method: "GET",
+    pattern: "/notifications/preferences",
+    capability: "profile.read_own",
+    cache: "none",
+    rateLimit: "authenticated",
+    phase: 5,
+    implemented: true,
+    summary: "The caller's full preference document, merged over the server's defaults.",
+    invariants: "Absent means the default, not off; the merge happens in SQL so the client renders one shape.",
+  },
+  {
+    method: "PUT",
+    pattern: "/notifications/preferences",
+    capability: "profile.read_own",
+    cache: "none",
+    rateLimit: "mutation",
+    phase: 5,
+    implemented: true,
+    summary: "Save categories. Full-document semantics: an omitted category means its default.",
+    invariants: "Unknown category names are refused with the field named, never dropped; the response is the authoritative document after the write.",
+  },
+  {
+    method: "GET",
+    pattern: "/notifications/inbox",
+    capability: "profile.read_own",
+    cache: "none",
+    rateLimit: "authenticated",
+    phase: 5,
+    implemented: true,
+    summary: "Notification history with the unread count, in one call.",
+    invariants: "Owner-scoped in SQL (not only by policy); page size bounded in the function; expired rows filtered.",
+  },
+  {
+    method: "POST",
+    pattern: "/notifications/inbox/:id/read",
+    capability: "profile.read_own",
+    cache: "none",
+    rateLimit: "mutation",
+    phase: 5,
+    implemented: true,
+    summary: "Mark one notification read.",
+    invariants: "`where id = $1 and user_id = auth.uid()` — the owner is in the statement; a policy alone would be one bug away from a cross-user write.",
+  },
+  {
+    method: "POST",
+    pattern: "/notifications/inbox/read-all",
+    capability: "profile.read_own",
+    cache: "none",
+    rateLimit: "mutation",
+    phase: 5,
+    implemented: true,
+    summary: "Mark the caller's unread notifications read, up to a bound.",
+    invariants: "Capped at 500 rows per call and reports `capped: true` rather than silently doing less.",
+  },
+  {
+    method: "GET",
+    pattern: "/notifications/config",
+    capability: null,
+    cache: "none",
+    rateLimit: "public",
+    phase: 5,
+    implemented: true,
+    summary: "Categories, defaults, limits, and whether this deployment can push at all.",
+    invariants: "Public and user-free by construction: it carries no row from any table a person owns.",
+  },
+  {
+    method: "GET",
+    pattern: "/notifications/diagnostics",
+    capability: "notifications.broadcast",
+    cache: "none",
+    rateLimit: "authenticated",
+    phase: 5,
+    implemented: true,
+    summary: "Queue depth, oldest pending age, transport in use.",
+    invariants: "Admin-only, and counts only: no notification bodies, no devices, no tokens.",
+  },
   {
     method: "POST",
     pattern: "/admin/notifications/broadcast",
@@ -387,8 +495,10 @@ export const ROUTES: readonly RouteDef[] = [
     cache: "none",
     rateLimit: "admin-blast",
     phase: 5,
+    implemented: true,
     summary: "Fan-out push/notification to an audience; the only route allowed to write many rows per call.",
-    invariants: "Audience size is capped and the send itself runs in a Queue (Phase 4+), never in the request.",
+    invariants:
+      "Audience size is capped and the send itself runs in a Queue, never in the request; `is_admin()` is re-checked inside the SQL function; over the cap the call is refused, not truncated; confirm: true is required above 1000.",
   },
   // ── administration ────────────────────────────────────────────────────────
   {

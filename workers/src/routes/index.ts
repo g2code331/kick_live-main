@@ -35,6 +35,19 @@ import {
   handleRecordMatchEvent,
   handleMatchAssign,
 } from "./live.ts";
+import {
+  handleNotificationBroadcast,
+  handleNotificationConfig,
+  handleNotificationDiagnostics,
+  handleNotificationDeviceDelete,
+  handleNotificationDeviceList,
+  handleNotificationDeviceRegister,
+  handleNotificationInbox,
+  handleNotificationInboxRead,
+  handleNotificationInboxReadAll,
+  handleNotificationPreferencesRead,
+  handleNotificationPreferencesWrite,
+} from "./notifications.ts";
 
 export interface HandlerContext {
   readonly request: Request;
@@ -78,6 +91,19 @@ export const HANDLERS: Record<string, RouteHandler> = {
   "POST /matches/:matchId/corrections": handleMatchCorrection,
   "POST /matches/:matchId/finalize": handleMatchFinalize,
   "POST /matches/:matchId/lock": handleMatchLock,
+
+  // ── notifications (Phase 5) ───────────────────────────────────────────────
+  "POST /notifications/devices": handleNotificationDeviceRegister,
+  "GET /notifications/devices": handleNotificationDeviceList,
+  "DELETE /notifications/devices/:id": handleNotificationDeviceDelete,
+  "GET /notifications/preferences": handleNotificationPreferencesRead,
+  "PUT /notifications/preferences": handleNotificationPreferencesWrite,
+  "GET /notifications/inbox": handleNotificationInbox,
+  "POST /notifications/inbox/:id/read": handleNotificationInboxRead,
+  "POST /notifications/inbox/read-all": handleNotificationInboxReadAll,
+  "GET /notifications/config": handleNotificationConfig,
+  "GET /notifications/diagnostics": handleNotificationDiagnostics,
+  "POST /admin/notifications/broadcast": handleNotificationBroadcast,
 };
 
 export async function dispatchRoute(ctx: HandlerContext, match: Matched): Promise<Response> {
