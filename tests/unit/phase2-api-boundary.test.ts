@@ -590,13 +590,37 @@ describe("phase2 · environment separation", () => {
     // queue is active because `index.ts` exports a `queue` handler and `queues/notifications.ts` consumes it.
     // Phase 6 activated R2 on the same terms, so the rule is now expressed per binding rather than as one
     // forbidden list: a binding is legal exactly when a handler reads `env.<NAME>` and nothing else. D1 stays
-    // forbidden (it would be a second copy of the match data with a sync job in the middle), and so does a
-    // second KV namespace.
+    // forbidden (it would be a second copy of the match data with a sync job in the middle); the only legal KV
+    // namespace is the rate limiter's, bound per environment since 2026-09-10 and asserted live below.
     assert.deepEqual(
       active.filter((l) => /^\[\[(d1_databases|kv_namespaces)\]\]$/.test(l)),
       [],
-      "no D1 and no extra KV namespace: neither has code that needs it",
+      "no top-level D1 and no top-level KV: the limiter binds per environment, never at the root",
     );
+    {
+      const ids: string[] = [];
+      for (const env of ["staging", "production"]) {
+        const block = toml.split(/\n(?=\[)/).find((b) => b.startsWith(`[[env.${env}.kv_namespaces]]`))!;
+        assert.ok(block, `[[env.${env}.kv_namespaces]] must be active — with no binding the limiter is per-isolate and the config reads stricter than reality`);
+        assert.match(block, /^binding = "RATE_LIMIT_KV"$/m, "the name the limiter reads is env.RATE_LIMIT_KV");
+        const id = /^id = "([0-9a-f]{32})"$/m.exec(block)?.[1]!;
+        assert.ok(id, `env.${env} needs the 32-hex id that "wrangler kv namespace create" printed; a placeholder deploys fine and fails at first write`);
+        ids.push(id);
+      }
+      assert.notEqual(ids[0], ids[1], "staging and production share nothing, least of all a rate-limit counter");
+    }
+    // What no local check could catch until the repo stopped pinning wrangler and `npx` became 4.x-only:
+    // naming a Durable Object class in the TOML is not enough — the deploy throws at build time unless
+    // the entrypoint module exports that class. So the pairing is asserted here instead.
+    {
+      const indexSource = read("workers/src/index.ts");
+      for (const block of toml.split(/\n(?=\[)/)) {
+        if (!/^\[\[(?:env\.[a-z]+\.)?durable_objects\.bindings\]\]/.test(block)) continue;
+        const cls = /^class_name = "([^"]+)"$/m.exec(block)?.[1]!;
+        assert.ok(cls, "every durable binding names a class");
+        assert.match(indexSource, new RegExp(`export\\s*\\{[^}]*\\b${cls}\\b`), `${cls} is bound in the TOML but not exported from workers/src/index.ts — wrangler refuses to build the Worker`);
+      }
+    }
     assert.deepEqual(
       active.filter((l) => l === "[[r2_buckets]]"),
       ["[[r2_buckets]]"],
@@ -734,8 +758,9 @@ describe("phase2 · environment separation", () => {
         `${label} needs each queue named exactly twice — once as a producer, once as a consumer — got ${names.join(", ")}`,
       );
     }
-    const deadLetters = [...toml.matchAll(/^\s+queue = "(kicklive-notifications-failed[^"]*)"$/gm)].map((m) => m[1]!);
+    const deadLetters = [...toml.matchAll(/^dead_letter_queue = "(kicklive-notifications-failed[^"]*)"$/gm)].map((m) => m[1]!);
     assert.equal(deadLetters.length, 3, "each environment needs its own dead-letter queue");
+    assert.equal(new Set(deadLetters).size, 3, "and distinct ones — dev, staging and production sharing a DLQ is how a poison message from one lands on whoever reads another's");
     // One queue per environment, six names in total. `new Set(...).size === 6` is the assertion that matters:
     // a producer and its consumer repeat a name inside an environment by design, and reusing a name *between*
     // environments is the bug.

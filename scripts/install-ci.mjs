@@ -73,7 +73,7 @@ export async function main() {
     for (const r of [add, commit, push]) if (!r.ok) console.error(r.stdout + r.stderr);
     return push.ok ? 0 : 1;
   }
-  console.log("ci:install: done. Commit .github/workflows (a human with Actions:write may be required) and push.");
+  console.log("ci:install: done. git add -f .github/workflows (the dir is deliberately gitignored), commit, push. A human with Actions:write may be required.");
   return 0;
 }
 

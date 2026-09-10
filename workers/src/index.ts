@@ -65,6 +65,12 @@ interface RequestTrace {
   clientRequestId?: string | null;
 }
 
+// Durable Object classes must be exported from the entrypoint module itself — a binding in the TOML
+// whose class is only reachable through the fetch handler's imports is a build-time throw ("not
+// exported in your entrypoint file"), not a runtime surprise. `tests/unit/phase2-api-boundary.test.ts`
+// pins the pairing.
+export { MatchRoom } from "./do/MatchRoom.ts";
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const started = Date.now();

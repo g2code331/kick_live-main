@@ -98,13 +98,16 @@ and no root in this environment, so `initdb` is impossible.** That single fact i
 - `READY` — staging/production are `env.staging` / `env.production` blocks with per-environment names, because
   named environments inherit no top-level bindings — the reason notifications working in dev and silently
   missing in prod is structurally hard to do by accident.
-- `REQUIRES CONFIGURATION` — queues: `npx wrangler queues create kicklive-notifications-<env>`,
-  `kicklive-ad-events-<env>` and the notification dead-letter queue, then `wrangler deploy`. Until then the
-  producer throws and `/api` still serves reads (fail-safe by design).
-- `REQUIRES CONFIGURATION` — **`RATE_LIMIT_KV` is commented out in both `env.staging` and `env.production`**
-  (`workers/wrangler.toml:195`, `:293`). With no namespace the limiter is per-isolate in-memory: real ceilings
-  are looser than the config implies, and a burst across isolates will not be shaped. Create it with the command
-  in the comment and uncomment — do not ship "rate limiting" while that block is inert.
+- `IN PROGRESS` — queues are created one name per command (wrangler takes a single positional):
+  `kicklive-notifications-staging` exists since 2026-09-10; owed are `kicklive-ad-events-staging`,
+  `kicklive-notifications-failed-staging`, `kicklive-notifications`, `kicklive-ad-events`,
+  `kicklive-notifications-failed`, then `wrangler deploy`. Until a queue exists its producer throws and
+  `/api` still serves reads (fail-safe by design).
+- `READY` (2026-09-10) — **`RATE_LIMIT_KV` is bound in both `env.staging` and `env.production`** with a
+  per-environment namespace and its real id in `workers/wrangler.toml`. `tests/unit/phase2-api-boundary.test.ts`
+  asserts both blocks exist, carry 32-hex ids, and the ids differ — so this cannot regress to an inert
+  comment. Post-deploy proof is one header on any rate-limited response: `x-ratelimit-store: kv` means the
+  binding is live; `memory` means it is gone and the limiter is per-isolate.
 - `REQUIRES CONFIGURATION` — `LIVE_MATCH_ROOM` Durable Object is declared; confirm the `new_sqlite` class
   binding in the deployed version and that `wrangler tail` shows alarm activity during a friendly match.
 - `REQUIRES TESTING` — `cron` lines: five-minute sweep + hourly media/ad/observability maintenance. Verify in
@@ -119,7 +122,10 @@ and no root in this environment, so `initdb` is impossible.** That single fact i
   bundle or in `.dev.vars.example` (the file says so and `check-secrets.mjs` would fail it).
 - `READY` — server-side key shape, per-kind caps in `workers/src/lib/mediaPolicy.ts`, no SVG, `MEDIA_MAX_BYTES`
   as the outer bound; uploads are reserve → put → publish, so an abandoned upload cannot become visible.
-- `REQUIRES CONFIGURATION` — create the buckets for staging and production, decide the public bucket policy (a
+- `REQUIRES CONFIGURATION` — create the buckets for staging and production (`npx wrangler r2 bucket create
+kicklive-media-staging`, `kicklive-media`) — but R2 must be enabled on the account by a human in the
+  dashboard first (`Please enable R2 through the Cloudflare Dashboard [code: 10042]`; a payment method is
+  required even for the free tier). Then decide the public bucket policy (a
   custom domain / `token`-less public access is what `urlColumn` assumes) and set `MEDIA_MAX_BYTES` per env.
 - `REQUIRES TESTING` — phase 6's deferred work is still open: no thumbnail/`og:` variants, no resize, no video
   handling, no avatar upload UI, `teams.gallery` has no upload path, and legacy `media`-table objects are not
@@ -314,8 +320,8 @@ and no root in this environment, so `initdb` is impossible.** That single fact i
 
 Configurable, verifiable, and honest about its gaps in §1–§6, §8–§14: the security posture, the privilege model,
 the database path, the observability plane and the privacy boundary are implemented with tests, and the whole
-list of what an operator must still _do_ (queues, KV namespace, R2 buckets, FCM, secrets, CI install, log drain,
-backups) is above with commands.
+list of what an operator must still _do_ (the remaining queues, R2 buckets, FCM, secrets, CI install, log drain,
+backups — the KV namespace landed on 2026-09-10) is above with commands.
 
 Two things stop this from being an unqualified `READY`:
 

@@ -25,7 +25,7 @@ git merge --ff-only origin/arena/01a08671-kick-live-main || git merge origin/are
 npm ci
 npm run typecheck && npm run test:unit && npm run test:integration && npm run format:check
 npm run ci:install          # copies ci/*.yml into .github/workflows/ (the repo forbids commits that touch that dir)
-git add .github/workflows && git commit -m "ci: install workflows"
+git add -f .github/workflows && git commit -m "ci: install workflows"   # -f: the dir is deliberately gitignored
 ```
 
 ### If the checks die with `ERR_UNKNOWN_FILE_EXTENSION: Unknown file extension ".ts"`
@@ -86,7 +86,9 @@ The Worker's bindings must exist before `wrangler deploy` will upload. Names bel
 `workers/wrangler.toml` already declares, so **create them with these exact names** or edit the TOML to match.
 
 ```bash
-# Queues — three per environment (producer, consumer, dead-letter)
+# Queues — three per environment (producer, consumer, dead-letter). One name per command:
+# `wrangler queues create` takes a single positional, and a second name on the line is
+# rejected with "Unknown arguments" rather than creating anything.
 npx wrangler queues create kicklive-notifications-staging
 npx wrangler queues create kicklive-ad-events-staging
 npx wrangler queues create kicklive-notifications-failed-staging
@@ -94,16 +96,23 @@ npx wrangler queues create kicklive-notifications
 npx wrangler queues create kicklive-ad-events
 npx wrangler queues create kicklive-notifications-failed
 
-# R2 — one bucket per environment
+# R2 — one bucket per environment. PREREQUISITE: R2 is opt-in per account. The first call fails with
+# "Please enable R2 through the Cloudflare Dashboard [code: 10042]" until someone clicks Enable once
+# in dash.cloudflare.com → R2; a payment method must be on file even for the free tier.
 npx wrangler r2 bucket create kicklive-media-staging
 npx wrangler r2 bucket create kicklive-media
 
-# KV — the rate-limit namespace. This is REQUIRED for rate limiting to mean what it says:
-# `[[env.staging.kv_namespaces]]` and `[[env.production.kv_namespaces]]` are commented out in
-# workers/wrangler.toml (lines ~195 and ~293) because the id is only knowable after creation.
-npx wrangler kv namespace create RATE_LIMIT_KV --env staging      # copy the returned id
-npx wrangler kv namespace create RATE_LIMIT_KV --env production    # copy the returned id
-# → uncomment both blocks in workers/wrangler.toml and paste the ids
+# KV — DONE as of 2026-09-10: `staging-RATE_LIMIT_KV` and `production-RATE_LIMIT_KV` exist and
+# their ids are wired into `[[env.staging.kv_namespaces]]` / `[[env.production.kv_namespaces]]` in
+# workers/wrangler.toml. Keep both blocks active (tests/unit/phase2-api-boundary.test.ts now fails
+# if either goes missing or ships a placeholder id): with no binding, rate limiting is
+# per-isolate in-memory and the ceilings in middleware/ratelimit.ts read stricter than reality.
+# Only recreate on a fresh account, then paste the printed ids into those two blocks:
+npx wrangler kv namespace create RATE_LIMIT_KV --env staging
+npx wrangler kv namespace create RATE_LIMIT_KV --env production
+# (From the repo root these warn "No environment found in configuration with name staging" —
+# harmless: the namespace is created regardless, and the warning is about the root directory,
+# which has no wrangler.toml; `worker:deploy:*` reads workers/wrangler.toml itself.)
 ```
 
 Durable Object (`LIVE_MATCH_ROOM`, class `MatchRoom`) and the two cron triggers

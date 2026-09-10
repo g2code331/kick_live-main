@@ -25,7 +25,7 @@ name = "kicklive-api"
 main = "src/index.ts"
 compatibility_date = "2026-09-01"
 compatibility_flags = ["nodejs_compat"]
-send_metrics = "off"
+send_metrics = false
 
 # ─────────────────────────────────────────────────────────────────────────
 # DEVELOPMENT — the top-level block, used by `wrangler dev`.
@@ -88,8 +88,10 @@ new_sqlite_classes = ["MatchRoom"]
 #   max_batch_size    the queue carries *job ids*; one message is one job, so 25 messages is 25 notifications
 #                     (the 500-token batches are inside `deliverJob`; Cloudflare caps this at 100 anyway).
 #   max_concurrency   5 batches in flight per instance; FCM's per-project rate is the reason it is not 50.
-#   max_retries +     the consumer never drops a message on the floor: a job that keeps failing is left
-#   backoff           `retry` in the database and the sweep re-enqueues it, so the DLQ is for poison messages.
+#   max_retries       the consumer never drops a message on the floor: a job that keeps failing is left
+#                     `retry` in the database and the sweep re-enqueues it, so the DLQ is for poison
+#                     messages. There is deliberately no delay knob here — the wrangler 4 consumer
+#                     schema exposes none; the interval between attempts is Cloudflare's schedule.
 
 # ─────────────────────────────────────────────────────────────────────────
 # Phase 6 · the media bucket. Bound because `services/mediaStore.ts` writes to it, and named per
@@ -117,17 +119,13 @@ queue = "kicklive-notifications-dev"
 max_batch_size = 25
 max_batch_timeout = 20
 max_retries = 6
-min_instances = 0
 max_concurrency = 5
-backoff_delay_ms = 10000
-backoff_max_delay_ms = 600000
 
-# Poison messages only, by the rule above. The queue itself must be created first
-# (`npx wrangler queues create <name>-dev` etc. as well), or the deploy fails with a
-# "queue not found" that has nothing to do with the code.
-  [queues.consumers.dead_letter_queue]
-  queue = "kicklive-notifications-failed-dev"
-  max_batch_size = 10
+# Poison messages only, by the rule above. `dead_letter_queue` is a plain string on the consumer —
+# wrangler 4 rejects the old `[queues.consumers.dead_letter_queue]` sub-table — and the DLQ itself
+# must be created first (`npx wrangler queues create kicklive-notifications-failed-dev`), or the
+# deploy fails with a "queue not found" that has nothing to do with the code.
+dead_letter_queue = "kicklive-notifications-failed-dev"
 
 # Ad measurement (Phase 7). A second queue rather than a second message type on the notification queue
 # because the two want opposite delivery policies: a notification job is a wake-up for a row that already
@@ -149,10 +147,7 @@ queue = "kicklive-ad-events-dev"
 max_batch_size = 100
 max_batch_timeout = 10
 max_retries = 2
-min_instances = 0
 max_concurrency = 5
-backoff_delay_ms = 30000
-backoff_max_delay_ms = 300000
 
 # No dead-letter queue for measurements. A message that survives two retries has already lost its day:
 # an impression is counted per UTC day, so a redelivery from a DLQ a week later would be refused by the
@@ -192,9 +187,12 @@ ALLOWED_ORIGINS = "https://staging.kicklive.football"
 # pattern = "api.staging.kicklive.football/*"
 # custom_domain = false
 
-# [[env.staging.kv_namespaces]]
-# binding = "RATE_LIMIT_KV"
-# id = "create with: npx wrangler kv namespace create RATE_LIMIT_KV --env staging"
+# Created 2026-09-10 as `staging-RATE_LIMIT_KV`. This block is the difference between a global
+# limiter and a per-isolate one: the middleware answers with `x-ratelimit-store: kv` while the
+# binding exists and `memory` the moment it disappears, so losing it is visible, not silent.
+[[env.staging.kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "14daf4b0404c42039317166e1d03f62d"
 
 # Named environments do not inherit top-level bindings, so the room is declared per environment.# The queue and the cron are repeated per environment rather than inherited — `[[env.staging.*]]` blocks see
 # no top-level bindings, so declaring them once would mean notifications work in dev and are silently absent in
@@ -214,14 +212,9 @@ queue = "kicklive-notifications-staging"
 max_batch_size = 25
 max_batch_timeout = 20
 max_retries = 6
-min_instances = 0
 max_concurrency = 5
-backoff_delay_ms = 10000
-backoff_max_delay_ms = 600000
 
-  [env.staging.queues.consumers.dead_letter_queue]
-  queue = "kicklive-notifications-failed-staging"
-  max_batch_size = 10
+dead_letter_queue = "kicklive-notifications-failed-staging"
 
 # Ad measurement (Phase 7). A second queue rather than a second message type on the notification queue
 # because the two want opposite delivery policies: a notification job is a wake-up for a row that already
@@ -243,10 +236,7 @@ queue = "kicklive-ad-events-staging"
 max_batch_size = 100
 max_batch_timeout = 10
 max_retries = 2
-min_instances = 0
 max_concurrency = 5
-backoff_delay_ms = 30000
-backoff_max_delay_ms = 300000
 
 # No dead-letter queue for measurements. A message that survives two retries has already lost its day:
 # an impression is counted per UTC day, so a redelivery from a DLQ a week later would be refused by the
@@ -290,9 +280,11 @@ ALLOWED_ORIGINS = "https://kicklive.football,https://www.kicklive.football"
 # pattern = "api.kicklive.football/*"
 # custom_domain = false
 
-# [[env.production.kv_namespaces]]
-# binding = "RATE_LIMIT_KV"
-# id = "create with: npx wrangler kv namespace create RATE_LIMIT_KV --env production"
+# Created 2026-09-10 as `production-RATE_LIMIT_KV`. The two ids must stay distinct: one namespace
+# shared by both environments is how a staging load test spends production's rate budget.
+[[env.production.kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "8cc376e1daa3476696bf28a7e13fa165"
 # The queue and the cron are repeated per environment rather than inherited — `[[env.staging.*]]` blocks see
 # no top-level bindings, so declaring them once would mean notifications work in dev and are silently absent in
 # staging. This is the same reason `durable_objects.bindings` is repeated above.
@@ -311,14 +303,9 @@ queue = "kicklive-notifications"
 max_batch_size = 25
 max_batch_timeout = 20
 max_retries = 6
-min_instances = 0
 max_concurrency = 5
-backoff_delay_ms = 10000
-backoff_max_delay_ms = 600000
 
-  [env.production.queues.consumers.dead_letter_queue]
-  queue = "kicklive-notifications-failed"
-  max_batch_size = 10
+dead_letter_queue = "kicklive-notifications-failed"
 
 # Ad measurement (Phase 7). A second queue rather than a second message type on the notification queue
 # because the two want opposite delivery policies: a notification job is a wake-up for a row that already
@@ -340,10 +327,7 @@ queue = "kicklive-ad-events"
 max_batch_size = 100
 max_batch_timeout = 10
 max_retries = 2
-min_instances = 0
 max_concurrency = 5
-backoff_delay_ms = 30000
-backoff_max_delay_ms = 300000
 
 # No dead-letter queue for measurements. A message that survives two retries has already lost its day:
 # an impression is counted per UTC day, so a redelivery from a DLQ a week later would be refused by the
