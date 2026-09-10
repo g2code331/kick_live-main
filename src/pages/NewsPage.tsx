@@ -5,6 +5,7 @@ import Header from '../components/Header';
 import { readOnce, useQuery } from '../lib/data';
 import { newsArticle, newsPage } from '../lib/data/queries.ts';
 import { recordMediaView } from '../lib/db';
+import { assetUrl } from '../lib/media/assets';
 
 const FALLBACK_IMG = 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&auto=format&fit=crop';
 
@@ -21,7 +22,9 @@ const CATEGORY_COLORS: Record<string, string> = {
 };
 
 function imgSrc(url: string | null | undefined) {
-  return url && url.trim() ? url : FALLBACK_IMG;
+  // `assetUrl` resolves a stored `/api/media/assets/...` path against the configured API
+  // origin and passes an external URL (unsplash, a legacy storage link) through untouched.
+  return url && url.trim() ? assetUrl(url, FALLBACK_IMG) : FALLBACK_IMG;
 }
 
 function timeSince(dateStr: string) {

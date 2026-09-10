@@ -45,6 +45,11 @@ ALLOWED_ORIGINS = "http://localhost:5000,http://127.0.0.1:5000,http://localhost:
 # RATE_LIMIT_KV is intentionally unbound in development: the limiter falls back to a per-isolate
 # counter and says so in `x-ratelimit-store: memory`.
 
+# Phase 6: ceiling for one uploaded file, in bytes, across every category. The per-kind caps in
+# src/lib/mediaPolicy.ts are tighter and are what an error message names; this is the outer bound.
+# Top-level, because wrangler merges top-level [vars] into every environment.
+MEDIA_MAX_BYTES = 26214400
+
 # Phase 3: the live match room. One instance per match id (`idFromName(String(match_id))`), holding the
 # sockets and the write queue for that match. `class_name` must match the exported class in
 # `src/do/MatchRoom.ts`, and the `migrations` block below is what creates it — an existing environment
@@ -80,6 +85,23 @@ new_sqlite_classes = ["MatchRoom"]
 #   max_retries +     the consumer never drops a message on the floor: a job that keeps failing is left
 #   backoff           `retry` in the database and the sweep re-enqueues it, so the DLQ is for poison messages.
 
+# ─────────────────────────────────────────────────────────────────────────
+# Phase 6 · the media bucket. Bound because `services/mediaStore.ts` writes to it, and named per
+# environment for the same reason the queues are: two environments sharing one bucket means a dev
+# `wrangler dev` can overwrite a production logo. The binding is not a credential — that is the
+# point of R2 here (docs/R2_MEDIA_ARCHITECTURE.md §2): nothing in this file, in `.dev.vars`, or in a
+# deploy log can be replayed against the rest of the account, because the binding only reaches this
+# one bucket from inside this Worker.
+#
+# `MEDIA_BUCKET` is the name `env.MEDIA_BUCKET` reads in workers/src. The bucket itself is created
+# with `npx wrangler r2 bucket create kicklive-media-dev` (etc.); a deploy against a missing bucket
+# fails at upload time with 503 naming the binding, which is the intended failure.
+# ─────────────────────────────────────────────────────────────────────────
+
+[[r2_buckets]]
+binding = "MEDIA_BUCKET"
+bucket_name = "kicklive-media-dev"
+
 [[queues.producers]]
 queue = "kicklive-notifications-dev"
 binding = "NOTIFICATION_QUEUE"
@@ -104,7 +126,12 @@ backoff_max_delay_ms = 600000
 [triggers]
 # The five-minute safety net (docs/NOTIFICATIONS_ARCHITECTURE.md §11): re-enqueue anything the queue lost,
 # and prune long-dead device rows on the hour. `*/5 * * * *` is UTC.
-crons = ["*/5 * * * *"]
+#
+# The second line is Phase 6 media retention (expire stale upload reservations, retire objects past their
+# superseded/soft-deleted window, then delete the keys the database named). It runs at :17 rather than :00
+# so a bad hour cannot have both sweeps colliding with the notification work, and `MEDIA_SWEEP_CRON` in
+# `src/services/mediaStore.ts` must match this string exactly — a test asserts it.
+crons = ["*/5 * * * *", "17 * * * *"]
 #
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -131,6 +158,12 @@ ALLOWED_ORIGINS = "https://staging.kicklive.football"
 # Named environments do not inherit top-level bindings, so the room is declared per environment.# The queue and the cron are repeated per environment rather than inherited — `[[env.staging.*]]` blocks see
 # no top-level bindings, so declaring them once would mean notifications work in dev and are silently absent in
 # staging. This is the same reason `durable_objects.bindings` is repeated above.
+# Phase 6 · per-environment media bucket, repeated because named environments inherit no top-level
+# bindings at all (see the ordering note above).
+[[env.staging.r2_buckets]]
+binding = "MEDIA_BUCKET"
+bucket_name = "kicklive-media-staging"
+
 [[env.staging.queues.producers]]
 queue = "kicklive-notifications-staging"
 binding = "NOTIFICATION_QUEUE"
@@ -150,7 +183,8 @@ backoff_max_delay_ms = 600000
   max_batch_size = 10
 
 [env.staging.triggers]
-crons = ["*/5 * * * *"]
+# The media cron string must equal MEDIA_SWEEP_CRON in src/services/mediaStore.ts (asserted in tests).
+crons = ["*/5 * * * *", "17 * * * *"]
 
 [[env.staging.durable_objects.bindings]]
 name = "LIVE_MATCH_ROOM"
@@ -186,6 +220,12 @@ ALLOWED_ORIGINS = "https://kicklive.football,https://www.kicklive.football"
 # The queue and the cron are repeated per environment rather than inherited — `[[env.staging.*]]` blocks see
 # no top-level bindings, so declaring them once would mean notifications work in dev and are silently absent in
 # staging. This is the same reason `durable_objects.bindings` is repeated above.
+# Phase 6 · per-environment media bucket, repeated because named environments inherit no top-level
+# bindings at all (see the ordering note above).
+[[env.production.r2_buckets]]
+binding = "MEDIA_BUCKET"
+bucket_name = "kicklive-media"
+
 [[env.production.queues.producers]]
 queue = "kicklive-notifications"
 binding = "NOTIFICATION_QUEUE"
@@ -205,7 +245,8 @@ backoff_max_delay_ms = 600000
   max_batch_size = 10
 
 [env.production.triggers]
-crons = ["*/5 * * * *"]
+# The media cron string must equal MEDIA_SWEEP_CRON in src/services/mediaStore.ts (asserted in tests).
+crons = ["*/5 * * * *", "17 * * * *"]
 
 [[env.production.durable_objects.bindings]]
 name = "LIVE_MATCH_ROOM"
@@ -228,9 +269,9 @@ invocation_logs = true
 # ─────────────────────────────────────────────────────────────────────────
 # PLANNED BINDINGS — deliberately inactive until the phase that owns them.
 #
-# [[r2_buckets]]      # media plane (replaces inline URLs / unsplash hotlinks) — still not needed: no
-#                     # upload path exists, and a bucket with no writer is config theatre.
-# (Phase 3 shipped the block above: [durable_objects.bindings] + [migrations].)
+# (Phase 3 shipped [durable_objects.bindings] + [migrations]; Phase 5 shipped [[queues.producers]];
+#  Phase 6 shipped [[r2_buckets]] — each was added when code started depending on it, which is what
+#  this list of "planned" bindings is for: nothing here may be activated on speculation.)
 #
 # [[d1_databases]]    # INTENTIONALLY ABSENT — do not "helpfully" add one.
 # D1 would be a second copy of match data with a sync job in the middle. Supabase Postgres is the

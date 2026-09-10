@@ -4,6 +4,7 @@ import Loading from "../components/Loading";
 import Header from "../components/Header";
 import { useQuery } from "../lib/data";
 import { liveMatches as liveMatchesQuery, newsPreview, scorers } from "../lib/data/queries.ts";
+import { assetUrl } from '../lib/media/assets';
 
 export default function HomePage() {
   const navigate = useNavigate();
@@ -156,7 +157,7 @@ export default function HomePage() {
                   >
                     <div className="aspect-video overflow-hidden">
                       <img
-                        src={item.image_url || 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&auto=format&fit=crop'}
+                        src={assetUrl(item.image_url, 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&auto=format&fit=crop')}
                         alt={item.title}
                         className="w-full h-full object-cover transition-transform duration-300 hover:scale-105"
                         onError={e => { e.currentTarget.src = 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&auto=format&fit=crop'; }}

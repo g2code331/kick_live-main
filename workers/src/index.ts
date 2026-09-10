@@ -26,6 +26,7 @@ import { authorizeForRoute } from "./middleware/authorization.ts";
 import { applyCors, corsOriginFor, preflightResponse } from "./middleware/cors.ts";
 import { BUDGETS, clientAddress, createRateLimiter, limitKeyFor, rateLimitHeaders, type RateDecision } from "./middleware/ratelimit.ts";
 import { handleNotificationQueue, sweepNotifications, type QueueBatch } from "./queues/notifications.ts";
+import { MEDIA_SWEEP_CRON, sweepMedia } from "./services/mediaStore.ts";
 import { matchRoute, stripApiPrefix, type RouteDef } from "./router.ts";
 import { dispatchRoute } from "./routes/index.ts";
 
@@ -61,8 +62,25 @@ export default {
     await handleNotificationQueue(batch as unknown as QueueBatch, env);
   },
 
-  /** The five-minute safety net: re-enqueue what the queue lost, prune dead device rows hourly. */
+  /**
+   * The five-minute safety net: re-enqueue what the queue lost, prune dead device rows hourly.
+   *
+   * Phase 6 hangs media retention off the same entry point rather than adding a second Worker:
+   * it needs the same secrets, the same bucket binding and the same queue, and a separate deploy
+   * for nine lines of code would double the number of places a credential can leak from. The two
+   * schedules are told apart by the cron expression itself — which is why `MEDIA_SWEEP_CRON` is a
+   * constant both this file and `workers/wrangler.toml` refer to, and why a test asserts the two
+   * agree (`tests/unit/phase2-api-boundary.test.ts`).
+   */
   async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    if (controller.cron === MEDIA_SWEEP_CRON) {
+      try {
+        await sweepMedia(env);
+      } catch (err) {
+        logError(`media-sweep-${controller.cron.replace(/\s+/g, "-")}`, err);
+      }
+      return;
+    }
     try {
       await sweepNotifications(env, ctx);
     } catch (err) {
@@ -131,7 +149,12 @@ async function limitRequest(request: Request, env: Env, route: RouteDef, princip
 }
 
 function finalise({ response, corsOrigin, requestId, cache, rate }: Finalised): Response {
-  const headers = withSecurityHeaders(new Headers(response.headers), cacheHeadersFor(cache));
+  const extra = cacheHeadersFor(cache);
+  // A `handler` route owns `cache-control` (media answers per object, so no static class fits).
+  // The fallback keeps "the handler may set it" from meaning "it may be missing": with no header
+  // at all, a shared cache is free to hold somebody's avatar until the CDN decides otherwise.
+  if (cache === "handler" && !response.headers.has("cache-control")) extra["cache-control"] = "no-store";
+  const headers = withSecurityHeaders(new Headers(response.headers), extra);
   headers.set("x-request-id", requestId || newRequestId());
   if (rate) for (const [k, v] of Object.entries(rateLimitHeaders(rate))) headers.set(k, v);
   applyCors(headers, corsOrigin);

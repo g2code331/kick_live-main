@@ -23,3 +23,38 @@ TURNSTILE_SECRET_KEY=
 # Exact origins allowed for CORS. `*` is rejected by src/env.ts on purpose; a `null` origin
 # (sandboxed iframe, file://) is refused by the middleware, not implicitly allowed.
 ALLOWED_ORIGINS=http://localhost:5000,http://127.0.0.1:5000
+
+# ── Phase 5 · push notifications ─────────────────────────────────────────────
+# Nothing here is required to boot the Worker. With these unset, `transportFor()` returns the mock
+# transport: jobs are created, fanned out and recorded, and no message leaves the account. That is the
+# intended state for a laptop, and the reason the local default is "silent" rather than "error".
+
+# Not a secret — the *Cloudflare-side* id of the Firebase project whose FCM v1 API you will call. It is
+# not the `projectId` in the SPA's Firebase config; those are the same string only when nobody has
+# renamed anything, so the Worker reads its own variable (workers/src/env.ts).
+FCM_PROJECT_ID=
+
+# SECRET — the downloaded service-account JSON, pasted verbatim onto one line (or set with
+# `npx wrangler secret put FCM_SERVICE_ACCOUNT`, which is the only way it reaches a real environment).
+# It contains a private key: the pre-commit source scan fails a build that embeds one, and no route ever
+# echoes it. Never put it in wrangler.toml, an issue, or a screenshot.
+FCM_SERVICE_ACCOUNT=
+
+# Tuning, all optional. Audiences above NOTIFICATIONS_MAX_AUDIENCE are refused rather than truncated;
+# the reminder lead time is minutes before kick-off, where 0 turns reminders off; FCM_TIMEOUT_MS bounds
+# one HTTP send so a hang cannot consume the queue's visibility window.
+NOTIFICATIONS_MAX_AUDIENCE=50000
+NOTIFICATIONS_REMINDER_LEAD_MINUTES=15
+FCM_TIMEOUT_MS=8000
+# Only needed when a push tap may land outside the SPA's own origin (an email link, a native app).
+NOTIFICATIONS_LINK_BASE=
+
+# ── Phase 6 · media on R2 ────────────────────────────────────────────────────
+# No secrets, by design. The bucket is a *binding* (`[[r2_buckets]]` in workers/wrangler.toml, read as
+# `env.MEDIA_BUCKET`), so `wrangler dev` reaches the dev bucket with the Cloudflare login you already
+# have and there is no key to store here. If a media access key ever appears in this file, the phase was
+# implemented wrong — see the note in scripts/check-secrets.mjs.
+
+# Ceiling for one uploaded file, in bytes. The per-kind caps in workers/src/lib/mediaPolicy.ts are
+# tighter and are the ones a user sees named in an error; this is the outer bound.
+MEDIA_MAX_BYTES=26214400

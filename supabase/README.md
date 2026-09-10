@@ -50,11 +50,17 @@ Or paste a single migration into the dashboard SQL editor — every file here is
 
 In order, and each one safe to re-run:
 
-| file                                           | what it does                                                                                                                                          | reads it changes behaviour for                               |
-| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| `20260909120000_phase1_security_hardening.sql` | RLS + privilege hardening; the capability matrix                                                                                                      | everything                                                   |
-| `20260909210000_phase3_live_match_engine.sql`  | the live engine: assignments, transitions, sequences, corrections, guards                                                                             | `src/lib/live/*`, `MatchControlCenter`, `MatchDetails`       |
-| `20260910120000_phase4_read_aggregates.sql`    | three read aggregates (`kicklive_competition_standings`, `kicklive_squad_sizes`, `kicklive_is_final_status`); **indexes deliberately left commented** | `src/lib/data/queries.ts` (`/tables`, `/team/:id`, `/teams`) |
+| file                                           | what it does                                                                                                                                                                                                                                | reads it changes behaviour for                                                                 |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `20260909120000_phase1_security_hardening.sql` | RLS + privilege hardening; the capability matrix                                                                                                                                                                                            | everything                                                                                     |
+| `20260909210000_phase3_live_match_engine.sql`  | the live engine: assignments, transitions, sequences, corrections, guards                                                                                                                                                                   | `src/lib/live/*`, `MatchControlCenter`, `MatchDetails`                                         |
+| `20260910120000_phase4_read_aggregates.sql`    | three read aggregates (`kicklive_competition_standings`, `kicklive_squad_sizes`, `kicklive_is_final_status`); **indexes deliberately left commented**                                                                                       | `src/lib/data/queries.ts` (`/tables`, `/team/:id`, `/teams`)                                   |
+| `20260911120000_phase5_notifications.sql`      | push + inbox: five tables (`notification_devices`, `_preferences`, `_jobs`, `_deliveries`, `match_interest`), `notifications` extended in place, the fan-out triggers, the recipient functions                                              | the Worker's `/notifications/*` routes; no client role has a write grant on any of them        |
+| `20260912120000_phase6_r2_media.sql`           | the media registry: `media_assets` + insert-only `media_operations`, `can_manage_team`, 16 `kicklive_*` functions for reserve/finalize/visibility/retention/migration. **Additive only** — no `*_url` column is dropped, renamed or retyped | `workers/src/routes/media.ts`, `src/lib/media/*`; the eight `*_url` columns keep their meaning |
+
+**None of the five has been applied to a live project from this repository** — there is no database
+reachable from here, so each file's own `do $$ … $$` verify block is the only execution proof that exists,
+and applying them is the first manual step in `../docs/PRODUCTION_MIGRATION_PLAN.md`.
 
 Phase 4's file adds no table, no column and no index. The index block is commented because the phase's rule
 is that an index needs a plan, and no database was available to plan against — see
@@ -80,6 +86,12 @@ Deliberately deferred, with the phase that owns it in `../docs/PRODUCTION_MIGRAT
   `sponsorships` — separate concepts, separate migrations, not folded into `media`/`competitions`.
 - `predictions` / `fan_votes`: `src/pages/PredictionsPage.tsx` renders without a backing table, so
   predictions are currently browser-local. The table + RLS + (Phase 2) Worker endpoint are the fix.
-- `device_tokens` for push (Phase 5, with FCM).
-- The move of writes out of the browser and into Workers (Phase 2), after which most client-facing
-  write policies can be narrowed to `service_role`-only.
+- ~~`device_tokens` for push~~ — written as `notification_devices` in the Phase 5 migration (token as a
+  credential: `unique (provider, token)`, RLS owner-only, no client write grant); still unapplied, so the
+  table does not exist in a live project until that file is run.
+- Media writes out of the browser: **done for the storage plane** in Phase 6 (`media_assets`, the R2
+  bucket, no `supabase.storage` call left in `src/`), **not done** for the editorial plane — `POST /media`
+  and friends are still declared-and-unimplemented, so an article row is still inserted from the client
+  and only its `image_url` goes through the Worker.
+- The rest of the move of writes out of the browser and into Workers (Phase 2), after which most
+  client-facing write policies can be narrowed to `service_role`-only.

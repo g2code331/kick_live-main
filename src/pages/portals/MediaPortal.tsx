@@ -7,6 +7,7 @@ import {
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
 import MediaPublisher from './shared/MediaPublisher';
+import { assetUrl } from '../../lib/media/assets';
 
 interface MediaPortalProps {
   onNavigate: (page: string) => void;
@@ -376,7 +377,7 @@ function ArticleRow({ article, onToggle, onEdit, onDelete }: {
       {/* Thumbnail */}
       <div className="w-14 h-14 rounded-xl overflow-hidden shrink-0 border border-white/5">
         <img
-          src={article.image_url || FALLBACK_IMG}
+          src={assetUrl(article.image_url, FALLBACK_IMG)}
           alt={article.title}
           className="w-full h-full object-cover"
           onError={e => { e.currentTarget.src = FALLBACK_IMG; }}

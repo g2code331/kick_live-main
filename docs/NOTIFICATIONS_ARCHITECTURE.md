@@ -365,7 +365,9 @@ ones (`kicklive_lifecycle_event_for` writes `half_time` / `second_half_start` / 
 the event table covers every row here and no second hook on `matches` is needed. And it does not notify on
 `match_abandoned`, even though abandonment is arguably the most serious moment of all: the brief's
 authoritative list stops at `MATCH_ENDED`, so adding it would be a notification nobody asked for. It is listed
-in §21 as a Phase 6 decision with its own category and default, not slipped in under `system`.
+in §21 as a Phase 7 decision with its own category and default, not slipped in under `system`. (This said
+"Phase 6" when it was written; media on R2 took that number in the meantime and advertising moved to Phase 7
+— see `PRODUCTION_MIGRATION_PLAN.md`.)
 | admin route `POST /admin/notifications/broadcast` | `announcement` or `system` | the audience the admin selected, capped (§14) | yes | admin-supplied title/body, validated (length, no URL in `metadata` beyond known keys) |
 
 Deliberately **not** in this table: goal-of-the-week marketing, "someone else scored in your league" (that is
@@ -714,7 +716,8 @@ Required before any push leaves this code, in order, each one verifiable:
    `match:<id>`/`team:<id>` topics stay a documented extension point in `notification_topics`, not created
    here).
 
-Known narrowings to revisit in Phase 6, none of which is a secret: no follow/team-subscription audience yet
+Known narrowings to revisit in Phase 7 (the number was Phase 6 when this was written; media on R2 took it — see
+`PRODUCTION_MIGRATION_PLAN.md`), none of which is a secret: no follow/team-subscription audience yet
 (§13.1), no `match:<id>` topics (each match fan-out is a per-device send; topics become worth their
 management cost above roughly the point where per-job recipient counts exceed FCM's 500-per-message batch
 comfortably, which is a _measurement_, not a guess), no email/SMS channel despite `channels` being ready for

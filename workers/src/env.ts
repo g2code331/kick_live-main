@@ -52,8 +52,9 @@ export interface Env {
 
   /**
    * Declared in Phase 2, because `middleware/ratelimit.ts` reads it and degrades to an in-isolate counter when
-   * it is absent. R2 (media) remains deliberately undeclared: scaffolding a binding with no code behind it
-   * produces a config that looks real and a deploy that fails. Queues became real in Phase 5, below.
+   * it is absent. R2 (media) stayed undeclared until Phase 6 gave it code, for the reason stated there:
+   * scaffolding a binding with nothing behind it produces a config that looks real and a deploy that fails.
+   * Queues became real in Phase 5, below.
    */
   readonly RATE_LIMIT_KV?: KVNamespace | undefined;
 
@@ -96,6 +97,25 @@ export interface Env {
    * worker opens, so this is only needed when the click may land outside the SPA's own origin.
    */
   readonly NOTIFICATIONS_LINK_BASE?: string | undefined;
+
+  // ── Phase 6 · media on R2 ─────────────────────────────────────────────────
+  //
+  // Two fields, and neither is a credential — that is the point of the phase. The bucket is reached through a
+  // binding, so there is no access key to store, rotate or leak, and `workers/wrangler.toml` names a *different*
+  // bucket per environment for the same reason it names a different queue: a shared bucket is a shared outage.
+
+  /**
+   * R2 bucket binding (`r2_buckets[].binding`). Optional because an environment without it still deploys: the
+   * media routes answer 503 naming the missing binding instead of half-working against a bucket nobody made.
+   */
+  readonly MEDIA_BUCKET?: R2Bucket | undefined;
+
+  /**
+   * Ceiling on one uploaded file, in bytes, across every category (25 MB default). Per-kind caps are tighter and
+   * live in `lib/mediaPolicy.ts`; this is the outer bound that stops a category with a generous limit from
+   * becoming a request that outlives the Worker's own patience.
+   */
+  readonly MEDIA_MAX_BYTES?: string | undefined;
 }
 
 export class ConfigError extends Error {

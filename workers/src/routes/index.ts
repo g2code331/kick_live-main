@@ -48,6 +48,17 @@ import {
   handleNotificationPreferencesRead,
   handleNotificationPreferencesWrite,
 } from "./notifications.ts";
+import {
+  handleMediaAssetDelete,
+  handleMediaAssetRead,
+  handleMediaAssetRestore,
+  handleMediaConfig,
+  handleMediaDiagnostics,
+  handleMediaEntityAssets,
+  handleMediaMigration,
+  handleMediaSweep,
+  handleMediaUpload,
+} from "./media.ts";
 
 export interface HandlerContext {
   readonly request: Request;
@@ -104,6 +115,17 @@ export const HANDLERS: Record<string, RouteHandler> = {
   "GET /notifications/config": handleNotificationConfig,
   "GET /notifications/diagnostics": handleNotificationDiagnostics,
   "POST /admin/notifications/broadcast": handleNotificationBroadcast,
+
+  // ── media plane on R2 (Phase 6) ────────────────────────────────────────────
+  "POST /media/uploads": handleMediaUpload,
+  "GET /media/assets/*": handleMediaAssetRead,
+  "GET /media/config": handleMediaConfig,
+  "GET /media/entities/:kind/:id": handleMediaEntityAssets,
+  "DELETE /media/assets/:id": handleMediaAssetDelete,
+  "POST /media/assets/:id/restore": handleMediaAssetRestore,
+  "GET /media/diagnostics": handleMediaDiagnostics,
+  "POST /media/sweep": handleMediaSweep,
+  "POST /media/migration": handleMediaMigration,
 };
 
 export async function dispatchRoute(ctx: HandlerContext, match: Matched): Promise<Response> {

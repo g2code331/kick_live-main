@@ -368,11 +368,25 @@ operator's tab staying open.
 components — which is why the desktop shell shows broken art offline, and why the CSP needs
 `img-src` exceptions). Player/team photos are `photo_url`/`logo_url` columns on the rows.
 
-Target: R2 bucket `kicklive-media`, `POST /v1/uploads/sign` returning a short-lived PUT (size + MIME
-bounds, key prefix by kind), public reads through `GET /v1/uploads/:key` with immutable cache keys and
-on-the-fly resizing, and rows storing `media_key` rather than an absolute URL so a bucket move is a
-config change. Until then, the R2 columns keep whatever the publisher pasted, and the Phase 1 policy
-change (`TO authenticated`) at least stops anonymous write attempts.
+**Superseded by Phase 6 — this paragraph is the original plan, kept so the change is auditable.** What
+was actually built differs in three ways, each for a reason (`docs/R2_MEDIA_ARCHITECTURE.md` is the
+current document):
+
+- **No signed uploads.** A presigned PUT cannot create a registry row, count against a quota, dedupe a
+  duplicate, or sniff a format, and it splits publish-and-record into two failure windows. The browser
+  posts the file to the Worker (`POST /api/media/uploads`, capability `profile.read_own`) and Postgres
+  decides the key, the version, the ownership and the visibility _before_ a byte moves. `POST
+/v1/uploads/sign` and `GET /v1/uploads/:key` were deleted as designs, not left as 501 stubs.
+- **No `media_key` column.** Rows keep storing a URL in the eight `*_url` columns they already have; what
+  changed is that the value is now the _relative_ path `/api/media/assets/<kind>/<id>/original/v<n>-<hash8>.<ext>`,
+  resolved at render time by `assetUrl()`. A bucket move is still a config change (and a legacy absolute
+  Supabase or unsplash URL still renders, which is why no row had to be migrated to keep working).
+- **No on-the-fly resizing.** An unbounded CPU-bound transform behind a public URL is a denial-of-service
+  invitation; derived variants are a producer's job (`thumbnail/`, `og/` exist in the key space and the
+  registry refuses them until one exists). Reads are a Worker read-through with the immutable cache key
+  the plan wanted, ranges and ETags included.
+
+R2 is reached through a binding (`MEDIA_BUCKET`), so no media credential exists anywhere in the app.
 
 ## 13. Advertising (future, deliberately separate)
 

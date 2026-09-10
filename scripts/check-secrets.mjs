@@ -46,6 +46,16 @@ const SECRETS = [
   },
   { name: "SUPABASE_JWT_SECRET", required: false, jobs: [], why: "Worker secret; used to verify the SPA bearer token in workers/src/middleware/auth.ts" },
   { name: "TURNSTILE_SECRET_KEY", required: false, jobs: [], why: "Worker secret; siteverify for signup + write routes (workers/src/middleware/turnstile.ts)" },
+  {
+    name: "FCM_SERVICE_ACCOUNT",
+    required: false,
+    jobs: [],
+    why: "Worker secret (Phase 5). The downloaded Firebase service-account JSON, containing a private key. Set it with `npx wrangler secret put FCM_SERVICE_ACCOUNT`, never in wrangler.toml and never in a client build.",
+  },
+  // Phase 6 deliberately adds no secret here. R2 is reached through a *binding* (`MEDIA_BUCKET` in
+  // workers/wrangler.toml), so there is no access key to store, rotate, leak in a log, or bake into an
+  // artifact — and if this list ever grows a `MEDIA_ACCESS_KEY`, the design was abandoned and this comment
+  // is the thing that was supposed to stop it. See docs/R2_MEDIA_ARCHITECTURE.md §2.
 ];
 
 const REPO_ROOT_FOR_SCAN = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
@@ -90,6 +100,19 @@ export function scanSource(root = process.cwd()) {
   const findings = [];
   const urlLiteral = /["'`]https:\/\/([a-z0-9-]{12,})\.supabase\.(co|in|net)[\/"'`]/i;
   const jwtLiteral = /["']eyJ[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}["']/;
+  // Phase 5 and 6 additions. Each pattern is chosen to be *unambiguous*: a scanner that fires on a
+  // placeholder, a doc example or a base64 blob gets muted inside a week, which is worse than no scanner,
+  // because the green check reads as a claim. So: a PEM header, an AWS key id, a Supabase token prefix, a
+  // Firebase service-account field name, and an FCM legacy server key — not "high entropy strings".
+  const PATTERNS = [
+    { kind: "pem-private-key", re: /-----BEGIN [A-Z ]*PRIVATE KEY-----/, commentSensitive: true, note: "a private key in the tree; a service-account JSON is the usual shape" },
+    { kind: "service-account-json", re: /"type"\s*:\s*"service_account"/, note: "a downloaded Google service-account file; only `wrangler secret put FCM_SERVICE_ACCOUNT`" },
+    { kind: "service-account-client-email", re: /["']firebase-adminsdk-[A-Za-z0-9_-]+@/, note: "the client_email of a Firebase service account, which identifies the key to rotate" },
+    { kind: "aws-access-key-id", re: /\bAKIA[0-9A-Z]{16}\b/, note: "an AWS/S3 key. There is no reason for one here: R2 is a binding, not a credential" },
+    { kind: "supabase-token", re: /\bsb(?:p|secret)_[A-Za-z0-9]{20,}/, note: "a Supabase personal access key or dashboard secret" },
+    { kind: "fcm-legacy-server-key", re: /\bAAAA[A-Za-z0-9_-]{7,}:APA9[0-9A-Za-z_-]{20,}/, note: "a legacy FCM server key; the v1 API uses the service account instead" },
+  ];
+  const isCommentLine = (line) => /^\s*(\/\/|\*|#|--|\/\*)/.test(line);
 
   const walk = (dir) => {
     let entries;
@@ -105,14 +128,27 @@ export function scanSource(root = process.cwd()) {
         walk(full);
         continue;
       }
-      if (!/\.(ts|tsx|js|jsx|mjs|cjs|html|css|json)$/.test(entry.name)) continue;
+      // `.pem`/`.key`/`.p12` are in the list because that is where a real key lives; they are not text
+      // files, and the extension filter is what would otherwise let them walk straight through the audit.
+      if (!/\.(ts|tsx|js|jsx|mjs|cjs|html|css|json|pem|key|p12|pfx)$/.test(entry.name)) continue;
       if (/\.example$/i.test(entry.name)) continue;
       const text = fs.readFileSync(full, "utf8");
+      const isKeyMaterial = /\.(pem|key|p12|pfx)$/i.test(entry.name);
       const lines = text.split("\n");
       lines.forEach((line, i) => {
         const url = urlLiteral.exec(line);
         if (url) findings.push({ file: path.relative(root, full), line: i + 1, kind: "hardcoded-supabase-url", detail: `project ref ${url[1]}` });
         if (jwtLiteral.test(line)) findings.push({ file: path.relative(root, full), line: i + 1, kind: "hardcoded-jwt", detail: line.trim().slice(0, 24) + "…" });
+        for (const pattern of PATTERNS) {
+          // A documented example of a key header is not a key. Skipping comment lines keeps this repo's own
+          // prose (workers/src/services/fcm.ts names the PEM format it parses) from tripping the rule, at the
+          // known cost that a key *commented out* in a source file is not reported — history is where that one
+          // lives, and it is `git filter-repo`'s problem, not a grep's.
+          // …but the exemption is disabled inside a key file, where `-----BEGIN …` is the *format*, and a
+          // PEM banner line otherwise looks exactly like a SQL comment to this heuristic.
+          if (pattern.commentSensitive && !isKeyMaterial && isCommentLine(line)) continue;
+          if (pattern.re.test(line)) findings.push({ file: path.relative(root, full), line: i + 1, kind: pattern.kind, detail: pattern.note });
+        }
       });
     }
   };

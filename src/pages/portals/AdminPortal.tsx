@@ -17,6 +17,7 @@ import TeamDashboard from './admin/TeamDashboard';
 import TableStatistics from './admin/TableStatistics';
 import MultiMatchQueue from './admin/MultiMatchQueue';
 import SeasonManagement from './admin/SeasonManagement';
+import { assetUrl } from '../../lib/media/assets';
 
 type AdminTab = 'overview' | 'users' | 'matches' | 'teams' | 'media' | 'competitions' | 'tables' | 'settings';
 
@@ -431,7 +432,7 @@ export default function AdminPortal({ onNavigate }: { onNavigate: (page: string)
                     <div key={item.id} className="glass rounded-2xl overflow-hidden group cursor-pointer">
                       <div className="h-36 lg:h-40 overflow-hidden">
                         <img
-                          src={item.image_url || 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=400'}
+                          src={assetUrl(item.image_url, 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=400')}
                           alt={item.title}
                           className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
                           onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=400'; }}

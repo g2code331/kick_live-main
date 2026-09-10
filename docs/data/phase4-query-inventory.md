@@ -10,7 +10,7 @@ problems at scale, which is exactly what a scale that has not arrived yet cannot
 
 | total sites | reads | writes | rpc | `select('*')` | unbounded | files | tables | pollers |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 211 | 119 | 92 | 8 | 32 | 39 | 32 | 22 | 2 |
+| 209 | 117 | 92 | 8 | 30 | 37 | 32 | 22 | 2 |
 
 ## By table
 
@@ -21,8 +21,8 @@ problems at scale, which is exactly what a scale that has not arrived yet cannot
 | `players` | 16 | 5 | 6 | 7 |
 | `match_events` | 8 | 10 | 6 | 6 |
 | `match_commentary` | 9 | 7 | 5 | 5 |
-| `media` | 10 | 4 | 2 | 2 |
 | `competitions` | 9 | 4 | 2 | 2 |
+| `media` | 8 | 4 | 0 | 0 |
 | `match_statistics` | 6 | 3 | 0 | 0 |
 | `profiles` | 5 | 2 | 1 | 0 |
 | `seasons` | 2 | 4 | 1 | 1 |
@@ -63,7 +63,6 @@ problems at scale, which is exactly what a scale that has not arrived yet cannot
 | `src/pages/portals/admin/CompetitionWizard.tsx` | 1 | 2 | 0 | 0 | `competitions` `matches` `teams` |
 | `src/pages/portals/admin/MatchCreator.tsx` | 2 | 1 | 0 | 0 | `competitions` `matches` `teams` |
 | `src/pages/portals/admin/TableStatistics.tsx` | 3 | 0 | 2 | 1 | `competitions` `matches` `teams` |
-| `src/pages/portals/shared/MediaPublisher.tsx` | 2 | 1 | 2 | 2 | `media` |
 | `src/pages/portals/admin/FixturesViewer.tsx` | 0 | 2 | 0 | 0 | `matches` |
 | `src/pages/portals/admin/MatchControlOrganized.tsx` | 2 | 0 | 2 | 2 | `competitions` `matches` |
 | `src/pages/portals/admin/TeamSquadDashboard.tsx` | 1 | 1 | 0 | 0 | `players` |
@@ -75,6 +74,7 @@ problems at scale, which is exactly what a scale that has not arrived yet cannot
 | `src/pages/portals/admin/MatchControlSimple.tsx` | 0 | 1 | 0 | 0 | `matches` |
 | `src/pages/portals/admin/TeamAdder.tsx` | 0 | 1 | 0 | 0 | `teams` |
 | `src/pages/portals/admin/UserManagement.tsx` | 1 | 0 | 0 | 0 | `profiles` |
+| `src/pages/portals/shared/MediaPublisher.tsx` | 0 | 1 | 0 | 0 | `media` |
 
 ## Components that own their own polling
 
@@ -88,17 +88,17 @@ documented in `docs/PRODUCTION_ARCHITECTURE.md` §17, not page polling.
 
 ## Unbounded reads
 
-- `src/pages/portals/AdminPortal.tsx:54` — `teams` — id
-- `src/pages/portals/TeamOwnerPortal.tsx:320` — `matches` — id, home_team_id, away_team_id, home_score, away_score, status, start_time, minute, homeTe
-- `src/pages/portals/TeamOwnerPortal.tsx:541` — `players` — *
-- `src/pages/portals/TeamOwnerPortal.tsx:714` — `matches` — id, home_team_id, away_team_id, home_score, away_score, status, start_time, minute, homeTe
-- `src/pages/portals/TeamOwnerPortal.tsx:777` — `matches` — id, home_team_id, away_team_id, home_score, away_score, status, minute, start_time, homeTe
-- `src/pages/portals/TeamOwnerPortal.tsx:856` — `matches` — home_team_id, away_team_id, home_score, away_score, status
-- `src/pages/portals/TeamOwnerPortal.tsx:857` — `teams` — id, name, short_name, primary_color
-- `src/pages/portals/TeamOwnerPortal.tsx:941` — `players` — *
-- `src/pages/portals/TeamOwnerPortal.tsx:942` — `matches` — home_team_id, away_team_id, home_score, away_score, status
-- `src/pages/portals/TeamOwnerPortal.tsx:1069` — `players` — *
-- `src/pages/portals/TeamOwnerPortal.tsx:1339` — `team_news` — *
+- `src/pages/portals/AdminPortal.tsx:55` — `teams` — id
+- `src/pages/portals/TeamOwnerPortal.tsx:321` — `matches` — id, home_team_id, away_team_id, home_score, away_score, status, start_time, minute, homeTe
+- `src/pages/portals/TeamOwnerPortal.tsx:542` — `players` — *
+- `src/pages/portals/TeamOwnerPortal.tsx:715` — `matches` — id, home_team_id, away_team_id, home_score, away_score, status, start_time, minute, homeTe
+- `src/pages/portals/TeamOwnerPortal.tsx:778` — `matches` — id, home_team_id, away_team_id, home_score, away_score, status, minute, start_time, homeTe
+- `src/pages/portals/TeamOwnerPortal.tsx:857` — `matches` — home_team_id, away_team_id, home_score, away_score, status
+- `src/pages/portals/TeamOwnerPortal.tsx:858` — `teams` — id, name, short_name, primary_color
+- `src/pages/portals/TeamOwnerPortal.tsx:942` — `players` — *
+- `src/pages/portals/TeamOwnerPortal.tsx:943` — `matches` — home_team_id, away_team_id, home_score, away_score, status
+- `src/pages/portals/TeamOwnerPortal.tsx:1070` — `players` — *
+- `src/pages/portals/TeamOwnerPortal.tsx:1340` — `team_news` — *
 - `src/pages/portals/admin/MatchControl.tsx:126` — `match_commentary` — *
 - `src/pages/portals/admin/MatchControlDashboard.tsx:111` — `match_events` — *, player:players(name), team:teams(short_name)
 - `src/pages/portals/admin/MatchControlNew.tsx:112` — `match_events` — *
@@ -120,8 +120,6 @@ documented in `docs/PRODUCTION_ARCHITECTURE.md` §17, not page polling.
 - `src/pages/portals/admin/TeamDashboard.tsx:71` — `teams` — id, name, short_name, city, venue, coach, primary_color, secondary_color, status, owner_id
 - `src/pages/portals/admin/TeamDashboard.tsx:87` — `profiles` — id, username, email
 - `src/pages/portals/admin/TeamDashboard.tsx:96` — `teams` — id, name, short_name, city, primary_color, secondary_color, created_at
-- `src/pages/portals/shared/MediaPublisher.tsx:40` — `media`
-- `src/pages/portals/shared/MediaPublisher.tsx:46` — `media`
 - `src/pages/portals/shared/PlayerCreator.tsx:24` — `teams` — id, name
 - `src/lib/MatchAutomation.ts:70` — `matches` — *
 - `src/lib/MatchAutomation.ts:157` — `match_events` — *

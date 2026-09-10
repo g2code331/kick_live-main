@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
+import { assetUrl } from '../../lib/media/assets';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type PortalTab = 'dashboard' | 'profile' | 'players' | 'matches' | 'fixtures' | 'table' | 'stats' | 'lineup' | 'gallery' | 'news' | 'settings';
@@ -1299,7 +1300,7 @@ function GalleryTab({ team, onToast }: { team: any; onToast: any }) {
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
           {images.map((img, i) => (
             <div key={i} className="group relative rounded-2xl overflow-hidden border border-white/5 aspect-square cursor-pointer" onClick={() => setPreview(img.url)}>
-              <img src={img.url} alt={img.caption || ''} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" onError={e => { (e.target as HTMLImageElement).src = 'https://via.placeholder.com/300x300?text=Photo'; }} />
+              <img src={assetUrl(img.url, 'https://via.placeholder.com/300x300?text=Photo')} alt={img.caption || ''} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" onError={e => { (e.target as HTMLImageElement).src = 'https://via.placeholder.com/300x300?text=Photo'; }} />
               <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-all flex items-end p-3">
                 {img.caption && <p className="text-white text-xs font-bold opacity-0 group-hover:opacity-100 transition-opacity">{img.caption}</p>}
               </div>

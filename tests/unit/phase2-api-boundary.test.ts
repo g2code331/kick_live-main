@@ -586,15 +586,44 @@ describe("phase2 · environment separation", () => {
       active.some((l) => l === "[vars]"),
       "development is the default block",
     );
-    // Phase 2's rule was "no binding without code behind it". Phase 5 keeps the rule and satisfies the
-    // condition — the queue is active because `index.ts` exports a `queue` handler and `queues/notifications.ts`
-    // consumes it — while D1, R2 and a second KV namespace stay forbidden for the same reason they were
-    // forbidden then: a config that looks real and a deploy that fails, or a second copy of the data.
+    // Phase 2's rule was "no binding without code behind it". Phase 5 kept it and satisfied the condition — the
+    // queue is active because `index.ts` exports a `queue` handler and `queues/notifications.ts` consumes it.
+    // Phase 6 activated R2 on the same terms, so the rule is now expressed per binding rather than as one
+    // forbidden list: a binding is legal exactly when a handler reads `env.<NAME>` and nothing else. D1 stays
+    // forbidden (it would be a second copy of the match data with a sync job in the middle), and so does a
+    // second KV namespace.
     assert.deepEqual(
-      active.filter((l) => /^\[\[(d1_databases|r2_buckets|kv_namespaces)\]\]$/.test(l)),
+      active.filter((l) => /^\[\[(d1_databases|kv_namespaces)\]\]$/.test(l)),
       [],
-      "no binding for infrastructure that does not exist yet",
+      "no D1 and no extra KV namespace: neither has code that needs it",
     );
+    assert.deepEqual(
+      active.filter((l) => l === "[[r2_buckets]]"),
+      ["[[r2_buckets]]"],
+      "the media bucket is bound once at the top level (dev)",
+    );
+    for (const env of ["staging", "production"]) {
+      assert.ok(
+        active.some((l) => l === `[[env.${env}.r2_buckets]]`),
+        `${env} needs its own media bucket: a named environment inherits no bindings`,
+      );
+    }
+    // The pairing that makes a binding meaningful instead of decorative: the name in the config has to be the
+    // name the code reads. Checked per block type, because a file-level regex over `binding = "X"` cannot tell
+    // an R2 bucket from a queue producer and would pass on a copy-paste that binds the wrong name to the right
+    // table.
+    const blocks = toml.split(/\n(?=\[)/);
+    const r2Blocks = blocks.filter((b) => /^\[\[(?:env\.[a-z]+\.)?r2_buckets\]\]/.test(b));
+    assert.equal(r2Blocks.length, 3, "one r2_buckets block per environment");
+    for (const block of r2Blocks) {
+      assert.match(block, /^binding = "MEDIA_BUCKET"$/m, "every media bucket binds the name env.MEDIA_BUCKET");
+      assert.match(block, /^bucket_name = "kicklive-media[^"]*"$/m, "and names a kicklive media bucket");
+    }
+    const mediaSources = [read("workers/src/routes/media.ts"), read("workers/src/services/mediaStore.ts")].join("\n");
+    assert.ok(mediaSources.includes("env.MEDIA_BUCKET"), "MEDIA_BUCKET is bound but nothing reads env.MEDIA_BUCKET");
+    const bucketNames = [...toml.matchAll(/^bucket_name = "([^"]+)"$/gm)].map((m) => m[1]!);
+    assert.equal(bucketNames.length, 3, "one bucket per environment, dev included");
+    assert.equal(new Set(bucketNames).size, 3, "two environments sharing one bucket is how a dev upload overwrites a production logo");
     assert.deepEqual(
       active.filter((l) => /^\[\[queues\.(producers|consumers)\]\]$/.test(l)),
       ["[[queues.producers]]", "[[queues.consumers]]"],
@@ -624,7 +653,17 @@ describe("phase2 · environment separation", () => {
     // A queue consumer without a retry path is a queue that loses messages on the floor. The Phase 5 design
     // says the queue is a wake-up and the database is the record, and the config has to match that claim.
     const tomlBody = toml;
-    assert.equal((tomlBody.match(/crons = \["\*\/5 \* \* \* \*"\]/g) ?? []).length, 3, "the five-minute sweep must be declared once per environment, or a lost message is a lost notification");
+    assert.equal(
+      (tomlBody.match(/crons = \["\*\/5 \* \* \* \*", "17 \* \* \* \*"\]/g) ?? []).length,
+      3,
+      "both sweeps must be declared once per environment, or a lost message is a lost notification and stale media never expires",
+    );
+    // The cron the Worker branches on is a constant, so a config edit that renames the schedule cannot silently
+    // stop retention: one of the two sides fails.
+    const mediaStore = read("workers/src/services/mediaStore.ts");
+    const cronConstant = /export const MEDIA_SWEEP_CRON = "([^"]+)"/.exec(mediaStore)?.[1];
+    assert.equal(cronConstant, "17 * * * *", "MEDIA_SWEEP_CRON must equal the second cron in every environment");
+    assert.match(read("workers/src/index.ts"), /controller\.cron === MEDIA_SWEEP_CRON/, "and the scheduled handler must dispatch on it");
     assert.match(tomlBody, /max_retries = 6/, "queue retries and the job's own attempts are separate budgets; both must be finite");
     assert.match(tomlBody, /dead_letter_queue/, "poison messages land somewhere a human can read");
     const entry = read("workers/src/index.ts");

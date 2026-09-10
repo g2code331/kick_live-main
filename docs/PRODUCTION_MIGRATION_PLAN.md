@@ -105,6 +105,11 @@ the same match converge.
 
 ## Phase 4 — media plane and background jobs
 
+> **Media, as written here, was superseded before it was ever built.** The media plane became Phase 6 and
+> took a different shape on three points — no signed uploads, no `media_key` columns, no resize-on-read —
+> for the reasons in `docs/R2_MEDIA_ARCHITECTURE.md` §3, §5 and §10. The queue half of this phase moved to
+> Phase 5. Read this paragraph as history; read Phase 6 as the present.
+
 R2 with signed uploads (`POST /v1/uploads/sign`), image resizing on read, `media_key` columns replacing
 pasted URLs; `kicklive-jobs` queue for standings recompute, media optimisation and fixture imports,
 with a dead-letter queue. `MatchAutomation` and `CompetitionEngine` move into the consumer — the
@@ -150,7 +155,65 @@ is tested against a mock delivery adapter. "A goal reaches a phone" additionally
 (Firebase project, service-account secret, queue ids, migration applied) and has **not** been verified here —
 no Postgres, no Cloudflare queue and no browser in this environment. Not configured ≠ working.
 
-## Phase 6 — advertising and sponsorship
+## Phase 6 — media on R2 🟡 code done, ⚠ migration not applied, ⚠ R2 buckets not created
+
+Design, decisions and honest status: **`docs/R2_MEDIA_ARCHITECTURE.md`**. That document, not this
+paragraph, is what to read before touching the media plane; this entry exists so the phase order and
+the numbering collision are recorded.
+
+The plan above changed in one place: **the media plane moves out of Phase 4** (Phase 4 as written was
+"data architecture, caching and performance" plus a queue that Phase 5 then claimed) **and becomes its
+own phase**, because the storage change is the one that touches every portal's write path and deserves
+its own rollback. What shipped, in order:
+
+- **Schema (additive only)** — `media_assets` (the registry: key, version, digest, sniffed type,
+  dimensions, visibility, status, `source_url` for migration lineage, one timestamp per transition) and
+  insert-only `media_operations`; `public.can_manage_team(int)` so ownership is answerable in SQL; 16
+  `kicklive_*` functions holding authorization, quota, versioning and retention. RLS enabled with **no
+  policies and no client grant** — the functions are the interface. The eight existing `*_url` columns
+  are untouched, which is what keeps ~35 read sites and every legacy absolute URL working.
+- **Worker** — nine routes (`POST /media/uploads`, `GET /media/assets/*`, `GET /media/config`,
+  `GET /media/entities/:kind/:id`, `DELETE /media/assets/:id[?purge=true]`, `POST /media/assets/:id/restore`,
+  `GET /media/diagnostics`, `POST /media/sweep`, `POST /media/migration`), a read-through with per-object
+  cache policy, and `mediaStore.ts` as the only module that touches a bucket. `POST /uploads/sign` and
+  `GET /uploads/:key` deleted: a signature the client holds cannot carry a registry row, a quota or a
+  format check, and it splits "publish" into two failure windows (architecture note §3).
+- **No media credential exists** — R2 is bound (`[[r2_buckets]]` → `MEDIA_BUCKET`) once per environment
+  with three distinct buckets, so there is no access key to store, leak or rotate. `scripts/check-secrets.mjs`
+  now also fails on PEM/service-account/AWS/Supabase-token shapes and scans `.pem|.key|.p12|.pfx`, with the
+  comment-line exemption disabled inside key files.
+- **Write path** — magic-byte sniffing (the declared MIME is never believed), markup refused outright (no
+  SVG, at any size, for any role), per-kind size caps, a per-role 24 h quota enforced in the reservation,
+  content-hash dedupe, an entity row predicate for authorization (own club / own article / self / staff),
+  and publish-or-don't: the entity's URL moves only in the transaction that marks the object ready.
+- **Retention** — a version never overwrites a key, so replacement needs no cache purge; superseded and
+  soft-deleted objects stay restorable for 30 days; `?purge=true` is admin-only and marks the row before
+  the object is deleted so a failure becomes a reportable orphan; an hourly sweep expires stale
+  reservations and names what it would delete before deleting it. SQL computes the difference, the
+  Worker lists and deletes — neither can do it alone, and both halves are testable that way.
+- **Frontend** — `MediaPublisher` now saves first and uploads second (an interrupted upload leaves an
+  editable article, not an ownerless object), with real progress, cancel and retry; `assetUrl()` resolves
+  stored relative paths at render time and passes external URLs through; six render sites wrapped; no
+  `supabase.storage` call remains anywhere in `src/` (a test census enforces it).
+- **Tests** — 38 unit (`tests/unit/phase6-media.test.ts`: the refusal table, key derivation, cache-class
+  rules, policy↔SQL agreement on kinds/columns/quotas/ceilings, the migration read as a document, route and
+  browser-bundle censuses, the secret scanner against a fixture tree) and 30 integration
+  (`tests/integration/media-upload.test.ts`, driving the real Worker entry with a Map-backed fake bucket and a
+  fake PostgREST so the assertions are about what the Worker _asked the database_). None needs cloud
+  credentials.
+
+**Not done, and said so rather than hidden**: derived variants (no producer yet), resize-on-read, video
+uploads (external links stay, on purpose), an avatar UI (nothing renders `avatar_url` today), the
+`teams.gallery` upload path, and deleting legacy Supabase Storage objects (they are the rollback). The
+numbering collision this creates with the advertising phase below is resolved in favour of history:
+advertising becomes **Phase 7**, still unstarted, and its prefixes stay reserved in the key space rather
+than present-but-empty in the schema.
+
+**The remaining Phase 6 work is a person, not a patch**: create the three R2 buckets, apply
+`supabase/migrations/20260912120000_phase6_r2_media.sql` to staging, deploy, then run the migration route
+dry-run → real, per kind, until `still_url_pointing_at_storage` is zero. Steps in architecture note §16.
+
+## Phase 7 — advertising and sponsorship (was Phase 6; nothing implemented)
 
 Separate concepts, separate tables, separate capability families (architecture §13–§14):
 `advertisers/ad_campaigns/ad_placements/ad_placement_events` and

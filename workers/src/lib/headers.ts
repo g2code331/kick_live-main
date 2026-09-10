@@ -17,10 +17,19 @@ export const SECURITY_HEADERS: Record<string, string> = {
 /** Default for anything that is not explicitly edge-cacheable. */
 export const NO_STORE = { "cache-control": "no-store" } as const;
 
-/** Declared by a route in `router.ts`; decides whether a shared cache may hold the response. */
-export type CacheClass = "edge" | "private" | "none";
+/**
+ * Declared by a route in `router.ts`; decides whether a shared cache may hold the response.
+ *
+ * `handler` was added for Phase 6's read-through: a stored object's policy depends on the
+ * object (an immutable versioned key for a year, `private, no-store` for somebody's avatar),
+ * and no class a route can name statically describes that. The handler therefore sets
+ * `cache-control` itself and the entry point leaves it alone — see `finalise`, which still
+ * forces `no-store` when a `handler` route forgets to say anything.
+ */
+export type CacheClass = "edge" | "private" | "none" | "handler";
 
 export function cacheHeadersFor(cache: CacheClass): Record<string, string> {
+  if (cache === "handler") return {};
   if (cache === "edge") {
     // 30 s browser / 60 s edge, and stale-while-revalidate so a fixture list keeps answering while it
     // refreshes. Scores are fresher than this only via the Phase 3 stream, never via this route.

@@ -36,7 +36,8 @@ export interface RouteDef {
   readonly rateLimit?: RateLimitClass;
   /**
    * 'edge' = cacheable at Cloudflare (public, no per-user content); 'private' = must not be cached
-   * by a shared cache; 'none' = write or streaming route, no caching either way.
+   * by a shared cache; 'none' = write or streaming route, no caching either way; 'handler' = the
+   * handler sets `cache-control` itself and `finalise` leaves it alone (per-object media policy).
    */
   readonly cache: CacheClass;
   readonly phase: 2 | 3 | 4 | 5 | 6;
@@ -539,22 +540,115 @@ export const ROUTES: readonly RouteDef[] = [
   },
 
   // ── media plane (R2) ──────────────────────────────────────────────────────
+  //
+  // Phase 6 replaced the two signed-upload stubs that used to sit here. The design changed on
+  // purpose: a presigned R2 PUT would put a size and type bound in the *signature*, and therefore
+  // in the client's hands, while the object still arrived with no registry row, no version, and no
+  // place for the database to decide ownership. Uploading through the Worker costs one extra
+  // request and buys the audit trail, the quota, the dedupe and the "no half-published entity"
+  // guarantee, all of which are the parts that were ever hard.
   {
     method: "POST",
-    pattern: "/uploads/sign",
-    capability: "media.publish",
+    pattern: "/media/uploads",
+    capability: "profile.read_own",
     cache: "none",
     rateLimit: "mutation",
-    phase: 4,
-    summary: "Signed R2 PUT for an image/video upload with size and MIME bounds.",
+    phase: 6,
+    implemented: true,
+    summary: "Store one image for an entity: sniff, reserve, write to R2, publish in that order.",
+    invariants:
+      "multipart with a `file` part; the body names a kind and an entity id, never a key, a bucket, a version or a visibility. Type comes from magic bytes, not the declared MIME. `kicklive_reserve_asset_upload` enforces ownership per kind and the per-role 24 h quota before any byte is written; a failed bucket write closes the reservation as `failed` and leaves the entity row untouched.",
   },
   {
     method: "GET",
-    pattern: "/uploads/:key",
+    pattern: "/media/assets/*",
+    capability: "public.read",
+    cache: "handler",
+    rateLimit: "public",
+    phase: 6,
+    implemented: true,
+    summary: "Read-through for a stored object, with the key carried in the path.",
+    invariants:
+      "The captured path is validated against the object-key charset and refused for `..` before storage is asked. Public assets answer anonymously; a private asset requires a session and `kicklive_asset_authorized`, so visibility is checked per request rather than hidden behind an unguessable URL. `cache-control` is set by the handler per object: a versioned key is immutable, a private key is no-store, and the route class exists so the entry point does not overwrite either.",
+  },
+  {
+    method: "GET",
+    pattern: "/media/config",
     capability: "public.read",
     cache: "edge",
-    phase: 4,
-    summary: "R2 read-through with image resizing + immutable cache keys.",
+    rateLimit: "public",
+    phase: 6,
+    implemented: true,
+    summary: "The media policy: prefixes, per-kind size caps, accepted types, retention.",
+    invariants: "Reads the same table the upload path enforces, so a client can state the limit it will hit.",
+  },
+  {
+    method: "GET",
+    pattern: "/media/entities/:kind/:id",
+    capability: "profile.read_own",
+    cache: "none",
+    rateLimit: "authenticated",
+    phase: 6,
+    implemented: true,
+    summary: "Version history for one entity, newest first.",
+    invariants: "Filtered by the same ownership predicate that authorizes uploads; a caller who may not see the entity gets an empty list, not a 403 to probe with.",
+  },
+  {
+    method: "DELETE",
+    pattern: "/media/assets/:id",
+    capability: "profile.read_own",
+    cache: "none",
+    rateLimit: "mutation",
+    phase: 6,
+    implemented: true,
+    summary: "Soft-delete an asset; `?purge=true` (admin) also removes the object.",
+    invariants:
+      "Ownership re-checked in SQL. Soft by default, and the current version's URL column is cleared rather than left dangling. Purge marks the row first and deletes the object second, so a failure leaves a reportable orphan instead of a row claiming bytes that are still there.",
+  },
+  {
+    method: "POST",
+    pattern: "/media/assets/:id/restore",
+    capability: "profile.read_own",
+    cache: "none",
+    rateLimit: "mutation",
+    phase: 6,
+    implemented: true,
+    summary: "Bring back a soft-deleted or superseded version.",
+    invariants: "Only from `deleted`/`superseded`; restoring supersedes whatever took the slot, because the render path relies on exactly one current version.",
+  },
+  {
+    method: "GET",
+    pattern: "/media/diagnostics",
+    capability: "admin.settings_write",
+    cache: "none",
+    rateLimit: "authenticated",
+    phase: 6,
+    implemented: true,
+    summary: "Counts by status and kind, storage bytes, stale reservations, still-on-legacy-URL rows, orphan reconciliation.",
+    invariants: "Counts and keys only — never file contents. A listing is bounded and reports `complete: false` when it was not exhaustive, so a partial check is never read as a clean one.",
+  },
+  {
+    method: "POST",
+    pattern: "/media/sweep",
+    capability: "admin.settings_write",
+    cache: "none",
+    rateLimit: "mutation",
+    phase: 6,
+    implemented: true,
+    summary: "Run the retention step now: expire stale reservations, retire objects past retention, delete what the database named.",
+    invariants: "The same function the hourly cron runs, so the schedule is testable from a request. The database decides what is old; the Worker only deletes keys it was given.",
+  },
+  {
+    method: "POST",
+    pattern: "/media/migration",
+    capability: "admin.settings_write",
+    cache: "none",
+    rateLimit: "admin-blast",
+    phase: 6,
+    implemented: true,
+    summary: "Copy one kind's published Supabase Storage objects into R2, bounded per run, dry run by default.",
+    invariants:
+      "Only `https://<SUPABASE_PROJECT_REF>.supabase.co/storage/v1/object/{public,sign}/{media,avatars}/…` is fetched — an allowlist of one host, so a row value can never aim the Worker at an internal endpoint. External links (unsplash, YouTube) are skipped permanently by that same check. Each object is recorded through `kicklive_record_migrated_asset`, idempotent on the source URL, and an entity URL is repointed only for a successful copy.",
   },
 
   // ── advertising (placements and delivery) ─────────────────────────────────
@@ -596,11 +690,20 @@ export function matchRoute(method: string, pathname: string): Matched | null {
   for (const route of ROUTES) {
     if (route.method !== method) continue;
     const template = route.pattern.split("/").filter((p) => p.length > 0);
-    if (template.length !== parts.length) continue;
+    // A trailing `*` captures the rest of the path. Exactly one route needs it:
+    // `GET /media/assets/*` answers for objects whose keys contain slashes, and a
+    // media URL has to carry the key verbatim or the cache in front of it is
+    // useless. It is honoured only as the final segment, and the handler must
+    // validate what it captured — this hands over raw path text, not an
+    // identifier. Static routes are still listed earlier in ROUTES, so a literal
+    // `/media/assets/…` path never gets swallowed by the wildcard.
+    const wildcard = template[template.length - 1] === "*";
+    if (wildcard ? parts.length < template.length : template.length !== parts.length) continue;
 
     const params: Record<string, string> = {};
     let ok = true;
-    for (let i = 0; i < template.length; i++) {
+    const fixed = wildcard ? template.length - 1 : template.length;
+    for (let i = 0; i < fixed; i++) {
       const seg = template[i] ?? "";
       const actual = parts[i] ?? "";
       if (seg.startsWith(":")) params[seg.slice(1)] = decodeURIComponent(actual);
@@ -608,6 +711,11 @@ export function matchRoute(method: string, pathname: string): Matched | null {
         ok = false;
         break;
       }
+    }
+    if (ok && wildcard) {
+      const rest = parts.slice(template.length - 1);
+      if (rest.length === 0) continue;
+      params["*"] = rest.map((seg) => decodeURIComponent(seg)).join("/");
     }
     if (ok) return { route, params };
   }
