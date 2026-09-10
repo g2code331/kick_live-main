@@ -336,11 +336,7 @@ describe("phase5 · idempotency and durability", () => {
     // `on conflict (dedupe_key)` needs an index the planner will use, and a verify block that asserts the
     // unique exists has to be able to name it. An inline unnamed `unique` becomes
     // `notification_jobs_dedupe_key1`-style noise that a later migration cannot reference safely.
-    assert.match(
-      code,
-      /dedupe_key\s+text\s+not null\s+constraint notification_jobs_dedupe_key\s+unique/,
-      "jobs: one row per key, under a constraint name the checks can cite",
-    );
+    assert.match(code, /dedupe_key\s+text\s+not null\s+constraint notification_jobs_dedupe_key\s+unique/, "jobs: one row per key, under a constraint name the checks can cite");
     has(code, "constraint notification_deliveries_job_device_unique unique (job_id, device_id)", "deliveries: a queue redelivery cannot send twice");
     has(
       code,

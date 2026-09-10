@@ -82,8 +82,14 @@ Rules for files in this directory:
 
 Deliberately deferred, with the phase that owns it in `../docs/PRODUCTION_MIGRATION_PLAN.md`:
 
-- `advertisers`, `ad_campaigns`, `ad_placements`, `ad_placement_events`, `sponsor_packages`,
-  `sponsorships` — separate concepts, separate migrations, not folded into `media`/`competitions`.
+- ~~`advertisers` … `sponsorships`~~ — **written, still unapplied.** The plan's single combined phase became
+  two migrations, and the table names settled differently: Phase 7 (`20260913120000_phase7_advertising.sql`)
+  made `advertisers`, `advertisement_campaigns`, `advertisements`, `ad_placements`, `advertisement_placements`,
+  `ad_events`, `advertisement_analytics`; Phase 8 (`20260914120000_phase8_sponsorship.sql`) made `sponsors`,
+  `sponsorship_packages`, `sponsorships`, `sponsorship_status_transitions`, `sponsorship_config`. The two
+  systems are still not folded into `media`/`competitions`, and — the part that mattered enough to write twice
+  — not into each other: the only seam is `sponsorships.advertisement_campaign_id`, nullable, written by
+  nobody yet. Neither migration has been applied to a real project; both are idempotent and replay clean.
 - `predictions` / `fan_votes`: `src/pages/PredictionsPage.tsx` renders without a backing table, so
   predictions are currently browser-local. The table + RLS + (Phase 2) Worker endpoint are the fix.
 - ~~`device_tokens` for push~~ — written as `notification_devices` in the Phase 5 migration (token as a

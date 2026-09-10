@@ -456,9 +456,23 @@ export const MEDIA_SWEEP_CRON = "17 * * * *";
  * `auth.uid()`, and presenting the service role here would make every one of
  * them "admin", which is the exact failure mode Phase 1 was written to prevent.
  */
-export function repositoryFor(env: Env, token: string | null): MediaRepository {
+/**
+ * A caller-supplied `reserve`. Phase 8's sponsor upload and Phase 7's creative upload both need a reservation
+ * that is authorized by *their* rules — "may this admin write a logo onto this sponsor" is not the same
+ * question as "may this manager store a crest on this team", and each table answers it in its own function.
+ * Everything else in the pipeline is shared: the same finalize, the same resolve, the same retention, the
+ * same history. That is why the override is one function and not a second repository — a forked repository
+ * is a forked media contract, and the two copies would drift on exactly the steps that matter (the order of
+ * supersede-then-publish, and the fact that a failed write must close the reservation).
+ *
+ * The `call` it is handed is the *same* one the repository uses, on the same authenticated PostgREST client,
+ * so an override cannot escalate: it runs with the caller's token, not a service-role one.
+ */
+export type ReserveOverride = (input: ReserveInput, call: <T = unknown>(fn: string, args: Record<string, unknown>) => Promise<T>) => Promise<ReserveOutcome>;
+
+export function repositoryFor(env: Env, token: string | null, reserve?: ReserveOverride): MediaRepository {
   if (!token) throw new ApiError("UNAUTHENTICATED", 401, "A signed-in user is required to store or remove media.");
-  return repositoryFrom(supabaseAsUser(env, token));
+  return repositoryFrom(supabaseAsUser(env, token), reserve);
 }
 
 /**
@@ -476,7 +490,7 @@ export function sweepRepositoryFor(env: Env): Pick<MediaRepository, "sweep"> {
   };
 }
 
-function repositoryFrom(db: SupabaseRest): MediaRepository {
+function repositoryFrom(db: SupabaseRest, reserve?: ReserveOverride): MediaRepository {
   const call = async <T>(fn: string, args: Record<string, unknown>): Promise<T> => {
     // `call` throws an ApiError carrying the upstream text in `detail`, so a
     // Postgres RAISE becomes a structured 502 rather than a stack trace.
@@ -484,17 +498,19 @@ function repositoryFrom(db: SupabaseRest): MediaRepository {
   };
   return {
     reserve: (input) =>
-      call<ReserveOutcome>("kicklive_reserve_asset_upload", {
-        p_entity_kind: input.kind,
-        p_entity_id: input.entityId,
-        p_variant: input.variant,
-        p_content_type: input.contentType,
-        p_byte_size: input.byteSize,
-        p_sha256: input.sha256,
-        p_width: input.width,
-        p_height: input.height,
-        p_alt_text: input.alt,
-      }),
+      reserve
+        ? reserve(input, call)
+        : call<ReserveOutcome>("kicklive_reserve_asset_upload", {
+            p_entity_kind: input.kind,
+            p_entity_id: input.entityId,
+            p_variant: input.variant,
+            p_content_type: input.contentType,
+            p_byte_size: input.byteSize,
+            p_sha256: input.sha256,
+            p_width: input.width,
+            p_height: input.height,
+            p_alt_text: input.alt,
+          }),
     finalize: (assetId, outcome, extra) =>
       call<FinalizeOutcome>("kicklive_finalize_asset_upload", {
         p_asset_id: assetId,

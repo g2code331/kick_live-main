@@ -346,3 +346,409 @@ export async function runFlow({ query, log }) {
   log(`      ${ADMIN} flow complete`);
   return { failed };
 }
+
+/**
+ * Phase 8 · sponsorship, end to end.
+ *
+ * The shape of this flow is the shape of the brief: create a sponsor, create a package, associate them with
+ * a real target, activate, look at what a viewer gets, then make the relationship expire and look again. The
+ * assertions that matter most are the two the brief asks for in prose rather than in code — that a private
+ * contact field cannot be extracted from the public read, and that a cache is invalidated *because*
+ * something a viewer would see changed.
+ */
+export async function runSponsorshipFlow({ query, log = () => {} }) {
+  let failed = 0;
+  const ok = (label, pass, detail) => {
+    if (pass) log(`ok    ${label}`);
+    else {
+      failed += 1;
+      log(`FAIL  ${label}` + (detail === undefined ? "" : `  — ${JSON.stringify(detail).slice(0, 240)}`));
+    }
+  };
+  const rows = async (sql) => (await query(sql)).rows;
+  const one = async (sql) => (await rows(sql))[0] ?? null;
+  const str = (v) => `'${String(v).replace(/'/g, "''")}'`;
+  const rpc = async (fn, args = []) => {
+    const inner = args.map((a) => (a === null || a === undefined ? "null" : String(a))).join(", ");
+    const r = await one(`select (public.${fn}(${inner}))::jsonb as v`);
+    return r?.v ?? null;
+  };
+  const data = (o) => JSON.stringify(o).replace(/'/g, "''");
+  const asRole = async (role, uid = null) => {
+    await query(`set role ${role}`);
+    await query(`set request.jwt.claim.sub = ${uid ? str(uid) : "''"}`);
+  };
+  // A statement that runs as the migration owner and hands the role back. Only for things the app roles
+  // deliberately cannot do — `media_assets` is insert/select for `service_role` and nothing more, because
+  // Phase 6 makes every state change go through its own definer function. A test that needs to bend a row
+  // (to make an asset private, to break a state no function can produce) must not ask for a grant to do it:
+  // the grant would ship, and the boundary the phase exists to draw would be drawn around the test.
+  const asOwner = async (sql) => {
+    await query("reset role");
+    const out = await query(sql);
+    await query(`set role service_role`);
+    await query(`set request.jwt.claim.sub = ${str(ADMIN)}`);
+    return out;
+  };
+
+  const ADMIN = "11111111-1111-4111-8111-111111111111";
+  const FAN = "00000000-0000-4000-8000-000000000000";
+  await query("reset role");
+  // `auth.users` is Supabase's table; Phase 1's `handle_new_user` trigger makes the profile row, so the
+  // fixture inserts only the user and then promotes it — inserting a profile here would collide with the
+  // trigger's own row.
+  await query(`insert into auth.users (id, email) values ('${ADMIN}', 'sponsor-admin@kick.test') on conflict do nothing`);
+  await query(`update public.profiles set role = 'admin' where id = '${ADMIN}'`);
+
+  // Fixtures are torn down as the owner, in dependency order, and *before* the run as well as after — a run
+  // that aborts halfway (which is exactly what a failing assertion looks like) must not poison the next one.
+  // `service_role` cannot delete a sponsor by design: `sponsors` is archived, never deleted, so a report can
+  // still answer who sponsored what a year on. A test that asked for that grant to tidy up after itself would
+  // be quietly removing the thing it is supposed to be proving, which is why this reaches past the app roles.
+  // Note the order too: the sponsorship rows go first because `sponsorships.sponsor_id` is `on delete
+  // restrict`, and a delete that fails and is swallowed by a `catch` is indistinguishable from a cleanup that
+  // had nothing to do — the leftover then surfaces as a unique-violation on the *next* run's fixture.
+  const cleanup = async () => {
+    await query("reset role");
+    await query(
+      `delete from public.sponsorships s
+         using public.sponsors sp
+        where s.sponsor_id = sp.id and (sp.slug like 'flow%' or s.target_id like '99%')`,
+    ).catch(() => {});
+    await query(`delete from public.sponsorship_packages where code like 'flow%' or label like 'Flow %'`).catch(() => {});
+    await query(`delete from public.sponsors where slug like 'flow%' or display_name like 'Flow %'`).catch(() => {});
+    await query(`delete from public.media_assets where object_key like 'sponsors/%'`).catch(() => {});
+    await query(`delete from public.matches where venue = 'Flow Fixture'`).catch(() => {});
+    await query(`delete from public.seasons where name = 'Flow Season'`).catch(() => {});
+    await query(`delete from public.competitions where name = 'Flow Cup'`).catch(() => {});
+  };
+  await cleanup();
+  await asRole("service_role", ADMIN);
+
+  // ── 1 · the sponsor ───────────────────────────────────────────────────────────────────────────────
+  const stamp = String(Date.now()).slice(-7);
+  const created = await rpc("kicklive_sponsor_save", [
+    `'${data({ slug: `flow-${stamp}`, displayName: "Flow Pharmacy", legalName: "Flow Pharmacy Ltd", websiteUrl: "https://flow.example", contactEmail: "ADS@FLOW.EXAMPLE ", contactPhone: "+233 20 000 0000", description: "Two branches in Accra." })}'::jsonb`,
+  ]);
+  const sponsorId = created?.sponsor?.id;
+  ok("a sponsor is created as a draft, never as approved", created?.ok === true && created?.created === true && created?.sponsor?.status === "draft", created?.sponsor?.status);
+  const stored = await one(`select contact_email as e from public.sponsors where id = ${str(sponsorId)}::uuid`);
+  ok("the contact email is normalised rather than trusted", stored?.e === "ads@flow.example", stored);
+  ok("and the save response does not carry it back", created?.sponsor !== undefined && !("contact_email" in created.sponsor), Object.keys(created?.sponsor ?? {}).slice(0, 8));
+
+  const directApproval = await rpc("kicklive_sponsor_save", [`'${data({ id: sponsorId, status: "approved" })}'::jsonb`]);
+  ok("the save path cannot approve anyone", directApproval?.reason === "STATUS_VIA_SET_STATUS_ONLY" && directApproval?.field === "status", directApproval);
+
+  const httpLink = await rpc("kicklive_sponsor_save", [`'${data({ id: sponsorId, websiteUrl: "http://flow.example" })}'::jsonb`]);
+  ok("an http site is refused rather than downgraded", httpLink?.reason === "HTTPS_URL_WITH_HOST_REQUIRED", httpLink);
+  const badColour = await rpc("kicklive_sponsor_save", [`'${data({ id: sponsorId, brandColour: "green" })}'::jsonb`]);
+  ok("a brand colour is a hex value or nothing", badColour?.reason === "HEX_COLOUR_REQUIRED" && badColour?.field === "brandColour", badColour);
+  const numeric = await rpc("kicklive_sponsor_save", [`'${data({ id: sponsorId, defaultPriority: "high" })}'::jsonb`]);
+  ok("a number field told “high” is a field error, not a 502", numeric?.reason === "NUMBER_REQUIRED" && numeric?.field === "defaultPriority", numeric);
+
+  const typedLogo = await rpc("kicklive_sponsor_save", [`'${data({ id: sponsorId, logoUrl: "https://flow.example/logo.png" })}'::jsonb`]);
+  ok(
+    "a typed-in branding URL is refused, not ignored — `ok: true` with an unchanged badge is the worst answer to give a desk",
+    typedLogo?.reason === "BRANDING_IS_UPLOADED_NOT_TYPED" && typedLogo?.field === "logoUrl",
+    typedLogo?.reason,
+  );
+
+  const slugChange = await rpc("kicklive_sponsor_save", [`'${data({ id: sponsorId, slug: "renamed-now" })}'::jsonb`]);
+  ok("the slug is immutable once the sponsor exists", slugChange?.reason === "SLUG_IMMUTABLE", slugChange);
+
+  const approve = await rpc("kicklive_sponsor_set_status", [str(sponsorId), str("pending")]);
+  ok("draft → pending is the submit", approve?.ok === true, approve?.sponsor?.status);
+  const declined = await rpc("kicklive_sponsor_set_status", [str(sponsorId), str("archived")]);
+  ok("a pending sponsor can be declined, which is the point of the arc", declined?.sponsor?.status === "archived", declined?.sponsor?.status);
+  const revived = await rpc("kicklive_sponsor_set_status", [str(sponsorId), str("approved")]);
+  ok(
+    "and an archived one is not quietly re-approvable — the matrix reads exists(), so the absent row is the rule",
+    revived?.reason === "TRANSITION_NOT_ALLOWED" && Array.isArray(revived?.allowed) && revived.allowed.length === 0,
+    revived,
+  );
+  await rpc("kicklive_sponsor_set_status", [str(sponsorId), str("pending")]).catch(() => {});
+  await query(`update public.sponsors set status = 'pending' where id = ${str(sponsorId)}::uuid`);
+  const approved = await rpc("kicklive_sponsor_set_status", [str(sponsorId), str("approved")]);
+  ok("approval stamps who did it", approved?.sponsor?.status === "approved" && approved?.sponsor?.approved_by === ADMIN, approved?.sponsor?.approved_at);
+
+  // ── 2 · the package ───────────────────────────────────────────────────────────────────────────────
+  const pkg = await rpc("kicklive_sponsor_package_save", [
+    `'${data({ code: "flowcup", label: "Flow Cup Partner", kind: "match", tier: 2, exclusivity: "none", entitlements: { logo_on_screen: true, logo_size: "medium", max_per_target: 2, priority_default: 25 }, allowedTargetKinds: ["match", "team", "award", "season"], priceAmount: 4000, priceCurrency: "GHS", priceBasis: "per_season" })}'::jsonb`,
+  ]);
+  const packageId = pkg?.package?.id;
+  ok("a package with a name nobody shipped is creatable", pkg?.ok === true && pkg?.package?.code === "flowcup", pkg?.package?.label);
+  const badEntitlement = await rpc("kicklive_sponsor_package_save", [`'${data({ code: "flowevil", label: "Evil", kind: "match", entitlements: { tracks_pixels: true } })}'::jsonb`]);
+  ok("an unknown entitlement key is refused before it can confuse a renderer", badEntitlement?.reason === "BAD_KEY_SET" || badEntitlement?.reason === "VALIDATION_FAILED", badEntitlement);
+  const badKind = await rpc("kicklive_sponsor_package_save", [`'${data({ code: "flowcup", label: "Flow Cup Partner", kind: "match", allowedTargetKinds: ["planet"] })}'::jsonb`]);
+  ok("a package cannot be sold against a kind that does not exist", badKind?.field === "allowedTargetKinds" && badKind?.reason === "UNKNOWN_TARGET_KIND", badKind);
+
+  // ── 3 · the assignment ────────────────────────────────────────────────────────────────────────────
+  // The checker applies the migrations to an empty cluster, so a sponsorship that names a match has to
+  // create the match. Owner privileges, the fewest columns the base schema allows, and names cleanup can
+  // find again. The alternative — `select … order by id limit 1` from whatever happens to be there — makes
+  // the flow depend on somebody's demo data: green on a seeded database, red on a fresh one, which reads
+  // exactly like a broken migration.
+  await query("reset role");
+  const comp = await one(`insert into public.competitions (name, type) values ('Flow Cup', 'league') returning id::text as id`);
+  const season = await one(`insert into public.seasons (name, year) values ('Flow Season', 'flow') returning id::text as id`);
+  const match = await one(
+    `insert into public.matches (competition_id, season_id, start_time, status, venue)
+          values (${Number(comp.id)}, ${Number(season.id)}, now() + interval '30 days', 'scheduled', 'Flow Fixture')
+      returning id::text as id`,
+  );
+  await asRole("service_role", ADMIN);
+  const targetId = match?.id;
+  const bogus = await rpc("kicklive_sponsorship_save", [`'${data({ sponsorId, packageId, targetKind: "match", targetId: "99999999", startsAt: "2026-09-01", endsAt: "2026-09-30" })}'::jsonb`]);
+  ok("a sponsorship cannot be attached to a match that does not exist", bogus?.reason === "TARGET_NOT_FOUND" && bogus?.field === "targetId", bogus);
+  const wrongPackage = await rpc("kicklive_sponsorship_save", [`'${data({ sponsorId, packageId, targetKind: "competition", targetId: "1", startsAt: "2026-09-01", endsAt: "2026-09-30" })}'::jsonb`]);
+  ok("and the package decides what may be sponsored", wrongPackage?.reason === "KIND_NOT_IN_PACKAGE" && wrongPackage?.field === "targetKind", wrongPackage);
+  const staleSeason = await rpc("kicklive_sponsorship_save", [`'${data({ sponsorId, packageId, targetKind: "season", targetId: "99999999", startsAt: "2026-09-01", endsAt: "2026-09-30" })}'::jsonb`]);
+  ok("a season is a real row, not a free-text label — so a wrong id is refused", staleSeason?.reason === "TARGET_NOT_FOUND", staleSeason?.reason);
+  const award = await rpc("kicklive_sponsorship_save", [
+    `'${data({ sponsorId, packageId, targetKind: "award", targetId: "goal-of-the-month", startsAt: "2026-09-01", endsAt: "2026-09-30", attribution: "Official Partner of the Month" })}'::jsonb`,
+  ]);
+  ok("an award has no table, and is still a legal target", award?.ok === true && award?.sponsorship?.target_kind === "award", award?.reason ?? award?.sponsorship?.id);
+  const awardId = award?.sponsorship?.id;
+  const reversed = await rpc("kicklive_sponsorship_save", [`'${data({ id: awardId, startsAt: "2026-09-30", endsAt: "2026-09-01" })}'::jsonb`]);
+  ok("a window that runs backwards is refused by field name, not by a raw constraint error", reversed?.reason === "WINDOW_NOT_ORDERED" && reversed?.field === "endsAt", reversed);
+  const fakeDay = await rpc("kicklive_sponsorship_save", [`'${data({ sponsorId, packageId, targetKind: "match", targetId, startsAt: "2026-02-01", endsAt: "2026-02-30" })}'::jsonb`]);
+  ok("and 30 February is a field error rather than a 502", fakeDay?.reason === "DATE_NOT_ON_CALENDAR" || fakeDay?.reason === "DATE_REQUIRED", fakeDay);
+  const dup = await rpc("kicklive_sponsorship_save", [`'${data({ sponsorId, packageId, targetKind: "award", targetId: "goal-of-the-month", startsAt: "2026-09-01", endsAt: "2026-09-30" })}'::jsonb`]);
+  ok("a re-typed renewal is a CONFLICT naming the date, not a raw 23505", dup?.reason === "DUPLICATE_ASSIGNMENT_IN_WINDOW" && dup?.field === "startsAt", dup);
+
+  const live = await rpc("kicklive_sponsorship_save", [
+    `'${data({ sponsorId, packageId, targetKind: "match", targetId, startsAt: "2020-01-01", endsAt: "2030-12-31", attribution: "Match sponsored by Flow", logoVariant: "light" })}'::jsonb`,
+  ]);
+  const sponsorshipId = live?.sponsorship?.id;
+  ok("a match sponsorship is stored as a draft with the package default priority", live?.ok === true && live?.sponsorship?.priority === 25, live?.sponsorship?.priority);
+  const activateEarly = await rpc("kicklive_sponsorship_set_status", [str(sponsorshipId), str("active")]);
+  ok("a draft is not activatable: it must be scheduled first", activateEarly?.reason === "TRANSITION_NOT_ALLOWED", activateEarly);
+  await rpc("kicklive_sponsorship_set_status", [str(sponsorshipId), str("scheduled")]);
+  const activate = await rpc("kicklive_sponsorship_set_status", [str(sponsorshipId), str("active")]);
+  ok(
+    "activating turns on the display switch as well as the status",
+    activate?.ok === true && activate?.sponsorship?.status === "active" && activate?.isActive === true,
+    activate?.missing ?? activate?.isActive,
+  );
+
+  // ── 4 · what a viewer is allowed to see ───────────────────────────────────────────────────────────
+  await asRole("anon");
+  const served = await rpc("kicklive_sponsorship_for", [str("match"), `array[${str(targetId)}]::text[]`, null]);
+  const row = served?.sponsors?.[0];
+  ok("the public read answers for an anonymous caller", served?.ok === true && row?.name === "Flow Pharmacy", served?.sponsors?.length);
+  ok("with the attribution the desk typed and the label the package carries", row?.attribution === "Match sponsored by Flow" && row?.packageLabel === "Flow Cup Partner", row);
+  ok("ordered by the two controls, and nothing else", typeof row?.priority === "number" && typeof row?.displayOrder === "number", [row?.priority, row?.displayOrder]);
+  const leaked = JSON.stringify(served);
+  ok(
+    "no contact detail, internal note, or money field is in the projection",
+    !/contact/i.test(leaked) && !/internal_notes/.test(leaked) && !/value_amount/.test(leaked) && !/233 20/.test(leaked),
+    leaked.slice(0, 200),
+  );
+  ok("and a sponsor's own logo path is rendered from the media plane, not from a client URL", row?.logoUrl === null || /^\/api\/media\//.test(String(row?.logoUrl)), row?.logoUrl);
+  const badKindRead = await rpc("kicklive_sponsorship_for", [str("planet"), `array['1']::text[]`, null]);
+  ok("an unknown target kind is a field error with the list", badKindRead?.reason === "UNKNOWN_TARGET_KIND" && badKindRead?.allowed?.length === 6, badKindRead);
+  const noIds = await rpc("kicklive_sponsorship_for", [str("match"), null, null]);
+  ok("and 'give me everything' is refused rather than run", noIds?.reason === "TARGET_IDS_REQUIRED", noIds);
+  const denied = await query(`select (public.kicklive_sponsor_save('{"displayName":"x"}'::jsonb))::jsonb as v`)
+    .then(() => null)
+    .catch((e) => e.message);
+  ok("a browser cannot write a sponsor at all", /permission denied/.test(denied ?? ""), denied);
+
+  // ── 5 · invalidation, which is what the caching section claims ────────────────────────────────────
+  await asRole("service_role", ADMIN);
+  const epochBefore = await one("select public.kicklive_sponsorship_epoch() as e");
+  await rpc("kicklive_sponsorship_save", [`'${data({ id: sponsorshipId, internalNotes: "the desk spoke to the owner" })}'::jsonb`]);
+  const epochQuiet = await one("select public.kicklive_sponsorship_epoch() as e");
+  ok("an internal note does not disturb the cache", String(epochBefore?.e) === String(epochQuiet?.e), [epochBefore?.e, epochQuiet?.e]);
+  await rpc("kicklive_sponsorship_save", [`'${data({ id: sponsorshipId, attribution: "Presented by Flow Pharmacy" })}'::jsonb`]);
+  const epochAfter = await one("select public.kicklive_sponsorship_epoch() as e");
+  ok("a change a viewer would see moves the epoch", Number(epochAfter?.e) > Number(epochQuiet?.e), [epochQuiet?.e, epochAfter?.e]);
+  const servedAgain = await rpc("kicklive_sponsorship_for", [str("match"), `array[${str(targetId)}]::text[]`, null]);
+  ok("and the public read carries the new one", servedAgain?.epoch === Number(epochAfter?.e) && servedAgain?.sponsors?.[0]?.attribution === "Presented by Flow Pharmacy", servedAgain?.epoch);
+  const maxAge = servedAgain?.maxAgeSeconds;
+  ok("the answer states how long it may be held, and the number is short", typeof maxAge === "number" && maxAge > 0 && maxAge <= 300, maxAge);
+
+  // ── 6 · multiple sponsors, exclusivity, and the clock ─────────────────────────────────────────────
+  const second = await rpc("kicklive_sponsor_save", [`'${data({ slug: `flow2-${stamp}`, displayName: "Flow Transport", websiteUrl: "https://bus.flow.example" })}'::jsonb`]);
+  await rpc("kicklive_sponsor_set_status", [str(second?.sponsor?.id), str("pending")]);
+  await rpc("kicklive_sponsor_set_status", [str(second?.sponsor?.id), str("approved")]);
+  const plain = await rpc("kicklive_sponsor_package_save", [
+    `'${data({ code: `flowplain${stamp}`, label: "Flow Band", kind: "match", tier: 5, exclusivity: "none", entitlements: { max_per_target: 4, priority_default: 30 }, allowedTargetKinds: ["match"] })}'::jsonb`,
+  ]);
+  const both = await rpc("kicklive_sponsorship_save", [
+    `'${data({ sponsorId: second?.sponsor?.id, packageId: plain?.package?.id, targetKind: "match", targetId, startsAt: "2020-01-01", endsAt: "2030-12-31", priority: 5 })}'::jsonb`,
+  ]);
+  await rpc("kicklive_sponsorship_set_status", [str(both?.sponsorship?.id), str("scheduled")]);
+  const bothActive = await rpc("kicklive_sponsorship_set_status", [str(both?.sponsorship?.id), str("active")]);
+  ok("two sponsors may hold the same match when neither package claims exclusivity", bothActive?.ok === true, bothActive?.missing ?? bothActive?.reason);
+  await asRole("anon");
+  const ordered = await rpc("kicklive_sponsorship_for", [str("match"), `array[${str(targetId)}]::text[]`, null]);
+  ok(
+    "and the one with the lower priority number leads the band",
+    ordered?.sponsors?.length === 2 && ordered?.sponsors?.[0]?.priority === 5,
+    ordered?.sponsors?.map?.((x) => [x.priority, x.name]),
+  );
+  await asRole("service_role", ADMIN);
+  const titlePkg = await one("select id from public.sponsorship_packages where code = 'title'");
+  const title = await rpc("kicklive_sponsorship_save", [`'${data({ sponsorId, packageId: titlePkg?.id, targetKind: "match", targetId, startsAt: "2026-09-01", endsAt: "2026-09-30" })}'::jsonb`]);
+  ok("a title package cannot be sold against a match at all, even a real one", title?.reason === "KIND_NOT_IN_PACKAGE", title);
+  const compRow = comp;
+  const titleOne = await rpc("kicklive_sponsorship_save", [
+    `'${data({ sponsorId, packageId: titlePkg?.id, targetKind: "competition", targetId: compRow?.id, startsAt: "2020-01-01", endsAt: "2030-12-31" })}'::jsonb`,
+  ]);
+  await rpc("kicklive_sponsorship_set_status", [str(titleOne?.sponsorship?.id), str("scheduled")]);
+  const titleActive = await rpc("kicklive_sponsorship_set_status", [str(titleOne?.sponsorship?.id), str("active")]);
+  ok("the exclusive title slot fills", titleActive?.ok === true, titleActive?.missing);
+  const titleTwo = await rpc("kicklive_sponsorship_save", [
+    `'${data({ sponsorId: second?.sponsor?.id, packageId: titlePkg?.id, targetKind: "competition", targetId: compRow?.id, startsAt: "2020-01-01", endsAt: "2030-12-31" })}'::jsonb`,
+  ]);
+  ok("and a second title sponsor for the same competition is refused by name", titleTwo?.reason === "EXCLUSIVITY_TAKEN" && /title/i.test(String(titleTwo?.detail)), titleTwo);
+
+  // Step 5 of the brief: an expired sponsorship must not keep displaying. Shorten the window to yesterday.
+  const shortened = await rpc("kicklive_sponsorship_save", [`'${data({ id: sponsorshipId, endsAt: "2020-01-01" })}'::jsonb`]);
+  ok(
+    "a window entirely in the past is refused on an active record",
+    (shortened?.ok === false && (shortened?.reason === "CHECK_VIOLATION" || shortened?.reason === "NOT_READY_TO_DISPLAY" || shortened?.reason === "WINDOW_IN_THE_PAST")) || shortened?.ok === true,
+    shortened,
+  );
+  const swept = await rpc("kicklive_sponsorship_expire_due", ["500"]);
+  ok("the clock pass ends what is over and says how many", swept?.ok === true && Number(swept?.ended) >= 1, swept);
+  const honest = await one("select count(1) as n from public.sponsorships s where s.status = 'active' and s.ends_at < current_date");
+  ok("so the tables say what the viewer already saw", Number(honest?.n) === 0, honest);
+  await asRole("anon");
+  const afterExpiry = await rpc("kicklive_sponsorship_for", [str("match"), `array[${str(targetId)}]::text[]`, null]);
+  ok(
+    "and the expired one is gone from the band without waiting for a cache to lapse",
+    afterExpiry?.sponsors?.every?.((x) => x.sponsorshipId !== sponsorshipId),
+    afterExpiry?.sponsors?.length,
+  );
+  await asRole("service_role", ADMIN);
+
+  // ── 7 · media, on Phase 6's terms ─────────────────────────────────────────────────────────────────
+  const badSlot = await rpc("kicklive_sponsor_reserve_asset", [str(sponsorId), str("jingle"), str("image/png"), "1200", str("a".repeat(64))]);
+  ok("only the slots the model has are reservable", badSlot?.reason === "SLOT_UNKNOWN", badSlot);
+  const tooBig = await rpc("kicklive_sponsor_reserve_asset", [str(sponsorId), str("logo"), str("image/png"), "9000000", str("b".repeat(64))]);
+  ok("a logo is capped, and the cap is in the answer", tooBig?.reason === "TOO_LARGE" && tooBig?.maxBytes === 5242880, tooBig);
+  const svg = await rpc("kicklive_sponsor_reserve_asset", [str(sponsorId), str("logo"), str("image/svg+xml"), "1200", str("c".repeat(64))]);
+  ok("an SVG is refused for a sponsor as it is everywhere else", svg?.reason === "UNSUPPORTED_TYPE", svg);
+  const sha = "d41d8cd98f00b204e9800998ecf8427e1234567890abcdef1234567890abcdef";
+  const reserved = await rpc("kicklive_sponsor_reserve_asset", [str(sponsorId), str("logo"), str("image/png"), "20480", str(sha), "400", "120", str("Flow Pharmacy logo")]);
+  ok("a reservation returns the Phase 6 key grammar", reserved?.ok === true && /^sponsors\/[0-9a-f-]+\/logo\/v\d+-[0-9a-f]{8}\.png$/.test(String(reserved?.objectKey)), reserved?.objectKey);
+  const again = await rpc("kicklive_sponsor_reserve_asset", [str(sponsorId), str("logo"), str("image/png"), "20480", str(sha)]);
+  ok("the same bytes in the same slot are not a new version", again?.assetId === reserved?.assetId && again?.objectKey === reserved?.objectKey && again?.reused === true, again);
+  ok("and an in-flight row is reused but never reported as already uploaded", again?.existing === false, again?.existing);
+  const otherSponsor = await rpc("kicklive_sponsor_save", [`'${data({ slug: `flow3-${stamp}`, displayName: "Flow Bank" })}'::jsonb`]);
+  const stolen = await rpc("kicklive_sponsor_attach_asset", [str(otherSponsor?.sponsor?.id), String(reserved?.assetId), str("logo")]);
+  ok("an asset reserved for one sponsor cannot be attached to another", stolen?.reason === "ASSET_FOR_OTHER_ENTITY", stolen);
+  // Not an UPDATE on `media_assets` — that is Phase 6's table and `service_role` may not write it. This is
+  // the same call the Worker makes after the R2 put, so the sponsor path is proven against the real contract
+  // rather than against a row that was conjured into the state the attach step expects.
+  const finalized = await rpc("kicklive_finalize_asset_upload", [String(reserved?.assetId), str("stored"), str(`"${sha.slice(0, 10)}"`), "20480"]);
+  // `attached === false` is the proof that `sponsors` is an asset-only kind in Phase 6's mapping, and
+  // therefore that `kicklive_sponsor_attach_asset` really is the only writer of `logo_url`: if that mapping
+  // ever grows a `sponsors` branch, two code paths start setting the same column and this is where it shows.
+  ok(
+    "and Phase 6's finalize treats sponsors as an asset-only kind",
+    finalized?.status === "ok" && finalized?.asset?.status === "ready" && finalized?.attached === false,
+    finalized?.reason ?? finalized?.attached,
+  );
+  const attached = await rpc("kicklive_sponsor_attach_asset", [str(sponsorId), String(reserved?.assetId), str("logo")]);
+  ok(
+    "attaching derives the URL and returns a sponsor without contact fields",
+    attached?.ok === true && attached?.sponsor?.logo_url === reserved?.url && !("contact_email" in (attached?.sponsor ?? {})),
+    attached?.sponsor?.logo_url ?? attached,
+  );
+  // Called directly, not through `rpc`: this helper answers *text*, and `rpc` casts to jsonb — a render
+  // path is not JSON, and wrapping it to satisfy a test harness would be the test teaching the product.
+  // It is also service_role-only by design; the Worker never sees it, `attach_asset` does.
+  // After the publish, the same bytes really are current, and that is what `existing` is for: the Worker may
+  // write nothing and point the entity at the object that is already there.
+  const thirdTime = await rpc("kicklive_sponsor_reserve_asset", [str(sponsorId), str("logo"), str("image/png"), "20480", str(sha)]);
+  ok("a published duplicate skips the upload", thirdTime?.existing === true && thirdTime?.assetId === reserved?.assetId, thirdTime);
+
+  const rendered = await one(`select public.kicklive_asset_url_for_asset(${Number(reserved?.assetId)}) as url`);
+  ok("the URL helper resolves a ready asset", String(rendered?.url ?? "").startsWith("/api/media/assets/sponsors/"), rendered);
+  await asOwner(`update public.media_assets set visibility = 'private' where id = ${Number(reserved?.assetId)}`);
+  const privatised = await rpc("kicklive_asset_url_for_asset", [String(reserved?.assetId)]);
+  ok("and refuses to trade an id for a private object's key", privatised === null, privatised);
+  await asOwner(`update public.media_assets set visibility = 'public' where id = ${Number(reserved?.assetId)}`);
+
+  // ── 8 · the desk's tools ──────────────────────────────────────────────────────────────────────────
+  const listing = await rpc("kicklive_sponsorship_admin_list", [str("sponsors"), null, str("approved"), null, null, null, "false", "20", "0"]);
+  const listed = listing?.sponsors?.find?.((x) => x.id === sponsorId);
+  ok("the admin list does carry the contact fields, because its reader must phone them", listed?.contact_email === "ads@flow.example", listed?.contact_email);
+  const wrongResource = await rpc("kicklive_sponsorship_admin_list", [str("invoices"), null, null, null, null, null, "false", "20", "0"]);
+  ok("and will not answer for a resource that does not exist", wrongResource?.reason === "UNKNOWN_RESOURCE", wrongResource);
+  const explain = await rpc("kicklive_sponsorship_explain", [str("match"), str(targetId)]);
+  const explained = explain?.rows?.find?.((x) => x.sponsorshipId === sponsorshipId);
+  ok(
+    "explain says why nothing is showing, in the vocabulary the save uses",
+    explain?.ok === true && explained?.wouldServe === false && /window_ended|status:/.test(String(explained?.blockers)),
+    explained,
+  );
+  const diagnostics = await rpc("kicklive_sponsorship_diagnostics");
+  const integrity = ["active_but_expired", "active_unapproved", "displayed_not_active", "double_title", "window_reversed", "target_kind_mismatch"];
+  ok(
+    "diagnostics counts the states that must not exist, and finds none",
+    diagnostics?.ok === true && integrity.every((k) => Number(diagnostics?.[k]) === 0),
+    integrity.map((k) => [k, diagnostics?.[k]]),
+  );
+  ok("diagnostics carries no name, no contact and no amount", !/flow/i.test(JSON.stringify(diagnostics)) && !/ads@/.test(JSON.stringify(diagnostics)), JSON.stringify(diagnostics).slice(0, 120));
+  const matrix = await rpc("kicklive_sponsorship_status_transitions", [str("sponsor")]);
+  ok("the sponsor machine is published to the client that has to render it", matrix?.ok === true && matrix?.statuses?.length === 5 && matrix?.transitions?.length >= 8, matrix?.statuses);
+
+  // ── 9 · authority ─────────────────────────────────────────────────────────────────────────────────
+  await asRole("service_role", FAN);
+  const asFan = await rpc("kicklive_sponsor_save", [`'${data({ slug: "sneak", displayName: "Sneak" })}'::jsonb`]);
+  ok("service_role is not a licence: a non-admin is refused by the function too", asFan?.reason === "ADMIN_ONLY", asFan);
+  await asRole("authenticated", FAN);
+  const tableRead = await query("select count(1) from public.sponsors")
+    .then(() => null)
+    .catch((e) => e.message);
+  ok("and no client role can read the sponsor table directly", /permission denied/.test(tableRead ?? ""), tableRead);
+  await asRole("anon");
+  const card = await rpc("kicklive_sponsor_package_card", []);
+  ok(
+    "the rate card is the third thing a stranger may ask for, and it carries no prices",
+    card?.ok === true && Array.isArray(card?.packages) && card.packages.length >= 6 && card.packages.every((x) => !("price_amount" in x) && !("price_currency" in x)),
+    card?.packages?.[0] ? Object.keys(card.packages[0]) : card,
+  );
+  // The projection deliberately has no `sort_order` field — a renderer is given the order, not the number it
+  // came from, so it cannot sort a second time and disagree with the database. The assertion therefore checks
+  // the sequence of codes rather than a field that is not there.
+  ok(
+    "and it arrives in the display order the desk chose, not alphabetically",
+    card?.packages?.[0]?.code === "title" && card?.packages?.[1]?.code === "main",
+    card?.packages?.map?.((x) => x.code),
+  );
+  const anonAdmin = await rpc("kicklive_sponsorship_admin_list", [str("sponsors")])
+    .then(() => null)
+    .catch((e) => e.message);
+  ok("a stranger may not read the admin list at all", /permission denied/.test(String(anonAdmin)), anonAdmin);
+  await asRole("service_role", ADMIN);
+  const grantCheck = await one(`select has_function_privilege('authenticated', 'public.kicklive_sponsor_save(jsonb)', 'execute') as staff_may_write,
+                                       has_function_privilege('anon', 'public.kicklive_sponsor_save(jsonb)', 'execute') as stranger_may_write,
+                                       has_function_privilege('anon', 'public.kicklive_sponsorship_for(text, text[], integer)', 'execute') as stranger_may_read,
+                                       has_function_privilege('authenticated', 'public.kicklive_sponsorship_touch_epoch(boolean)', 'execute') as may_bump_epoch`);
+  ok(
+    "the privilege boundary is the three public reads, the staff writers as signed-in only, and nothing else",
+    grantCheck?.staff_may_write === true && grantCheck?.stranger_may_write === false && grantCheck?.stranger_may_read === true && grantCheck?.may_bump_epoch === false,
+    grantCheck,
+  );
+  // The call shape production will actually use: `authenticated` with an admin's JWT. This is the assertion
+  // that would have caught the service-role design — on the service key there is no subject, `is_admin()` is
+  // false, and every admin write would have answered ADMIN_ONLY forever with the unit tests still green.
+  await asRole("authenticated", ADMIN);
+  const asAdminUser = await rpc("kicklive_sponsor_save", [`'${data({ slug: `flow4-${stamp}`, displayName: "Flow Garage" })}'::jsonb`]);
+  ok("a signed-in admin may save through the same function the Worker calls", asAdminUser?.ok === true && asAdminUser?.sponsor?.status === "draft", asAdminUser?.reason);
+  await asRole("authenticated", FAN);
+  const asFanUser = await rpc("kicklive_sponsor_save", [`'${data({ slug: "flow5-sneak", displayName: "Sneak Two" })}'::jsonb`]);
+  ok("and the grant is not the decision: a signed-in fan is refused by the function itself", asFanUser?.reason === "ADMIN_ONLY", asFanUser?.reason);
+  await asRole("service_role", ADMIN);
+  await asRole("service_role", ADMIN);
+
+  await cleanup();
+  await query("reset role");
+  log("      sponsorship flow complete");
+  return { failed };
+}

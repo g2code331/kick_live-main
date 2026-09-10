@@ -15,8 +15,11 @@
  * player. `video_url` columns therefore keep holding external links (Step 7).
  */
 
-/** Kinds with a table the registry can attach to. `sponsors`/`advertisements`
- *  are reserved prefixes for Phase 7 and are not legal asset kinds yet. */
+/** Kinds with a table the registry can attach to. `advertisements` (Phase 7) and `sponsors` (Phase 8) were
+ *  reserved prefixes in Phase 6 and each became legal in the migration that created the table it points at —
+ *  a kind that is legal before its table exists is an invitation to write objects nothing can authorize or
+ *  render. The list is pinned against the *final* `media_assets_kind_check` (across every later migration) by
+ *  `tests/unit/phase6-media.test.ts`, so adding an entity table without saying so here fails a test. */
 export const MEDIA_KINDS = [
   "teams",
   "players",
@@ -27,9 +30,11 @@ export const MEDIA_KINDS = [
   "matches",
   "users",
   // A registry-only kind, added by the same migration that creates the table it points at: `advertisements`
-  // widens `media_assets_kind_check` in Phase 7 for exactly that reason. `sponsors` will arrive the same way —
-  // a kind legal before its table exists is an invitation to write objects nothing can authorize or render.
+  // widens `media_assets_kind_check` in Phase 7 for exactly that reason, and `sponsors` did the same in
+  // Phase 8. Both are registry-only for the same reason: their URL column is written by a function that knows
+  // whose entity it is, not by the generic publish path.
   "advertisements",
+  "sponsors",
 ] as const;
 export type MediaKind = (typeof MEDIA_KINDS)[number];
 
@@ -85,12 +90,29 @@ export const MEDIA_CATEGORIES: Record<MediaKind, MediaCategory> = {
   news: { kind: "news", table: "media", urlColumn: "image_url", idColumn: "id", visibility: "public", maxBytes: 10 * 1024 * 1024, uploadable: true, description: "News and match-report images" },
   team_news: { kind: "team_news", table: "team_news", urlColumn: "image_url", idColumn: "id", visibility: "public", maxBytes: 10 * 1024 * 1024, uploadable: true, description: "Club news images" },
   // Registry-only kinds: they exist so that an asset row can name its entity and be *authorized* by a
-  // function that knows the table, and so `kicklive_entity_assets` can answer for them. Neither is
-  // uploadable from the generic media route — an advertisement's creative is reserved through
+  // function that knows the table, and so `kicklive_entity_assets` can answer for them. None is uploadable
+  // from the generic media route — an advertisement's creative is reserved through
   // `kicklive_ad_reserve_creative`, which checks that the caller owns the flight's advertiser, and a
   // sponsor's logo through `kicklive_sponsor_reserve_asset`, which checks the sponsorship desk. A
   // `urlColumn` of "" is the type-level statement of that: there is no entity column for a publish to
   // repoint, so the generic path physically cannot attach one by accident.
+  sponsors: {
+    // Phase 8. Two slots per sponsor — `logo` and `banner` — and both are public, because a badge on a
+    // competition page is shown to everybody who can see the page. `urlColumn` is "" because
+    // `kicklive_asset_url_column` deliberately has no `sponsors` arm: Phase 6's publish path must not be able
+    // to repoint a sponsor's logo, since the only writer of `logo_url`/`banner_url` is
+    // `kicklive_sponsor_attach_asset`, which checks that the asset was reserved *for that sponsor*. The caps
+    // here mirror that function (5 MiB logo, 10 MiB banner), and the sizes are the reason the entry is not the
+    // generic 5 MiB — a wide banner is the one asset a sponsor reliably sends that is larger than a crest.
+    kind: "sponsors",
+    table: "sponsors",
+    urlColumn: "",
+    idColumn: "id",
+    visibility: "public",
+    maxBytes: 10 * 1024 * 1024,
+    uploadable: false,
+    description: "Sponsor logo and banner (reserved per slot by kicklive_sponsor_reserve_asset)",
+  },
   advertisements: {
     kind: "advertisements",
     table: "advertisements",

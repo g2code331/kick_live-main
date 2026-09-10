@@ -40,7 +40,7 @@ export interface RouteDef {
    * handler sets `cache-control` itself and `finalise` leaves it alone (per-object media policy).
    */
   readonly cache: CacheClass;
-  readonly phase: 2 | 3 | 4 | 5 | 6 | 7;
+  readonly phase: 2 | 3 | 4 | 5 | 6 | 7 | 8;
   readonly summary: string;
   /** What the handler has to enforce beyond the capability, so it is not "discovered" later. */
   readonly invariants?: string;
@@ -899,18 +899,189 @@ export const ROUTES: readonly RouteDef[] = [
   },
 
   // ── sponsorship (rights, not delivery) ────────────────────────────────────
-  // Still unbuilt, and Phase 7 deliberately does not touch it: rights are a contract about a season, and
-  // advertising is a machine that decides what to show per request. They share a sponsor's name and nothing
-  // else, which is why `sponsors` and `advertisers` are two tables.
-  { method: "GET", pattern: "/sponsorship/packages", capability: "public.read", cache: "edge", phase: 6, summary: "Published rate card for a season." },
+  // Phase 8. Two planes, and the split is the point: one read a browser may cache, and one surface a desk
+  // uses. `advertising` decides what to show per request against a slot; this decides who is *entitled* to
+  // appear on a competition, season, team, match, award or event, for how long, in what order. They share the
+  // word "sponsor" and one foreign key (`sponsorships.advertisement_campaign_id`), which is why `sponsors`
+  // and `advertisers` remain two tables and why no route here reads or writes an ad table.
   {
-    method: "PATCH",
-    pattern: "/sponsorship/sponsorships/:id",
+    method: "GET",
+    pattern: "/sponsorship",
+    capability: "public.read",
+    cache: "handler",
+    rateLimit: "public",
+    phase: 8,
+    implemented: true,
+    summary: "The active sponsor band for one target — competition, season, team, match, award or event.",
+    invariants:
+      "`kicklive_sponsorship_for` is the only public read and the only thing that decides visibility: active status *and* the display switch, today inside the window, an approved sponsor, an active package. The projection has no contact and no money columns, ordering is `priority, display_order` with no randomness and no bidding, and the cache header is the database's `maxAgeSeconds` with the config epoch in the ETag, so a change at the desk is visible on the next request rather than after a TTL.",
+  },
+  {
+    method: "GET",
+    pattern: "/sponsorship/packages",
+    capability: "public.read",
+    cache: "edge",
+    rateLimit: "public",
+    phase: 8,
+    implemented: true,
+    summary: "The published rate card: what each package promises, and against what it may be sold.",
+    invariants:
+      "`kicklive_sponsor_package_card` selects code, label, description, kind, tier, exclusivity, allowed kinds and entitlements. The price columns are not in its select list, so they are unreachable rather than filtered — the admin list is the surface that carries them.",
+  },
+  {
+    method: "GET",
+    pattern: "/sponsorship/admin/sponsors",
     capability: "sponsorship.manage",
     cache: "none",
-    phase: 6,
-    summary: "Renewals and rights changes; separate table from ad campaigns.",
+    rateLimit: "authenticated",
+    phase: 8,
+    implemented: true,
+    summary: "Sponsors with their contact block and their commercial terms, for the desk.",
+    invariants:
+      "Admin-only in the matrix and re-checked as `is_admin()` in SQL. This is the one read that returns `contact_email`, `contact_phone` and `value_amount`, and it never becomes a public projection: the public route has its own function with its own column list.",
+  },
+  {
+    method: "POST",
+    pattern: "/sponsorship/admin/sponsors",
+    capability: "sponsorship.manage",
+    cache: "none",
     rateLimit: "mutation",
+    phase: 8,
+    implemented: true,
+    summary: "Create or update a sponsor: identity, links, contacts, branding colour, defaults.",
+    invariants:
+      "`kicklive_sponsor_save` refuses `status` (approval is the status route, which records who did it), refuses a typed `logoUrl`/`bannerUrl` (branding is uploaded, and the URL is derived from an asset in the right bucket), validates the website against the same https rule advertising uses, and names the field for any value it will not cast. Slug is derived, then immutable.",
+  },
+  {
+    method: "POST",
+    pattern: "/sponsorship/admin/sponsors/:id/status",
+    capability: "sponsorship.manage",
+    cache: "none",
+    rateLimit: "mutation",
+    phase: 8,
+    implemented: true,
+    summary: "Submit, approve, suspend, reinstate or archive a sponsor.",
+    invariants:
+      "Only the arcs in `sponsorship_status_transitions` (kind = sponsor) exist; a refusal answers with the list of what is allowed from there, which is an empty list once a row is archived. Approval stamps `auth.uid()`; suspension requires a reason and pauses the sponsor's active sponsorships in the same transaction, so a page never keeps billing for a partner that has been switched off.",
+  },
+  {
+    method: "POST",
+    pattern: "/sponsorship/admin/sponsors/:id/branding",
+    capability: "sponsorship.manage",
+    cache: "none",
+    rateLimit: "mutation",
+    phase: 8,
+    implemented: true,
+    summary: "Upload a logo or banner into the sponsor's own R2 prefix, then point the sponsor at it.",
+    invariants:
+      "Phase 6's pipeline, unchanged: sniff, reserve, write, head, publish. Reservation is `kicklive_sponsor_reserve_asset` (slot ∈ logo|banner, per-slot size caps, no SVG, key derived under `sponsors/<id>/<slot>/`), and `logo_url`/`banner_url` are written only by `kicklive_sponsor_attach_asset`, which refuses an asset reserved for somebody else. `sponsors` is asset-only in `kicklive_asset_url_column`, so the generic publish path cannot attach a sponsor's logo by accident.",
+  },
+  {
+    method: "GET",
+    pattern: "/sponsorship/admin/packages",
+    capability: "sponsor_package.manage",
+    cache: "none",
+    rateLimit: "authenticated",
+    phase: 8,
+    implemented: true,
+    summary: "Every package, active or not, with the terms and prices the public card withholds.",
+    invariants:
+      "`sponsorship_packages` is configuration, not a per-kind table: six seeded rows today, and a new kind of deal is a row. Retiring one is `isActive: false`, which stops new assignments without touching what has been sold.",
+  },
+  {
+    method: "POST",
+    pattern: "/sponsorship/admin/packages",
+    capability: "sponsor_package.manage",
+    cache: "none",
+    rateLimit: "mutation",
+    phase: 8,
+    implemented: true,
+    summary: "Define or edit a package: label, tier, allowed target kinds, entitlements, terms.",
+    invariants:
+      "`code` is immutable once assigned (it names the package in URLs and cache keys), entitlements are checked against a closed key set so a renderer may switch on a name and treat anything else as absent, and `allowedTargetKinds` is what the assignment route validates against.",
+  },
+  {
+    method: "GET",
+    pattern: "/sponsorship/admin/assignments",
+    capability: "sponsorship.manage",
+    cache: "none",
+    rateLimit: "authenticated",
+    phase: 8,
+    implemented: true,
+    summary: "Sponsorships by target, sponsor or status, including the expired ones a report needs.",
+    invariants:
+      "One table for six target kinds, addressed by `(target_kind, target_id)`; `p_include_expired` is explicit because the default view of a live system is not the default view of an audit.",
+  },
+  {
+    method: "POST",
+    pattern: "/sponsorship/admin/assignments",
+    capability: "sponsorship.manage",
+    cache: "none",
+    rateLimit: "mutation",
+    phase: 8,
+    implemented: true,
+    summary: "Sell a package against a competition, season, match, team, award or event.",
+    invariants:
+      "Package must be active and must permit the target kind, the target must exist (`award`/`event` are format-checked because they have no table yet), the window must be ordered and real, exclusivity and `max_per_target` are refused by name, and a duplicate assignment for the same sponsor/package/window answers CONFLICT instead of a raw unique-violation. New rows are always `draft`.",
+  },
+  {
+    method: "POST",
+    pattern: "/sponsorship/admin/assignments/:id/status",
+    capability: "sponsorship.manage",
+    cache: "none",
+    rateLimit: "mutation",
+    phase: 8,
+    implemented: true,
+    summary: "Schedule, activate, pause, complete or archive one sponsorship; the display switch is separate.",
+    invariants:
+      "Activation re-checks the sponsor's approval, the package, the window and the target before it will set `active`, and says which of those was missing (`missing` in the refusal). `isActive` is an independent switch: it can hide a row the contract still keeps, which is what a sponsor's request to pause a campaign for a fortnight actually is.",
+  },
+  {
+    method: "POST",
+    pattern: "/sponsorship/admin/preview",
+    capability: "sponsorship.manage",
+    cache: "none",
+    rateLimit: "mutation",
+    phase: 8,
+    implemented: true,
+    summary: "What one or more targets would show right now, and the reason for anything that would not.",
+    invariants:
+      "`kicklive_sponsorship_explain` runs the same eligibility code as the public read, so the preview agrees with production rather than with the form. Between one and eight targets, never anonymous — it names sponsors and their arrangements.",
+  },
+  {
+    method: "GET",
+    pattern: "/sponsorship/admin/transitions",
+    capability: "sponsorship.manage",
+    cache: "none",
+    rateLimit: "authenticated",
+    phase: 8,
+    implemented: true,
+    summary: "The status machine, so the admin UI renders the arcs instead of duplicating them.",
+    invariants: "As stored: `exists(row)` means allowed, so the absence of a transition is the rule and the client is handed the same table the database consulted.",
+  },
+  {
+    method: "GET",
+    pattern: "/sponsorship/admin/diagnostics",
+    capability: "admin.settings_write",
+    cache: "none",
+    rateLimit: "authenticated",
+    phase: 8,
+    implemented: true,
+    summary: "Counts of the states that must not exist, plus the config epoch.",
+    invariants:
+      "Integers and short tokens only — no sponsor names, no contacts, no amounts — so the response is safe to leave open in a support channel. A non-zero `active_but_expired` or `double_title` is a bug in a writer, not a business state.",
+  },
+  {
+    method: "POST",
+    pattern: "/sponsorship/admin/maintenance",
+    capability: "admin.settings_write",
+    cache: "none",
+    rateLimit: "admin-blast",
+    phase: 8,
+    implemented: true,
+    summary: "End what has run out, then report, without waiting for the next hour.",
+    invariants:
+      "`kicklive_sponsorship_expire_due` (bounded) then `kicklive_sponsorship_diagnostics`, in that order, idempotent. Expiry is a state change and an epoch bump, so the public band stops serving an expired sponsor on the next request instead of when a CDN entry ages out.",
   },
 ];
 

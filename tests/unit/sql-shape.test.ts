@@ -93,7 +93,11 @@ describe("migrations · the shapes Postgres forgives and then punishes", () => {
       for (const stmt of statements(text)) {
         const drop = /^drop trigger if exists ([\w]+) on ([\w.]+)/i.exec(stmt);
         if (drop) dropped.add(`${drop[1]!.toLowerCase()}@${drop[2]!.toLowerCase()}`);
-        const create = /^create (?:or replace )?(?:constraint )?trigger (\w+)\s+on\s+([\w.]+)/i.exec(stmt);
+        // `ON <table>` is not next to the name: Postgres puts the timing and the event list between them
+        // (`create trigger x before insert or update on public.t for each row …`), so the table is found by
+        // scanning forward. A regex anchored on `trigger NAME on` matches nothing at all in real files — which
+        // is the worst outcome a lint can have, because it reports the rule as satisfied.
+        const create = /^create (?:or replace )?(?:constraint )?trigger (\w+)\b[\s\S]*?\bon\s+([\w.]+)/i.exec(stmt);
         if (create) {
           const key = `${create[1]!.toLowerCase()}@${create[2]!.toLowerCase()}`;
           assert.ok(dropped.has(key), `${file}: trigger ${key} is created without a preceding "drop trigger if exists"`);

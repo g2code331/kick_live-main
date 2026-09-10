@@ -82,6 +82,24 @@ import {
   handleAdvertisements,
 } from "./ads.ts";
 
+import {
+  handleSponsorshipAdminAssignments,
+  handleSponsorshipAdminPackages,
+  handleSponsorshipAdminSponsors,
+  handleSponsorshipAssignmentStatus,
+  handleSponsorshipBand,
+  handleSponsorshipBrandingUpload,
+  handleSponsorshipDiagnostics,
+  handleSponsorshipMaintenance,
+  handleSponsorshipPackages,
+  handleSponsorshipPreview,
+  handleSponsorshipSaveAssignment,
+  handleSponsorshipSavePackage,
+  handleSponsorshipSaveSponsor,
+  handleSponsorshipSponsorStatus,
+  handleSponsorshipTransitions,
+} from "./sponsorship.ts";
+
 export interface HandlerContext {
   readonly request: Request;
   readonly env: Env;
@@ -170,6 +188,25 @@ export const HANDLERS: Record<string, RouteHandler> = {
   "POST /advertising/analytics": handleAdAnalytics,
   "GET /advertising/diagnostics": handleAdDiagnostics,
   "POST /advertising/maintenance": handleAdMaintenance,
+
+  // sponsorship — the public band first, then the desk. Read this list as two audiences: the first two are
+  // what a match page and a sponsorship enquiry page fetch, and everything under `/sponsorship/admin/` is
+  // what a person with a job to do fetches. The split is the security model, restated in code order.
+  "GET /sponsorship": handleSponsorshipBand,
+  "GET /sponsorship/packages": handleSponsorshipPackages,
+  "GET /sponsorship/admin/sponsors": handleSponsorshipAdminSponsors,
+  "POST /sponsorship/admin/sponsors": handleSponsorshipSaveSponsor,
+  "POST /sponsorship/admin/sponsors/:id/status": handleSponsorshipSponsorStatus,
+  "POST /sponsorship/admin/sponsors/:id/branding": handleSponsorshipBrandingUpload,
+  "GET /sponsorship/admin/packages": handleSponsorshipAdminPackages,
+  "POST /sponsorship/admin/packages": handleSponsorshipSavePackage,
+  "GET /sponsorship/admin/assignments": handleSponsorshipAdminAssignments,
+  "POST /sponsorship/admin/assignments": handleSponsorshipSaveAssignment,
+  "POST /sponsorship/admin/assignments/:id/status": handleSponsorshipAssignmentStatus,
+  "POST /sponsorship/admin/preview": handleSponsorshipPreview,
+  "GET /sponsorship/admin/transitions": handleSponsorshipTransitions,
+  "GET /sponsorship/admin/diagnostics": handleSponsorshipDiagnostics,
+  "POST /sponsorship/admin/maintenance": handleSponsorshipMaintenance,
 };
 
 export async function dispatchRoute(ctx: HandlerContext, match: Matched): Promise<Response> {

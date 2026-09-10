@@ -91,7 +91,10 @@ function refusalMessage(reason: string, detail?: Record<string, unknown>): strin
   }
 }
 
-function bucketFor(ctx: HandlerContext): MediaBucket {
+/** The bound bucket, or a 503 that names the missing binding. Exported for Phase 8's sponsor upload, which
+ *  writes through this accessor and this pipeline: a second bucket lookup is how a second set of cache
+ *  headers and a second idea of "configured" appear. */
+export function bucketFor(ctx: HandlerContext): MediaBucket {
   const bucket = ctx.env.MEDIA_BUCKET as MediaBucket | undefined;
   if (!bucket) {
     // A configuration error, reported as one. Answering 200 with an object that

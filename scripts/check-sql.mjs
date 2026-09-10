@@ -6,6 +6,8 @@
  *   node scripts/check-sql.mjs --dsn postgres://user:***@127.0.0.1:5432/kicklive_scratch
  *   KICKLIVE_SQL_TEST_DSN=postgres://… node scripts/check-sql.mjs --flow
  *   … --skip=flow --keep
+ *   … --fresh            recreate the scratch database first (see the comment at the flag: a chain that is
+ *                        re-applied onto a database holding later-phase rows reports a defect that is not there)
  *
  * WHY THIS EXISTS. Until it did, the migrations in this repository had only ever been *read*. A text
  * review cannot see the eight classes of defect this file found on its first run (and `tests/unit/sql-shape.test.ts`
@@ -154,6 +156,7 @@ async function runPsql(dsn, sql) {
 async function main() {
   const files = [BASELINE, ...migrationFiles()];
   const driver = await loadDriver();
+
   if (driver.kind === "psql" && !opt("psql") && !flag("psql")) {
     console.log(
       [
@@ -171,6 +174,54 @@ async function main() {
     return 0;
   }
 
+  if (!flag("allow-any-database") && !/(scratch|test|ci|local)/i.test(DSN)) {
+    throw new Error(
+      `refusing to run against ${DSN || "(no DSN)"}: the DSN must name a scratch database (its text has to contain ` +
+        `"scratch", "test", "ci" or "local") unless --allow-any-database is passed. This script applies migrations and ` +
+        `writes rows; pointing it at production is how a check becomes an incident.`,
+    );
+  }
+
+  if (flag("fresh") && driver.kind !== "pg") {
+    // The psql path shells out one transaction per statement and never holds a session, so it has no way to
+    // release the database it is about to drop — and it runs no flow either, which makes a reset there a
+    // wipe with nothing behind it. Name the missing dependency instead of failing inside a constructor.
+    throw new Error("--fresh needs the `pg` driver (npm i --no-save pg); create the scratch database by hand for --psql runs");
+  }
+
+  if (flag("fresh") && flag("allow-any-database")) {
+    // Two flags that should never meet. `--allow-any-database` exists so a reviewer can point the *apply*
+    // passes at something unusual; `--fresh` drops a database. Keeping them apart means the destructive half
+    // of this tool is always governed by the name check, with no combination that opts out of it.
+    throw new Error("--fresh and --allow-any-database are mutually exclusive: a flag that drops a database only runs against a scratch name");
+  }
+  if (flag("fresh")) {
+    // WHY THIS EXISTS. The rerun pass re-applies every migration, and Phase 7's swap of
+    // `media_assets_kind_check` is a drop-and-re-add to *its* nine-kind list, which Phase 8 then widens to
+    // ten. On a database left holding a `sponsors` asset row — the usual debris of a flow run that aborted
+    // before its cleanup — Phase 7's rerun fails for a reason that is not a defect anywhere. The alternative
+    // fixes were worse: narrowing Phase 8 to dodge it, or editing a committed migration whose production
+    // apply already happened and will never be replayed. A scratch database is supposed to be scratchable,
+    // so the checker is given a way to say that out loud. It is opt-in, because destroying a database is
+    // never a default, and it runs after the name check above, which is what bounds it.
+    const url = new URL(DSN);
+    const dbname = decodeURIComponent(url.pathname.replace(/^\//, ""));
+    if (!dbname) throw new Error(`--fresh needs a database name in the DSN, got ${DSN}`);
+    const { Client } = driver.pg;
+    const admin = new Client({ connectionString: new URL(`${url.protocol}//${url.username}:${url.password}@${url.host}/postgres`).href });
+    await admin.connect();
+    // `with (force)` (PG13+) because this script's own previous session may still be holding the database,
+    // and "drop the scratch database" that quietly fails with "is being used by another user" is the worst
+    // possible outcome of a flag whose entire job is to remove state.
+    // Quoted, and doubled quotes escaped, because a database name is an identifier and `drop database` takes
+    // no parameter: the only safe form is one the parser cannot reinterpret.
+    const quoted = `"${dbname.replace(/"/g, '""')}"`;
+    await admin.query(`drop database if exists ${quoted} with (force)`);
+    await admin.query(`create database ${quoted}`);
+    await admin.end();
+    console.log(`ok    fresh: recreated database ${dbname}`);
+  }
+
   let client = null;
   const query = async (sql) => {
     if (client) return client.query(sql);
@@ -184,13 +235,6 @@ async function main() {
     await client.query("set session_preparation_mode = 'simple'").catch(() => {});
   }
 
-  if (!flag("allow-any-database") && !/(scratch|test|ci|local)/i.test(DSN)) {
-    throw new Error(
-      `refusing to run against ${DSN || "(no DSN)"}: the DSN must name a scratch database (its text has to contain ` +
-        `"scratch", "test", "ci" or "local") unless --allow-any-database is passed. This script applies migrations and ` +
-        `writes rows; pointing it at production is how a check becomes an incident.`,
-    );
-  }
   let failed = 0;
   const step = async (label, sql, options = {}) => {
     try {
@@ -222,9 +266,13 @@ async function main() {
     await step(`rerun   ${file}`, read(file), { bodies: "on" });
   }
   if (!flag("skip=flow")) {
-    const { runFlow } = await import(path.join(ROOT, "scripts", "sql-flow.mjs"));
-    const flow = await runFlow({ query, log: console.log });
-    failed += flow.failed;
+    // Both flows in one session: the admin flow leaves the catalog in a state the sponsorship flow reads,
+    // and importing the module twice would be a second copy of the same fixtures running in an order nobody
+    // chose. Each returns its own failure count and both are added, so a red run says how red.
+    const { runFlow, runSponsorshipFlow } = await import(path.join(ROOT, "scripts", "sql-flow.mjs"));
+    const admin = await runFlow({ query, log: console.log });
+    const sponsor = await runSponsorshipFlow({ query, log: console.log });
+    failed += admin.failed + sponsor.failed;
   }
   // No cleanup by default, and no `drop schema public cascade` ever: this script is pointed at a DSN by
   // hand, and a checker that destroys a schema it was pointed at is a worse instrument than one that
