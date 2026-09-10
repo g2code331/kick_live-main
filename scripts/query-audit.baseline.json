@@ -1,0 +1,15 @@
+{
+  "totals": {
+    "querySites": 217,
+    "reads": 127,
+    "writes": 90,
+    "rpc": 6,
+    "starSelects": 45,
+    "unboundedReads": 52,
+    "files": 43,
+    "tables": 20,
+    "pollers": 6,
+    "pollsThatRefetch": 1
+  },
+  "generatedBy": "scripts/query-audit.mjs --static"
+}
