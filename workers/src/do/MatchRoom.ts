@@ -40,6 +40,8 @@
  */
 import type { Env } from "../env.ts";
 import { logError } from "../lib/debug.ts";
+import { flushObservations, observe, observeGauge } from "../lib/observability.ts";
+import { classify } from "../lib/errors.ts";
 import { ApiError, json, ok } from "../lib/response.ts";
 import { assertRecordable, inspectEvent, type EventLike } from "../lib/matchEvents.ts";
 import { assertTransition, canRecordEvents, clockKind, MATCH_STATUS_VALUES, minuteCeiling, periodOf, type MatchStatus } from "../lib/matchLifecycle.ts";
@@ -108,6 +110,9 @@ export class MatchRoom {
   /** Only used to avoid re-sending a MATCH_CLOCK frame every 15 seconds for a minute that has not moved. */
   lastMinuteSent = -1;
 
+  /** When the connections gauge was last sampled. See `emitConnectionsGauge`. */
+  lastGaugeAt = 0;
+
   constructor(state: DurableObjectState, env: Env) {
     this.state = state;
     this.env = env;
@@ -126,8 +131,13 @@ export class MatchRoom {
     const action = url.pathname.replace(/^\/\d+/, "").replace(/\/+$/, "");
     try {
       switch (`${request.method} ${action}`) {
-        case "GET /snapshot":
+        case "GET /snapshot": {
+          // The fallback transport's read: an SSE client, a poller, or a socket that gave up. Counted apart
+          // from the pushed snapshots so 'the websocket layer is not working' is visible while it is still
+          // only a ratio rather than a complaint.
+          observe({ subsystem: "live", metric: "snapshots", route: `/live/matches/:matchId`, dimension: "poll", samples: 1 });
           return ok(await this.snapshotFrame(matchId, await this.load(matchId)));
+        }
         case "GET /events":
           return ok(await this.replay(matchId, Number(url.searchParams.get("after") ?? "0")));
         case "GET /diagnostics":
@@ -143,11 +153,23 @@ export class MatchRoom {
         case "POST /lock":
           return await this.serialise(() => this.handleLock(matchId, request));
         case "POST /refresh":
+          observe({ subsystem: "live", metric: "snapshots", route: `/live/matches/:matchId`, dimension: "poll", samples: 1 });
           return ok(await this.snapshotFrame(matchId, await this.refresh(matchId)));
         default:
           return json({ success: false, error: { code: "NOT_FOUND", message: `No MatchRoom action for ${request.method} ${action}` } }, { status: 404 });
       }
     } catch (err) {
+      // A live-match mutation that failed is the number an operator cares about most at 21:00, and this catch
+      // is the only place that sees every failure of every action. Counted by category (database, websocket,
+      // validation) and against the route pattern, never with the message: the sentence is already in the log
+      // line below with the same join key, and a metric that carries text is a log in disguise.
+      observe({
+        subsystem: "live",
+        metric: "event_failures",
+        route: "/live/matches/:matchId",
+        dimension: classify(err).category,
+        samples: 1,
+      });
       if (err instanceof ApiError) {
         return json(
           { success: false, error: { code: err.code, message: err.message, ...(err.fields ? { fields: err.fields } : {}), ...(err.detail ? { detail: err.detail } : {}) } },
@@ -165,9 +187,17 @@ export class MatchRoom {
    * on the returned promise.
    */
   private serialise<T>(work: () => Promise<T>): Promise<T> {
+    const queuedAt = Date.now();
     const run = this.tail.then(work, work);
     this.tail = run.then(
       () => undefined,
+      () => undefined,
+    );
+    // How long a committed change waited behind the tail — the part of a fan's 'the goal has not appeared yet'
+    // that the network is not responsible for. This attaches a second consumer of the same promise instead of
+    // chaining onto the returned one, so the caller still sees the original promise and its original failure.
+    run.then(
+      () => observe({ subsystem: "live", metric: "lag", route: "/live/matches/:matchId", dimension: "write_tail", samples: 1, durationMs: Date.now() - queuedAt }),
       () => undefined,
     );
     return run;
@@ -337,6 +367,7 @@ export class MatchRoom {
     // The commit succeeded but the RPC handed back no row (only possible if the event was folded into
     // another one). Rather than invent a frame, send the truth: a fresh snapshot, which every client
     // already knows how to apply.
+    observe({ subsystem: "live", metric: "snapshots", route: `/live/matches/:matchId`, dimension: "push", samples: 1 });
     const snapshot = await this.snapshotFrame(matchId, await this.load(matchId));
     if (changed) await this.broadcast(matchId, snapshot, "all");
     return ok({ accepted: true, duplicate: result.duplicate === true, changed, snapshot }, { requestId: body.requestId });
@@ -499,6 +530,19 @@ export class MatchRoom {
    * snapshot attached, so a stale draft is *decided*, never discarded (step 15).
    */
   private async conflict(matchId: number, room: RoomState, reason: SyncConflictMessage["reason"], clientEventId: string | null, detail: string): Promise<Response> {
+    // The reason is already a bounded enum, so it can be the dimension verbatim. What is not recorded is the
+    // client event id or the rejected payload: a refused frame is a count, and its contents are retrievable
+    // from the log by whoever sent them.
+    observe({
+      subsystem: "live",
+      metric: "rejected",
+      route: `/live/matches/:matchId`,
+      dimension: String(reason)
+        .toUpperCase()
+        .replace(/[^A-Z0-9_]/g, "_")
+        .slice(0, 32),
+      samples: 1,
+    });
     const snapshot = await this.snapshotFrame(matchId, room);
     const frame: SyncConflictMessage = {
       version: PROTOCOL_VERSION,
@@ -550,20 +594,35 @@ export class MatchRoom {
     if (floor >= room.sequence) return { mode: "events", events: [], ...now };
     const buffered = room.events.filter((e) => e.sequence > floor);
     const lowest = buffered.length > 0 ? Math.min(...buffered.map((e) => e.sequence)) : Number.POSITIVE_INFINITY;
-    if (buffered.length > 0 && lowest <= floor + 1 && buffered.length < RETAINED_EVENTS) return { mode: "events", events: buffered, ...now };
+    if (buffered.length > 0 && lowest <= floor + 1 && buffered.length < RETAINED_EVENTS) {
+      return this.countReconnect(matchId, "resume", { mode: "events", events: buffered, ...now });
+    }
 
     try {
       const rows = await loadEvents(this.reader(request), matchId, { afterSequence: floor, limit: MAX_REPLAY_EVENTS });
-      if (rows.length === 0) return { mode: "snapshot", events: [], ...now, reason: "nothing after that sequence" };
+      if (rows.length === 0) return this.countReconnect(matchId, "snapshot", { mode: "snapshot", events: [], ...now, reason: "nothing after that sequence" });
       const coversGap = Math.min(...rows.map((e) => e.sequence)) <= floor + 1;
-      if (!coversGap || rows.length >= MAX_REPLAY_EVENTS) return { mode: "snapshot", events: [], ...now, reason: "gap too wide to replay" };
-      return { mode: "events", events: rows, ...now };
+      if (!coversGap || rows.length >= MAX_REPLAY_EVENTS) {
+        return this.countReconnect(matchId, "snapshot", { mode: "snapshot", events: [], ...now, reason: "gap too wide to replay" });
+      }
+      return this.countReconnect(matchId, "resume", { mode: "events", events: rows, ...now });
     } catch (err) {
       // Postgres down: say so rather than pretending "nothing happened", which would silently drop
       // events the client then never re-asks for.
       if (err instanceof ApiError && (err.code === "DEPENDENCY_FAILED" || err.code === "INTERNAL_ERROR")) throw err;
-      return { mode: "snapshot", events: [], ...now, reason: "replay unavailable" };
+      return this.countReconnect(matchId, "snapshot", { mode: "snapshot", events: [], ...now, reason: "replay unavailable" });
     }
+  }
+
+  /**
+   * One sample per socket coming back, and which way it came back: 'resume' (the retained buffer covered the
+   * gap — free and instant) or 'snapshot' (the client had to be rebuilt from a full read). A spike in the
+   * second after a deploy is the signal that the retained buffer was too short for the outage, which is a
+   * number worth having and the only reason this helper exists.
+   */
+  private countReconnect<T extends { mode: "events" | "snapshot" }>(matchId: number, kind: "resume" | "snapshot", result: T): T {
+    observe({ subsystem: "live", metric: "reconnects", route: `/live/matches/:matchId`, dimension: kind, samples: 1 });
+    return result;
   }
 
   private async diagnostics(matchId: number): Promise<Record<string, unknown>> {
@@ -614,10 +673,18 @@ export class MatchRoom {
   async alarm(): Promise<void> {
     const room = await this.state.storage.get<RoomState>("room");
     const viewers = count(this.state.getWebSockets(VIEWERS(this.matchIdOf(room))));
+    // The tick is the Durable Object's only guaranteed moment to hand telemetry over. A room's samples sit in
+    // this isolate's buffer, and an isolate is evicted whenever the platform feels like it, so a room that
+    // never flushed would simply stop reporting mid-match — which is exactly the failure an operator would
+    // read as "the crowd left". Both exits from this function flush, and the gauge below is what makes
+    // "how many people were watching, and for how long" answerable afterwards.
+    this.emitConnectionsGauge(room ? room.matchId : this.matchIdOf(room), viewers);
+    await flushObservations(this.env).catch(() => undefined);
     // Nobody watching, or a stopped clock: go back to sleep instead of burning quota. The next mutation
     // or socket re-arms it.
     if (!room || viewers === 0 || clockKind(room.status) !== "wallclock") {
       await this.state.storage.deleteAlarm();
+      await flushObservations(this.env).catch(() => undefined);
       return;
     }
     const minute = this.minuteOf(room);
@@ -738,6 +805,21 @@ export class MatchRoom {
   }
 
   /** The match id lives in the socket's tag, so a hibernated room can still tell which match to serve. */
+  /**
+   * One reading per minute per room, which is what makes the stored number mean what the panel says it means.
+   *
+   * `metric_rollups.value_sum` accumulates every sample that arrives for a bucket, so a gauge emitted on
+   * every broadcast would add the same audience once per goal, and the read that answers "how many people were
+   * watching at the busiest minute" (a `max` over per-bucket sums) would report the busiest *broadcast*. Once
+   * a minute, one reading, and the rollup's minute bucket holds exactly the audience of that minute.
+   */
+  private emitConnectionsGauge(matchId: number, viewers: number): void {
+    const now = Date.now();
+    if (now - this.lastGaugeAt < 60_000) return;
+    this.lastGaugeAt = now;
+    observeGauge("live", "connections", viewers + count(this.state.getWebSockets(CONTROLLERS(matchId))), "room", `/live/matches/:matchId`);
+  }
+
   private matchIdOfSocket(ws: WebSocket): number {
     for (const tag of this.state.getTags(ws)) {
       const found = /^m(\d+):/.exec(tag);
@@ -764,12 +846,19 @@ export class MatchRoom {
   private async broadcast(matchId: number, frame: LiveMessage, audience: "all" | "controllers"): Promise<void> {
     const payload = JSON.stringify(frame);
     const sockets = audience === "controllers" ? this.state.getWebSockets(CONTROLLERS(matchId)) : this.state.getWebSockets(VIEWERS(matchId));
+    let failed = 0;
     for (const socket of sockets) {
       try {
         socket.send(payload);
       } catch {
-        /* see above */
+        failed++;
       }
+    }
+    // Still swallowed, still correct, and no longer invisible. One send that throws is a socket the platform is
+    // about to remove, which is normal at the edges of a match; a *rate* of them is a room whose clients cannot
+    // hear, which is the difference between a shrug and an alert.
+    if (failed > 0) {
+      observe({ subsystem: "live", metric: "event_failures", route: `/live/matches/:matchId`, dimension: "WEBSOCKET_ERROR", samples: failed });
     }
   }
 }

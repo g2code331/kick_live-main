@@ -269,10 +269,11 @@ async function main() {
     // Both flows in one session: the admin flow leaves the catalog in a state the sponsorship flow reads,
     // and importing the module twice would be a second copy of the same fixtures running in an order nobody
     // chose. Each returns its own failure count and both are added, so a red run says how red.
-    const { runFlow, runSponsorshipFlow } = await import(path.join(ROOT, "scripts", "sql-flow.mjs"));
+    const { runFlow, runSponsorshipFlow, runObservabilityFlow } = await import(path.join(ROOT, "scripts", "sql-flow.mjs"));
     const admin = await runFlow({ query, log: console.log });
     const sponsor = await runSponsorshipFlow({ query, log: console.log });
-    failed += admin.failed + sponsor.failed;
+    const observability = await runObservabilityFlow({ query, log: console.log });
+    failed += admin.failed + sponsor.failed + observability.failed;
   }
   // No cleanup by default, and no `drop schema public cascade` ever: this script is pointed at a DSN by
   // hand, and a checker that destroys a schema it was pointed at is a worse instrument than one that

@@ -40,7 +40,7 @@ export interface RouteDef {
    * handler sets `cache-control` itself and `finalise` leaves it alone (per-object media policy).
    */
   readonly cache: CacheClass;
-  readonly phase: 2 | 3 | 4 | 5 | 6 | 7 | 8;
+  readonly phase: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
   readonly summary: string;
   /** What the handler has to enforce beyond the capability, so it is not "discovered" later. */
   readonly invariants?: string;
@@ -1082,6 +1082,166 @@ export const ROUTES: readonly RouteDef[] = [
     summary: "End what has run out, then report, without waiting for the next hour.",
     invariants:
       "`kicklive_sponsorship_expire_due` (bounded) then `kicklive_sponsorship_diagnostics`, in that order, idempotent. Expiry is a state change and an epoch bump, so the public band stops serving an expired sponsor on the next request instead of when a CDN entry ages out.",
+  },
+  // ── observability (Phase 9) ────────────────────────────────────────────────
+  // One public door, and the twelve behind it are `admin.audit_read` or `admin.settings_write`. The split is
+  // not a filter in a handler: each row names a different database function, and the public route's function
+  // is the only one granted to `anon`. Revoking a grant, not editing this file, is what changes an answer.
+  {
+    method: "GET",
+    pattern: "/observability/health",
+    capability: "public.read",
+    cache: "none",
+    rateLimit: "public",
+    phase: 9,
+    implemented: true,
+    summary: "High-level status for a status page or an uptime probe: overall colour, when it was measured, one line per component.",
+    invariants:
+      "`kicklive_health_read` returns `status`, `observedAt` and `components[{component,status,ageSeconds}]` and nothing else — no reason strings, no latencies, no row counts, no versions. `no-store`, because a cached green panel during an outage is worse than no panel. Unreadable telemetry answers 200 with `degraded`/`TELEMETRY_UNAVAILABLE` rather than 503, so a content alert and an availability alert stay distinguishable.",
+  },
+  {
+    method: "GET",
+    pattern: "/observability/metrics",
+    capability: "admin.audit_read",
+    cache: "none",
+    rateLimit: "authenticated",
+    phase: 9,
+    implemented: true,
+    summary: "Requests, latency percentiles, status codes, cache behaviour and top routes for a window.",
+    invariants:
+      "`kicklive_metrics_summary` reads the rollups only — there is no raw request table to read. Percentiles are bucket bounds with an `open` flag, never interpolated, and a window older than the rollup retention answers `WINDOW_BEYOND_ROLLUP_RETENTION` instead of zeros. `subsystem` must be one of the eight and `route` must be a pattern, so a concrete path is refused rather than silently matching nothing.",
+  },
+  {
+    method: "GET",
+    pattern: "/observability/metrics/daily",
+    capability: "admin.audit_read",
+    cache: "none",
+    rateLimit: "authenticated",
+    phase: 9,
+    implemented: true,
+    summary: "Whole-day numbers, which survive for 400 days when the minute rows are kept for 14.",
+    invariants:
+      "`kicklive_metrics_daily` reads `metric_daily`, written by the compaction step and never by a request. A day still in progress appears only once it is compacted, so the honest answer for today is `not yet` — which is why this route and `/observability/metrics` are not the same query.",
+  },
+  {
+    method: "GET",
+    pattern: "/observability/live-matches",
+    capability: "admin.audit_read",
+    cache: "none",
+    rateLimit: "authenticated",
+    phase: 9,
+    implemented: true,
+    summary: "Rooms, sockets, reconnects, refused events and how stale each live match's last write is.",
+    invariants:
+      "Match ids, a status, a timestamp and an age: the response contains no viewer identity, no token and no audience list, because a room's connection count is an operational number while a room's audience list is a list of people. Reads the tables the Durable Objects mirror into, not a live socket — this route must answer during the outage it is being read for.",
+  },
+  {
+    method: "GET",
+    pattern: "/observability/notifications",
+    capability: "admin.audit_read",
+    cache: "none",
+    rateLimit: "authenticated",
+    phase: 9,
+    implemented: true,
+    summary: "Phase 5's counters: jobs, attempts, deliveries, retries, invalid tokens, queue pressure.",
+    invariants:
+      "Aggregates over `notification_jobs` and `notification_deliveries` plus the Phase 9 rollups. It never returns a device token, a token prefix or a user id: a delivery count that identifies whose push failed is not a metric. The invalid-token rate beside the delivery rate is the number that says a token pool is rotting.",
+  },
+  {
+    method: "GET",
+    pattern: "/observability/advertising",
+    capability: "admin.audit_read",
+    cache: "none",
+    rateLimit: "authenticated",
+    phase: 9,
+    implemented: true,
+    summary: "Phase 7's numbers: impressions, clicks, CTR and campaign activity, per campaign.",
+    invariants:
+      "Delegates to `kicklive_ad_analytics` grouped by campaign, so there is exactly one definition of an impression in this system and this route cannot invent a second one. No viewer is identifiable in the response: no `placement_events` rows, no per-session series, no behavioural profile.",
+  },
+  {
+    method: "GET",
+    pattern: "/observability/alerts",
+    capability: "admin.audit_read",
+    cache: "none",
+    rateLimit: "authenticated",
+    phase: 9,
+    implemented: true,
+    summary: "The conditions worth waking for, as codes with the numbers that produced them.",
+    invariants:
+      "`kicklive_observability_alerts`: nine codes, each with a threshold from `observability_config` and a sample floor below which it stays quiet, because an error rate over three requests is noise. This is alert readiness, not a pager — nothing here contacts a third party, and the route exists so a status page or a spare cron minute can decide to.",
+  },
+  {
+    method: "GET",
+    pattern: "/observability/audit",
+    capability: "admin.audit_read",
+    cache: "none",
+    rateLimit: "authenticated",
+    phase: 9,
+    implemented: true,
+    summary: "Recent privileged actions from `activity_logs`, newest first, filterable by action and entity.",
+    invariants:
+      "`kicklive_audit_list`, limit 1–200. Read-only twice over: this is the only audit route the Worker offers, the admin policy on the table is `for select`, and `activity_logs_append_only` refuses UPDATE and DELETE for every role including the owner — with the one named exception for `on delete set null`.",
+  },
+  {
+    method: "GET",
+    pattern: "/observability/admin/health",
+    capability: "admin.audit_read",
+    cache: "none",
+    rateLimit: "authenticated",
+    phase: 9,
+    implemented: true,
+    summary: "The same components as the public health route, with reasons, detail, consecutive failures and age.",
+    invariants:
+      "`kicklive_health_read_admin`, gated on `is_admin()` inside the function. The difference between this and `/observability/health` is a grant and a function rather than a field list in a handler, which is the only version of `the public endpoint leaks nothing` that survives somebody adding a column to the health table in a later phase.",
+  },
+  {
+    method: "GET",
+    pattern: "/observability/admin/diagnostics",
+    capability: "admin.audit_read",
+    cache: "none",
+    rateLimit: "authenticated",
+    phase: 9,
+    implemented: true,
+    summary: "Whether the telemetry is wired up: row counts, coverage, retention settings, grants, unknown metric names.",
+    invariants:
+      "`kicklive_observability_diagnostics` returns counts and short tokens only, so the response is safe to leave open in a support channel — the same rule Phase 8's diagnostics row follows. `metricsUnknown` is how a metric added in code and not in the catalogue becomes a review item instead of an anonymous row.",
+  },
+  {
+    method: "GET",
+    pattern: "/observability/admin/catalogue",
+    capability: "admin.audit_read",
+    cache: "none",
+    rateLimit: "authenticated",
+    phase: 9,
+    implemented: true,
+    summary: "Every subsystem, metric and dimension the system knows how to record, and what each is for.",
+    invariants:
+      "`kicklive_observability_catalogue` is a SQL function over a VALUES list; `workers/src/lib/observability.ts` keeps the same table in code, and a unit test diffs the two in both directions, so the documented meaning of a counter cannot drift from the counter.",
+  },
+  {
+    method: "POST",
+    pattern: "/observability/admin/probe",
+    capability: "admin.settings_write",
+    cache: "none",
+    rateLimit: "admin-blast",
+    phase: 9,
+    implemented: true,
+    summary: "Run the three dependency probes now and write down what they said.",
+    invariants:
+      "R2 `head`, `kicklive_health_recompute_derived`, one read round trip, then `kicklive_health_write` per component. Never a 500 for a red component: the verdict is the payload, so an unhappy dependency answers `ok: true` with `unavailable` in the body. It does not touch retention — `is it up` and `delete what is old` are different verbs on different routes.",
+  },
+  {
+    method: "POST",
+    pattern: "/observability/admin/maintenance",
+    capability: "admin.settings_write",
+    cache: "none",
+    rateLimit: "admin-blast",
+    phase: 9,
+    implemented: true,
+    summary: "Compact one day into `metric_daily`, then drop what the retention settings say to drop.",
+    invariants:
+      "Requires `confirm: true` because it deletes rows. `kicklive_metrics_rollup_daily` is delete-then-insert for a single finished day (idempotent, minute rows only) and `kicklive_metrics_purge` clamps both ages to at least a day and reports `auditTouched: false` — nothing in this path has ever deleted from `activity_logs`.",
   },
 ];
 

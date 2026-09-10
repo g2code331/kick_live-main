@@ -304,6 +304,87 @@ the last green run of the flow. Before this migration is applied anywhere, run
 require both flows to print `ALL PASS`. Deploy order is staging → seeded rate card → production → desk
 smoke test with devtools open, in architecture note §16.
 
+## Phase 9 — analytics, monitoring and observability 🟢 code done, tests green, ⚠ migration not applied, ⚠ SQL flow never executed here
+
+Design, decisions and honest status: **`docs/OBSERVABILITY_ARCHITECTURE.md`**. The one sentence that explains
+every other decision: **a request is a number in a bucket, plus one log line if it failed or was slow — there is
+no raw request table and none is planned.** What shipped:
+
+- **Schema** — `supabase/migrations/20260915120000_phase9_observability.sql`, additive only: `metric_rollups`
+  (minute buckets, fixed-interval counters, a ten-wide latency histogram, 14-day retention), `metric_daily`
+  (400 days), `system_health` (nine components keyed by primary key so a second opinion cannot grow),
+  `observability_config` (one row: buckets, retentions, flush interval, alert thresholds, caps) and a 26-row
+  metric catalogue exposed as the `kicklive_observability_catalogue()` function rather than a table, so it
+  cannot drift into a second source of truth that needs its own grants. RLS on with **no policies**; table DML to `service_role` only. §16 `do $verify$`
+  raises instead of installing silently — a CHECK that never fires, a policy that says `for all` where it should
+  say `for select`, and a grant loop whose `like` pattern misses a function are the three ways a migration
+  written without a database lands wrong, and each one is asserted here.
+- **Worker pipeline** — `lib/observability.ts`: a bounded per-isolate buffer (`MAX_KEYS = 400` series, excess
+  folds into `*` and `bufferStats().overflowed` says how much), flushed every 20s / 400 samples through
+  `kicklive_metrics_record`, which refuses per entry (nine named reasons) instead of refusing the batch, clamps
+  `errors ≤ samples`, rejects a run of 3+ digits in a route and rejects any secret-shaped key or value.
+  `observeGauge` samples a gauge **at most once per bucket**, because `value_sum` is a sum over the bucket.
+- **Logs** — the same file writes one JSON line per notable request with a closed field set
+  (`ts, level, subsystem, requestId, clientRequestId, method, route, status, durationMs, category, cache, …`):
+  no path, no query, no body, no headers, no IP, no user agent, no stack. `LOG_MODE` (`off|errors|slow|all`)
+  defaults to **`errors`** — every failure and every slow request, no healthy 200s.
+- **Correlation** — the client's `x-request-id` (`src/lib/api/client.ts:177`) is adopted when it matches
+  `/^[A-Za-z0-9._-]{8,64}$/` and minted otherwise; it rides into queue messages as
+  `payload.trace = { requestId, origin, at }`, re-read without trusting any field, and into
+  `activity_logs.details.request_id`. No `traceparent`, no vendor tracer: the argument is in architecture note §4.
+- **Errors** — `lib/errors.ts` classifies every `ApiCode` into
+  `AUTHENTICATION|AUTHORIZATION|VALIDATION|DATABASE|R2|QUEUE|FCM|WEBSOCKET|INTERNAL` (`classify` is total over
+  the union, and a test proves it) and `failWithCategory` adds one response header, `x-error-category`.
+  **The error envelope was not edited**: 100 routes and the frontend's `failure()` parser depend on its shape,
+  and a header is present for tooling while being ignorable by users.
+- **Audit hardening, in place** — §7: the admin policy on `activity_logs` becomes **select-only**; the
+  `activity_logs_append_only` trigger refuses every delete and every update except the profile FK's own
+  `on delete set null`; a `security definer` writer `kicklive_audit_record` takes the subject from the JWT
+  (`user_id := coalesce(auth.uid(), p_actor_id)` — an argument never overrides), validates the action and
+  entity-type shapes, refuses credentials in `details`, and injects `via` / `actor_role` / `request_id`.
+  `kicklive_audit_list` clamps `limit` to 1..200. No parallel audit table, no edits to committed phase SQL.
+  `middleware/audit.ts` audits exactly the privileged routes whose SQL does not already (the ten in
+  `AUDITED_IN_SQL` are excluded, set-difference asserted), and a failed audit write is logged once and never
+  surfaces — a recorded trade, in architecture note §9.
+- **Health** — `probeDependencies` on the five-minute beat plus `kicklive_health_recompute_derived` for the
+  computed components; `GET /observability/health` reads `kicklive_health_read()` (granted to `anon`,
+  projection = `component/status/ageSeconds`, nothing else) and the admin panel reads
+  `kicklive_health_read_admin()` (+ reason code, flat detail, streak, staleness, live alerts). The difference
+  is a grant and two functions rather than a field list in a handler, so a new column cannot leak.
+- **Routes** — 13 new (`/observability/{health,metrics,metrics/daily,live-matches,notifications,advertising,alerts,audit}`
+  plus `admin/{health,diagnostics,catalogue,probe,maintenance}`), all `cache: "none"`, reads gated on
+  `admin.audit_read` + `authenticated`, the two POSTs on `admin.settings_write` + `admin-blast`. Router
+  catalogue: **101 routes**. Metrics are also emitted from inside `MatchRoom` (lag, reconnects, snapshot
+  poll/push, rejects, broadcast failures, connections gauge) and from both queue consumers — no fan identity
+  anywhere in it.
+- **Frontend** — `src/lib/data/observability.ts` mirrors the SQL projections field by field and a test compares
+  those types against the migration's `return jsonb_build_object` blocks; `SystemMonitoring.tsx` renders
+  SYSTEM HEALTH / API / LIVE MATCHES / NOTIFICATIONS / ADVERTISING, an alerts strip (code + evidence, never
+  `message`) and the privileged-action list, per-section fetches, **no chart library** — percentiles are shown
+  as bucket bounds with the `open` flag, which is the precision the histogram actually has.
+- **Retention** — `kicklive_metrics_rollup_daily` (delete-then-insert one finished day, idempotent, and the
+  reason no hourly writer exists) and `kicklive_metrics_purge` (ages clamped to ≥ 1 day, `auditTouched: false`
+  always — no function in this migration can delete from `activity_logs`) both ride the existing hourly media
+  sweep rather than adding a cron line. Alerts are computed at read time against the config row; nine codes.
+
+**Not done, and said so rather than hidden**: no external metrics vendor or dashboard product; no hourly rollup
+writer (an hour-granular read of `metric_rollups` returns nothing today — the summary function groups minute
+rows itself); no audit retention job, by design, with `diagnostics` reporting age instead; no alert _delivery_
+(paging is a product, not a metric); no client-side performance-beacon ingestion, which would have needed a new
+public write path; no `system.diagnostics` capability (reads ride `admin.audit_read`); and
+`AdminPortal.logActivity`'s three browser inserts into `activity_logs` are left alone and documented as **a
+record, not evidence** (architecture note §10). `activity_logs` has no `error_category` column — the category
+lives on the response header and in the log line only.
+
+**Blocking verification**: this sandbox has no Postgres (`initdb`/`psql` absent, no container runtime, not
+root), so `node scripts/check-sql.mjs` could not run and **`runObservabilityFlow` — 30-odd assertions against a
+real database — has never been executed.** The unit suite (563 tests, 0 failures) cannot see whether a CHECK
+fires, so the migration is _written and linted_ (35 function bodies paren-balanced; both `tsc` projects clean;
+`prettier` clean; `worker-routes --check` agrees at 101; `gates.mjs` and `verify.mjs check` green) rather than
+_proven_. Before applying anywhere:
+`node scripts/check-sql.mjs --dsn "postgres://kicklive@127.0.0.1:55432/kicklive_scratch" --fresh` and require
+`runFlow`, `runSponsorshipFlow` **and** `runObservabilityFlow` to print `ALL PASS`.
+
 ## Standing constraints for every phase
 
 Additive SQL only; no destructive statement without a reviewed, backed-up, separately scheduled

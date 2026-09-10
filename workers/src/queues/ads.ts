@@ -19,6 +19,7 @@
  */
 import type { Env } from "../env.ts";
 import { logDebug, logError } from "../lib/debug.ts";
+import { flushObservations, observe } from "../lib/observability.ts";
 import { AD_EVENT_NAMES, MAX_EVENTS_PER_BODY, VIEWER_KEY_PATTERN, type AdEventName } from "../lib/adPolicy.ts";
 import { supabaseAdmin } from "../services/supabase.ts";
 import type { QueueBatch } from "./notifications.ts";
@@ -85,6 +86,26 @@ export function runtimeFor(env: Env): AdEventsRuntime {
  * client that has not read the contract, and the database would refuse every row of the batch for it — so the
  * refusal happens here, where it can be logged, and the message is acked.
  */
+/**
+ * One sample per event the rollup write actually counted, by event name, and one refusal per event it did not.
+ *
+ * The reason a creative was not counted (`duplicate_window`, `out_of_window`, whatever
+ * `kicklive_ad_record_event` decides) goes to the log rather than into a dimension: an unbounded dimension
+ * value is how a metrics table turns into a log table, and the *count* of refusals is the operational fact.
+ */
+function observeAdReceipts(events: AdEventMessage[], receipts: AdEventReceipt[]): void {
+  let counted = 0;
+  for (const [index, event] of events.entries()) {
+    if (receipts[index]?.counted === true) {
+      counted++;
+      observe({ subsystem: "advertising", metric: "events", route: "/advertising/events", dimension: event.event, samples: 1 });
+    } else {
+      observe({ subsystem: "advertising", metric: "ingest", route: "/advertising/events", dimension: "refused", samples: 1 });
+    }
+  }
+  if (counted > 0) observe({ subsystem: "advertising", metric: "ingest", route: "/advertising/events", dimension: "written", samples: counted });
+}
+
 export function parseAdEvent(body: unknown): AdEventMessage | null {
   if (!body || typeof body !== "object") return null;
   const b = body as Record<string, unknown>;
@@ -152,22 +173,38 @@ export async function recordAdEvents(env: Env, events: readonly AdEventMessage[]
 export async function handleAdEventQueue(batch: QueueBatch, env: Env, deps?: Partial<AdEventsRuntime>): Promise<AdEventReceipt[]> {
   const runtime = { ...runtimeFor(env), ...(deps ?? {}) };
   const events: AdEventMessage[] = [];
+  let malformed = 0;
   for (const message of batch.messages) {
     const parsed = parseAdEvent(message.body);
     if (parsed === null) {
       message.ack();
+      malformed++;
       logError("ad-events-queue", new Error(`discarded malformed queue message: ${JSON.stringify(message.body ?? null).slice(0, 200)}`));
       continue;
     }
     events.push(parsed);
   }
-  if (events.length === 0) return [];
+  // The refusal is counted and its content is logged, and the two never meet: a message body in a metric
+  // dimension would be a per-viewer record wearing a metric's clothes, and the raw text of a malformed body is
+  // not something a dashboard can group on either.
+  if (malformed > 0) observe({ subsystem: "advertising", metric: "ingest", route: "/advertising/events", dimension: "refused", samples: malformed });
+  if (events.length === 0) {
+    await flushObservations(env).catch(() => undefined);
+    return [];
+  }
   try {
     const receipts = await runtime.sink.record(events);
     batch.ack();
+    observeAdReceipts(events, receipts);
+    await flushObservations(env).catch(() => undefined);
     return receipts;
   } catch (err) {
     logError("ad-events-queue", err);
+    // A refused *batch* is the interesting case — it is a queue redelivery loop starting — so every message in
+    // it is counted as a refusal before the retry, which is what turns 'the rollup write is failing' into a
+    // rate rather than a stack of identical log lines.
+    observe({ subsystem: "advertising", metric: "ingest", route: "/advertising/events", dimension: "refused", samples: events.length });
+    await flushObservations(env).catch(() => undefined);
     batch.retry();
     return [];
   }

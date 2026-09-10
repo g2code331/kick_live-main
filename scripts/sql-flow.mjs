@@ -757,3 +757,239 @@ export async function runSponsorshipFlow({ query, log = () => {} }) {
   log("      sponsorship flow complete");
   return { failed };
 }
+// Phase 9 — observability. The point of running this migration against Postgres at all is to find out whether
+// the constraints and the refusals *fire*, since every one of them was written without a database in reach.
+// So each assertion here aims at a CHECK or a raise that a unit test can only hope for: the rollup folding a
+// replayed flush, the redaction rules rejecting their own input, the audit trigger refusing an edit. The read
+// functions run as `authenticated` with an admin's subject because that is how the Worker calls them — a
+// service-role call has no subject, and every `is_admin()` gate in this file would answer FORBIDDEN forever.
+export async function runObservabilityFlow({ query, log = () => {} }) {
+  let failed = 0;
+  const ok = (label, pass, detail) => {
+    if (pass) log(`ok    ${label}`);
+    else {
+      failed += 1;
+      log(`FAIL  ${label}` + (detail === undefined ? "" : `  — ${JSON.stringify(detail).slice(0, 240)}`));
+    }
+  };
+  const rows = async (sql) => (await query(sql)).rows;
+  const one = async (sql) => (await rows(sql))[0] ?? null;
+  const str = (v) => `'${String(v).replace(/'/g, "''")}'`;
+  const rpc = async (fn, args = []) => {
+    const inner = args.map((a) => (a === null || a === undefined ? "null" : String(a))).join(", ");
+    const r = await one(`select (public.${fn}(${inner}))::jsonb as v`);
+    return r?.v ?? null;
+  };
+  const asRole = async (role, uid = null) => {
+    await query(`set role ${role}`);
+    await query(`set request.jwt.claim.sub = ${uid ? str(uid) : "''"}`);
+  };
+
+  const ADMIN = "11111111-1111-4111-8111-111111111111";
+  const FAN = "00000000-0000-4000-8000-000000000000";
+  await query("reset role");
+  await query(`insert into auth.users (id, email) values ('${ADMIN}', 'obs-admin@kick.test') on conflict do nothing`);
+  await query(`update public.profiles set role = 'admin' where id = '${ADMIN}'`);
+  await query(`insert into auth.users (id, email) values ('${FAN}', 'obs-fan@kick.test') on conflict do nothing`);
+
+  // One fixed instant inside the current minute: a bucket assertion that reads `now()` twice can race the clock,
+  // and a test that fails once a month is a test that gets deleted.
+  const stamp = await one(`select to_char(date_trunc('minute', now()), 'YYYY-MM-DD"T"HH24:MI:00Z') as t`);
+  const at = stamp.t;
+  await asRole("service_role", ADMIN);
+
+  // 1 · the writer. A well-formed batch lands as minute-granular rollup rows, and a replayed flush folds into
+  //     the same row — which is what makes an at-least-once queue safe to send twice.
+  const sample = (n, ms, errors = 0) => ({ subsystem: "api", metric: "requests", route: "/flow/:id", dimension: `${n}xx`, samples: 4, errors, durationMs: ms });
+  const first = await rpc("kicklive_metrics_record", [`'${JSON.stringify([sample(2, 50), sample(5, 5000, 1)])}'::jsonb`, str(at)]);
+  ok("a well-formed batch writes both series into the minute it belongs to", first?.ok === true && first?.rows === 2 && first?.bucket === at, first);
+  const rowQuery = (dim, metric) =>
+    `select samples, errors, sum_ms, min_ms, max_ms, bucket_aligned, array_length(histogram, 1) as hist_len
+       from public.metric_rollups
+      where route = '/flow/:id' and dimension = ${str(dim)} and metric = ${str(metric)} and bucket = ${str(at)}::timestamptz`;
+  const rollup = await one(rowQuery("2xx", "requests"));
+  ok("the rollup row is bucket-aligned and carries a histogram as wide as the configured buckets", rollup?.bucket_aligned === true && rollup?.hist_len === 10 && rollup?.samples === 4, rollup);
+  await rpc("kicklive_metrics_record", [`'${JSON.stringify([sample(2, 50)])}'::jsonb`, str(at)]);
+  const afterReplay = await one(rowQuery("2xx", "requests"));
+  ok("a replayed flush folds into the same row instead of duplicating it", afterReplay?.samples === (rollup?.samples ?? 0) + 4, { before: rollup?.samples, after: afterReplay?.samples });
+
+  // 2 · the refusals. A validator that rejected the whole batch would be easier to write and wrong to run: one
+  //     malformed entry must cost one entry, and the reason must name the rule so the fix is obvious from a log
+  //     line. Each entry below breaks exactly one rule, in order.
+  const dirty = [
+    sample(2, 40),
+    "not-an-object",
+    { metric: "requests" },
+    { subsystem: "bogus", metric: "requests" },
+    { subsystem: "api", metric: "HIGH" },
+    { subsystem: "api", metric: "requests", route: "/teams/123456" },
+    { subsystem: "api", metric: "requests", dimension: "status=500" },
+    { subsystem: "api", metric: "requests", route: "/flow/:id", samples: 1, detail: "Authorization: Bearer abcdef.ghijklmnop" },
+    { subsystem: "api", metric: "errors", route: "/flow/:id", dimension: "5xx", samples: 2, errors: 9 },
+  ];
+  const refused = await rpc("kicklive_metrics_record", [`'${JSON.stringify(dirty)}'::jsonb`, str(at)]);
+  const why = (i) => refused?.refused?.[i]?.reason;
+  ok("a bad entry refuses itself, not the batch", refused?.ok === true && refused?.rows === 2, refused);
+  ok(
+    "each rule names itself, so a refused entry is actionable and not a mystery",
+    why(1) === "ENTRY_NOT_OBJECT" &&
+      why(2) === "SUBSYSTEM_AND_METRIC_REQUIRED" &&
+      why(3) === "UNKNOWN_SUBSYSTEM" &&
+      why(4) === "MALFORMED_METRIC" &&
+      why(5) === "ROUTE_MUST_BE_PATTERN" &&
+      why(6) === "MALFORMED_DIMENSION" &&
+      why(7) === "SECRET_SHAPE_REFUSED",
+    { one: why(1), two: why(2), three: why(3), four: why(4), five: why(5), six: why(6), seven: why(7) },
+  );
+  const oversized = await rpc("kicklive_metrics_record", [`(select jsonb_agg(jsonb_build_object('subsystem','api','metric','requests','samples',1)) from generate_series(1, 500))::jsonb`, str(at)]);
+  ok("an oversized batch is refused whole rather than silently truncated", oversized?.ok === false && oversized?.reason === "BATCH_TOO_LARGE", oversized);
+  const clamped = await one(rowQuery("5xx", "errors"));
+  ok("errors cannot exceed samples — the writer clamps rather than trusting a caller", clamped?.errors === clamped?.samples && clamped?.errors === 2, clamped);
+  const known = await one(`select public.kicklive_observability_metric_known('api', 'zzz-not-in-the-catalogue') as known`);
+  ok("a metric absent from the catalogue is still stored, because a new route should not lose its numbers", known?.known === false, known);
+
+  // 3 · percentiles, from the histogram and with no fabricated zero.
+  await asRole("authenticated", ADMIN);
+  const summary = await rpc("kicklive_metrics_summary", [
+    str(`'${at}'::timestamptz - interval '10 minutes'`),
+    str(`'${at}'::timestamptz + interval '10 minutes'`),
+    `'api'`,
+    `'/flow/:id'`,
+    `null`,
+    `20`,
+  ]);
+  ok(
+    "the summary answers with bucket bounds, an open flag for the top bucket, and error-rate arithmetic",
+    summary?.ok === true &&
+      (summary?.totals?.samples ?? 0) >= 6 &&
+      Array.isArray(summary?.latency?.bucketsMs) &&
+      typeof summary?.latency?.p95?.boundMs === "number" &&
+      summary?.latency?.p9x !== undefined,
+    { totals: summary?.totals, p50: summary?.latency?.p50, p95: summary?.latency?.p95, open: summary?.latency?.p9x },
+  );
+  const empty = await rpc("kicklive_metrics_summary", [`'2000-01-01T00:00:00Z'::timestamptz`, `'2000-01-01T00:59:00Z'::timestamptz`, `null`, `null`, `null`, `20`]);
+  ok("an empty window reports no samples instead of a latency of zero", empty?.ok === true && empty?.totals?.samples === 0 && empty?.latency?.p95?.boundMs === null, empty);
+  const hours = await one(`select count(1)::int as n from public.metric_rollups where granularity = 'hour'`);
+  ok("nothing writes hourly rows — minute rows plus day rollups is the accepted scope", hours?.n === 0, hours);
+
+  // 4 · health. The public read is a projection of the same rows, not a filtered copy of the admin read, so
+  //     "we will hide the sensitive fields later" is not available as a shortcut.
+  await asRole("service_role", ADMIN);
+  const write = await rpc("kicklive_health_write", [`'supabase'`, `'degraded'`, `'POOL_WAIT'`, `'{"p95Ms": 1200}'::jsonb`, `false`]);
+  ok("a probe records a status, a stable reason code and a flat detail object", write?.ok !== false, write);
+  const badDetail = await rpc("kicklive_health_write", [`'supabase'`, `'degraded'`, `'POOL_WAIT'`, `'{"nested":{"deep":1}}'::jsonb`, `true`]);
+  ok("a nested detail object is refused, because that is where a credential would hide", badDetail?.reason === "DETAIL_NOT_FLAT", badDetail);
+  const badComponent = await rpc("kicklive_health_write", [`'kubernetes'`, `'ok'`, `'X'`, `'{}'::jsonb`, `true`]);
+  ok("and so is a component the health model does not have", badComponent?.reason === "UNKNOWN_COMPONENT", badComponent);
+  await asRole("anon");
+  const publicHealth = await rpc("kicklive_health_read");
+  const publicComponent = (publicHealth?.components ?? [])[0] ?? {};
+  ok("the public health response is component, status and age — nothing else", Object.keys(publicComponent).sort().join(",") === "ageSeconds,component,status", {
+    keys: Object.keys(publicComponent).sort(),
+    status: publicHealth?.status,
+  });
+  const anonAdmin = await rpc("kicklive_health_read_admin");
+  ok("a stranger cannot open the admin snapshot", anonAdmin === null || anonAdmin?.ok === false || anonAdmin?.code === "FORBIDDEN", anonAdmin);
+  await asRole("authenticated", ADMIN);
+  const adminHealth = await rpc("kicklive_health_read_admin");
+  const adminComponent = (adminHealth?.components ?? []).find((c) => c.component === "supabase") ?? {};
+  ok(
+    "the admin snapshot carries the reason, the streak and the staleness flag",
+    adminComponent.reason === "POOL_WAIT" && adminComponent.consecutiveFailures >= 1 && "stale" in adminComponent,
+    adminComponent,
+  );
+  const alerts = await rpc("kicklive_observability_alerts", [`900`]);
+  ok(
+    "alerts evaluate over a window against the config row, with evidence attached",
+    Array.isArray(alerts?.alerts) && (alerts?.alerts ?? []).every((a) => a.code && a.severity && a.evidence !== undefined),
+    { codes: (alerts?.alerts ?? []).map((a) => a.code) },
+  );
+  const recompute = await rpc("kicklive_health_recompute_derived");
+  ok("the derived components are written by the definer that owns them", recompute?.ok !== false, recompute);
+
+  // 5 · the audit trail: subject from the JWT, secrets refused, and no way to edit it from SQL.
+  const audited = await rpc("kicklive_audit_record", [`'flow.probe'`, `'match'`, `null`, `'flow-target'`, `'{"changed": 2}'::jsonb`, `'req-flow-1'`, `null`]);
+  const auditRow = await one(`select user_id, id, details from public.activity_logs where action = 'flow.probe' order by id desc limit 1`);
+  ok("an audited action records the caller from the JWT", String(auditRow?.user_id) === ADMIN && (audited?.ok ?? true) === true, { audited, user: String(auditRow?.user_id ?? "").slice(0, 8) });
+  const forged = await rpc("kicklive_audit_record", [`'flow.probe'`, `'match'`, `null`, `'flow-target'`, `'{}'::jsonb`, `null`, `'${FAN}'`]);
+  const forgedRow = await one(`select user_id from public.activity_logs where action = 'flow.probe' order by id desc limit 1`);
+  ok("an actor_id argument never overrides the authenticated subject", String(forgedRow?.user_id) === ADMIN, { ok: forged?.ok, user: String(forgedRow?.user_id ?? "").slice(0, 8) });
+  const secretAudit = await rpc("kicklive_audit_record", [`'flow.probe'`, `'match'`, `null`, `'x'`, `'{"token":"eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJmbG93In0.abc"}'::jsonb`, `null`, `null`]);
+  ok("a credential in an audit payload is refused rather than stored forever", secretAudit?.ok === false, secretAudit);
+  await asRole("authenticated", FAN);
+  const fanAudit = await rpc("kicklive_audit_record", [`'flow.probe'`, `'match'`, `null`, `'x'`, `'{}'::jsonb`, `null`, `null`]);
+  ok("the audit writer is closed to a fan", fanAudit?.ok === false || fanAudit?.code === "FORBIDDEN", fanAudit);
+  const fanList = await rpc("kicklive_audit_list", []);
+  ok("and so is the audit read", fanList?.ok === false || fanList?.code === "FORBIDDEN", fanList);
+  const fanLive = await rpc("kicklive_live_match_metrics");
+  ok("and so are the live-match metrics", fanLive?.ok === false || fanLive?.code === "FORBIDDEN", fanLive);
+  await asRole("authenticated", ADMIN);
+  const listed = await rpc("kicklive_audit_list", [`'flow.probe'`, `null`, `null`, `null`, `null`, `50`, `0`]);
+  ok("an admin reads the trail back with the request id intact", (listed?.entries ?? []).some((e) => e.request_id === "req-flow-1") && typeof listed?.retention === "object", {
+    total: listed?.total,
+    retention: listed?.retention,
+  });
+  const badLimit = await rpc("kicklive_audit_list", [`null`, `null`, `null`, `null`, `null`, `5000`, `0`]);
+  ok("and the read is clamped, so nobody dumps the trail with one call", badLimit?.ok === false || badLimit?.code === "VALIDATION_FAILED" || (badLimit?.entries ?? []).length <= 200, badLimit);
+  for (const [label, sql] of [
+    ["delete", `delete from public.activity_logs where action = 'flow.probe'`],
+    ["edit", `update public.activity_logs set action = 'flow.forged' where action = 'flow.probe'`],
+    ["rewrite", `update public.activity_logs set details = '{"erased": true}'::jsonb where action = 'flow.probe'`],
+  ]) {
+    let outcome = "succeeded";
+    try {
+      await asRole("service_role", ADMIN);
+      await query(sql);
+    } catch (error) {
+      outcome = String(error?.message ?? error);
+    }
+    ok(`the trail refuses a ${label} even for service_role`, outcome !== "succeeded", outcome === "succeeded" ? null : outcome.slice(0, 140));
+  }
+  await query("reset role");
+  await query(`update public.activity_logs set user_id = null where action = 'flow.probe'`);
+  const survived = await one(`select count(1)::int as n from public.activity_logs where action = 'flow.probe'`);
+  ok("the one update the trigger allows is the profile delete cascading, and it only clears the subject", (survived?.n ?? 0) > 0, survived);
+  await asRole("service_role", ADMIN);
+
+  // 6 · rollup, retention, diagnostics. In the order a maintenance window would run them, because idempotence
+  //     is only proven by running the same job twice.
+  const rolled = await rpc("kicklive_metrics_rollup_daily", [`current_date`]);
+  const rolledTwice = await rpc("kicklive_metrics_rollup_daily", [`current_date`]);
+  const daily = await one(`select count(1)::int as n, coalesce(sum(samples), 0)::int as samples from public.metric_daily where day = current_date and route = '/flow/:id'`);
+  ok("the day rollup is delete-then-insert: running it twice is a re-run, not a doubling", rolled?.ok === true && rolledTwice?.rows === daily?.n && daily?.samples > 0, { rolled, rolledTwice, daily });
+  const future = await rpc("kicklive_metrics_rollup_daily", [`current_date + 1`]);
+  ok("and it refuses a day that has not happened yet", future?.ok === false && future?.reason === "DAY_IN_FUTURE", future);
+  const beforeAudit = await one(`select count(1)::int as n from public.activity_logs`);
+  const purged = await rpc("kicklive_metrics_purge", [`1`, `1`]);
+  const afterAudit = await one(`select count(1)::int as n from public.activity_logs`);
+  ok("retention clamps to a day and never touches the audit trail, whatever it is told", purged?.auditTouched === false && beforeAudit?.n === afterAudit?.n, {
+    purged,
+    before: beforeAudit?.n,
+    after: afterAudit?.n,
+  });
+  const diag = await rpc("kicklive_observability_diagnostics");
+  ok(
+    "diagnostics reports what an operator needs before a purge is ever scheduled",
+    diag?.ok === true && diag?.audit?.appendOnly === true && diag?.audit?.editablePolicies === 0 && diag?.hourlyRows === 0 && diag?.catalogue !== undefined,
+    { keys: Object.keys(diag ?? {}), audit: diag?.audit, hourly: diag?.hourlyRows },
+  );
+  const redaction = await rpc("kicklive_observability_explain", [`'user sent Authorization: Bearer abcdef.ghiJKLmnop to /x'`]);
+  ok(
+    "the redaction probe explains a refusal without storing the thing that caused it",
+    redaction?.wouldStore === false && redaction?.preview === "[redacted]" && redaction?.reason === "BEARER_TOKEN",
+    redaction,
+  );
+  const cleanText = await rpc("kicklive_observability_explain", [`'match 42 moved to second half'`]);
+  ok("and lets an ordinary sentence through, which is how we know the rule is narrow", cleanText?.wouldStore === true && cleanText?.reason === null, cleanText);
+  const quoteHeavy = await rpc("kicklive_observability_explain", [`'drop table activity_logs; -- it''s fine'`]);
+  ok("the probe takes arbitrary text as data and answers about it, never running it", quoteHeavy?.inputLength > 10 && typeof quoteHeavy?.wouldStore === "boolean", quoteHeavy);
+
+  await query("reset role");
+  await query(`delete from public.metric_rollups where route = '/flow/:id'`).catch(() => {});
+  await query(`delete from public.metric_daily where route = '/flow/:id'`).catch(() => {});
+  await query(`delete from public.system_health where component = 'supabase' and reason = 'POOL_WAIT'`).catch(() => {});
+  await query(`delete from public.activity_logs where action = 'flow.probe'`).catch(() => {});
+  await asRole("service_role", ADMIN);
+  log("      observability flow complete");
+  return { failed };
+}

@@ -212,6 +212,16 @@ export function supabaseAnon(env: Env): SupabaseRest {
 }
 
 /**
+ * Whether this environment can write through the service client at all. Telemetry asks *before* building a
+ * client, because a metric that throws on every request is a metric that gets switched off — and the answer
+ * lives here rather than as `env.SUPABASE_SERVICE_ROLE_KEY` at the call site so that the Phase 2 rule "one
+ * module may read the service-role secret" stays a fact about the codebase instead of a comment about it.
+ */
+export function hasServiceRole(env: Env): boolean {
+  return typeof env.SUPABASE_SERVICE_ROLE_KEY === "string" && env.SUPABASE_SERVICE_ROLE_KEY.trim().length > 0;
+}
+
+/**
  * RLS bypassed. Every use must be justified in a comment at the call site, and must re-check the
  * caller's capability first — this client is what makes an unauthorised write possible if it is used
  * to serve a request the caller was never allowed to make.

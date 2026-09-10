@@ -99,6 +99,21 @@ import {
   handleSponsorshipSponsorStatus,
   handleSponsorshipTransitions,
 } from "./sponsorship.ts";
+import {
+  handleObservabilityAdminHealth,
+  handleObservabilityAdvertising,
+  handleObservabilityAlerts,
+  handleObservabilityAudit,
+  handleObservabilityCatalogue,
+  handleObservabilityDaily,
+  handleObservabilityDiagnostics,
+  handleObservabilityHealth,
+  handleObservabilityLive,
+  handleObservabilityMaintenance,
+  handleObservabilityMetrics,
+  handleObservabilityNotifications,
+  handleObservabilityProbe,
+} from "./observability.ts";
 
 export interface HandlerContext {
   readonly request: Request;
@@ -207,6 +222,23 @@ export const HANDLERS: Record<string, RouteHandler> = {
   "GET /sponsorship/admin/transitions": handleSponsorshipTransitions,
   "GET /sponsorship/admin/diagnostics": handleSponsorshipDiagnostics,
   "POST /sponsorship/admin/maintenance": handleSponsorshipMaintenance,
+
+  // ── observability (Phase 9) ─────────────────────────────────────────────────
+  // The public door first, then the staff reads, then the two verbs that change something. Each key resolves
+  // to exactly one `security definer` function; the route table in `router.ts` is what decides who may call it.
+  "GET /observability/health": handleObservabilityHealth,
+  "GET /observability/metrics": handleObservabilityMetrics,
+  "GET /observability/metrics/daily": handleObservabilityDaily,
+  "GET /observability/live-matches": handleObservabilityLive,
+  "GET /observability/notifications": handleObservabilityNotifications,
+  "GET /observability/advertising": handleObservabilityAdvertising,
+  "GET /observability/alerts": handleObservabilityAlerts,
+  "GET /observability/audit": handleObservabilityAudit,
+  "GET /observability/admin/health": handleObservabilityAdminHealth,
+  "GET /observability/admin/diagnostics": handleObservabilityDiagnostics,
+  "GET /observability/admin/catalogue": handleObservabilityCatalogue,
+  "POST /observability/admin/probe": handleObservabilityProbe,
+  "POST /observability/admin/maintenance": handleObservabilityMaintenance,
 };
 
 export async function dispatchRoute(ctx: HandlerContext, match: Matched): Promise<Response> {

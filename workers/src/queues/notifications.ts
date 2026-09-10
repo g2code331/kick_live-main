@@ -18,6 +18,8 @@
  */
 import type { Env } from "../env.ts";
 import { logError } from "../lib/debug.ts";
+import { classify } from "../lib/errors.ts";
+import { flushObservations, observe } from "../lib/observability.ts";
 import { deliverJob, runtimeFor, type NotificationRepository, type DeliverOutcome, type NotificationsRuntime } from "../services/notifications.ts";
 import { redact } from "../services/fcm.ts";
 
@@ -46,10 +48,12 @@ export async function handleNotificationQueue(batch: QueueBatch, env: Env, deps?
   const runtime = { ...runtimeFor(env), ...(deps ?? {}) };
   const outcomes: DeliverOutcome[] = [];
   let retryAny = false;
+  let malformed = 0;
 
   for (const message of batch.messages) {
     const jobId = parseJobId(message.body);
     if (jobId === null) {
+      malformed++;
       // Unparseable, or a job id that is not a positive integer. Acked: retrying it would loop, and the row it
       // was meant to wake up is still pending in the database for the sweep to find.
       message.ack();
@@ -61,6 +65,11 @@ export async function handleNotificationQueue(batch: QueueBatch, env: Env, deps?
       outcomes.push(outcome);
       if (outcome.status === "retry") retryAny = true;
     } catch (err) {
+      // Counted as a failed job, and by category: a delivery failure that is really a database failure is a
+      // different 03:00 conversation, and the category comes from the same taxonomy the HTTP path uses, so the
+      // two halves of the system can be added together instead of compared by eye.
+      observe({ subsystem: "notifications", metric: "jobs", route: "/notifications", dimension: "failed", samples: 1 });
+      observe({ subsystem: "notifications", metric: "errors", route: "/notifications", dimension: classify(err).category, samples: 1 });
       // A repository or transport error that escaped `deliverJob` (a 5xx from PostgREST, say) is exactly the
       // case the retry policy exists for. The job stays `running` until the sweep's visibility timeout moves it
       // back, so this cannot double-send: the claim predicate is the guard, not the queue's at-most-once-ness.
@@ -69,9 +78,38 @@ export async function handleNotificationQueue(batch: QueueBatch, env: Env, deps?
     }
   }
 
+  if (malformed > 0) observe({ subsystem: "notifications", metric: "queue", route: "/notifications", dimension: "refused", samples: malformed });
+  for (const outcome of outcomes) observeDelivery(outcome);
   if (retryAny) batch.retry();
   else batch.ack();
+  // A batch is the unit of work a consumer has, and the isolate may be recycled the moment it ends, so this is
+  // the flush point. The 20 s throttle still applies, which costs at most the tail of one batch and saves a
+  // round trip per message.
+  await flushObservations(env).catch(() => undefined);
   return outcomes;
+}
+
+/**
+ * One job in, three numbers out: what it finished as, whether this attempt is going to be repeated, and how
+ * many devices it reached.
+ *
+ * Device counts are summed, never listed — `sent`/`failed`/`retired` are totals `deliverJob` already returns,
+ * and a per-device metric would be a history of who owns which push token. `retired` is the number to watch:
+ * it is FCM telling us a token is gone, and a retirement rate that outgrows delivery is a token pool quietly
+ * rotting while every job still reports success.
+ */
+function observeDelivery(outcome: DeliverOutcome): void {
+  observe({ subsystem: "notifications", metric: "jobs", route: "/notifications", dimension: outcome.status, samples: 1 });
+  observe({
+    subsystem: "notifications",
+    metric: "attempts",
+    route: "/notifications",
+    dimension: outcome.retryInMs === null ? "first" : "retry",
+    samples: 1,
+  });
+  if (outcome.sent > 0) observe({ subsystem: "notifications", metric: "deliveries", route: "/notifications", dimension: "delivered", samples: outcome.sent });
+  if (outcome.failed > 0) observe({ subsystem: "notifications", metric: "deliveries", route: "/notifications", dimension: "failure", samples: outcome.failed });
+  if (outcome.retired > 0) observe({ subsystem: "notifications", metric: "deliveries", route: "/notifications", dimension: "invalid_token", samples: outcome.retired });
 }
 
 function parseJobId(body: unknown): number | null {

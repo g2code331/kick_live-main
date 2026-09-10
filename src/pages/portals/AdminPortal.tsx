@@ -14,13 +14,14 @@ import MediaPublisher from './shared/MediaPublisher';
 import AppSettingsDashboard from './admin/AppSettingsDashboard';
 import UserManagement from './admin/UserManagement';
 import SponsorshipManager from './admin/SponsorshipManager';
+import SystemMonitoring from './admin/SystemMonitoring';
 import TeamDashboard from './admin/TeamDashboard';
 import TableStatistics from './admin/TableStatistics';
 import MultiMatchQueue from './admin/MultiMatchQueue';
 import SeasonManagement from './admin/SeasonManagement';
 import { assetUrl } from '../../lib/media/assets';
 
-type AdminTab = 'overview' | 'users' | 'matches' | 'teams' | 'media' | 'competitions' | 'sponsorship' | 'tables' | 'settings';
+type AdminTab = 'overview' | 'users' | 'matches' | 'teams' | 'media' | 'competitions' | 'sponsorship' | 'monitoring' | 'tables' | 'settings';
 
 export default function AdminPortal({ onNavigate }: { onNavigate: (page: string) => void }) {
   const { profile, signOut } = useAuth();
@@ -91,6 +92,7 @@ export default function AdminPortal({ onNavigate }: { onNavigate: (page: string)
     { id: 'media', label: 'Media', icon: <Newspaper size={16} />, badge: 0 },
     { id: 'users', label: 'Users', icon: <Shield size={16} />, badge: 0 },
     { id: 'sponsorship', label: 'Sponsorship', icon: <Trophy size={16} />, badge: 0 },
+    { id: 'monitoring', label: 'Monitoring', icon: <Activity size={16} />, badge: 0 },
     { id: 'tables', label: 'Tables', icon: <Target size={16} />, badge: 0 },
     { id: 'settings', label: 'Settings', icon: <Settings size={16} />, badge: 0 },
   ];
@@ -463,6 +465,7 @@ export default function AdminPortal({ onNavigate }: { onNavigate: (page: string)
 
           {activeTab === 'users' && <UserManagement />}
           {activeTab === 'sponsorship' && <SponsorshipManager />}
+          {activeTab === 'monitoring' && <SystemMonitoring />}
           {activeTab === 'teams' && <TeamDashboard />}
           {activeTab === 'tables' && <TableStatistics />}
           {activeTab === 'settings' && (
