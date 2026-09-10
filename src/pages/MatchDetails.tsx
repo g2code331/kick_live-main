@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Calendar, Users, MessageSquare, Activity, TrendingUp, Wifi, WifiOff } from 'lucide-react';
 import { useQuery } from '../lib/data';
 import { matchFixture, matchSupplements } from '../lib/data/queries.ts';
+import SponsorBand from '../components/SponsorBand.tsx';
 
 import { useMatchRoom } from '../lib/live/useMatchRoom.ts';
 
@@ -302,6 +303,16 @@ export default function MatchDetails() {
                 </div>
               </div>
             </div>
+
+            {/* Sponsorship (Phase 8): two bands, one component, no names in the code. `match` is what was sold
+                against this fixture; `competition` is what was sold against the whole competition and is shown
+                here because a fan who came for one match is the audience the sponsor paid for. Both are cached
+                reads keyed by target, so a Back trip costs nothing, and both render *nothing* when nothing has
+                been sold — an unsponsored match must not carry an empty box. */}
+            <SponsorBand kind="match" id={id} heading="Match sponsor" max={3} className="mt-2" />
+            {fixture?.competition_id ? (
+              <SponsorBand kind="competition" id={fixture.competition_id} heading="Competition partners" max={6} layout="wall" size="lg" className="glass rounded-[2rem] p-5 border border-white/10" />
+            ) : null}
           </div>
         </div>
       </div>

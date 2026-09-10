@@ -1138,6 +1138,15 @@ begin
   if p_data ? 'status' then
     return jsonb_build_object('ok', false, 'code', 'VALIDATION_FAILED', 'field', 'status', 'reason', 'STATUS_VIA_SET_STATUS_ONLY');
   end if;
+  -- `is_active` is refused for the `status` reason and for the sponsor's `logoUrl` reason at once. It is a
+  -- second door onto a column the status route already owns (with its transition row and its author), and a
+  -- save that quietly ignored it would answer `ok: true` to a desk that had just unticked "display" — the
+  -- form would look saved, the band would not change, and the reason would be sitting in a column this
+  -- function never reads. The switch exists: it is `kicklive_sponsorship_set_status(p_is_active => ...)`.
+  if p_data ? 'isActive' or p_data ? 'is_active' then
+    return jsonb_build_object('ok', false, 'code', 'VALIDATION_FAILED', 'field', 'isActive', 'reason', 'DISPLAY_SWITCH_VIA_SET_STATUS_ONLY',
+                              'detail', 'a sponsorship is shown or hidden by the status route, which records who did it');
+  end if;
   select * into v_row from public.sponsorships s where s.id = v_id;
   if v_id is not null and not found then
     return jsonb_build_object('ok', false, 'code', 'NOT_FOUND', 'reason', 'SPONSORSHIP_UNKNOWN');

@@ -516,6 +516,11 @@ export async function runSponsorshipFlow({ query, log = () => {} }) {
   const dup = await rpc("kicklive_sponsorship_save", [`'${data({ sponsorId, packageId, targetKind: "award", targetId: "goal-of-the-month", startsAt: "2026-09-01", endsAt: "2026-09-30" })}'::jsonb`]);
   ok("a re-typed renewal is a CONFLICT naming the date, not a raw 23505", dup?.reason === "DUPLICATE_ASSIGNMENT_IN_WINDOW" && dup?.field === "startsAt", dup);
 
+  const hiddenSwitch = await rpc("kicklive_sponsorship_save", [
+    `'${data({ sponsorId, packageId, targetKind: "match", targetId, startsAt: "2026-09-01", endsAt: "2026-09-30", isActive: false })}'::jsonb`,
+  ]);
+  ok("the save refuses to move the display switch rather than ignore it", hiddenSwitch?.reason === "DISPLAY_SWITCH_VIA_SET_STATUS_ONLY" && hiddenSwitch?.field === "isActive", hiddenSwitch);
+
   const live = await rpc("kicklive_sponsorship_save", [
     `'${data({ sponsorId, packageId, targetKind: "match", targetId, startsAt: "2020-01-01", endsAt: "2030-12-31", attribution: "Match sponsored by Flow", logoVariant: "light" })}'::jsonb`,
   ]);

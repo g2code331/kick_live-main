@@ -15,7 +15,7 @@
  * branch on instead of a string to match prose against.
  */
 import { readAccessToken } from "../api/index.ts";
-import { mediaUploadEndpoint } from "./assets.ts";
+import { mediaUploadEndpoint, sponsorBrandingEndpoint } from "./assets.ts";
 
 export type MediaUploadKind = "teams" | "players" | "competitions" | "news" | "team_news" | "users";
 
@@ -79,15 +79,32 @@ export interface UploadOptions {
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 
-export function uploadAsset(options: UploadOptions): Promise<MediaUploadResult> {
-  const { file, kind, entityId, alt, onProgress, signal, filename } = options;
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+/**
+ * One transport, two entry points. The XHR, the progress callback, the deadline, the abort, the single-settle
+ * guard and the error mapping all live here; what differs between a club crest and a sponsor's logo is the
+ * endpoint and the field names — which is exactly the seam worth having, because a second copy of this
+ * function is a second place to forget the deadline or the `Authorization: Bearer null` rule.
+ */
+interface MultipartSend {
+  endpoint: string;
+  /** Text form fields, in the order a form would send them. */
+  fields: Record<string, string>;
+  file: File | Blob;
+  filename?: string;
+  onProgress?: (fraction: number, loadedBytes: number, totalBytes: number) => void;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
 
-  return new Promise<MediaUploadResult>((resolve, reject) => {
+async function sendMultipart(o: MultipartSend): Promise<{ data: Record<string, unknown>; requestBytes: number }> {
+  const { endpoint, fields, file, onProgress, signal, filename } = o;
+  const timeoutMs = o.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+
+  return new Promise((resolve, reject) => {
     const body = new FormData();
-    body.append("kind", kind);
-    body.append("entityId", String(entityId));
-    if (alt) body.append("alt", alt);
+    for (const [key, value] of Object.entries(fields)) {
+      if (value !== "" && value !== undefined && value !== null) body.append(key, value);
+    }
     body.append("file", file instanceof File ? file : new File([file], filename ?? "upload", { type: file.type || "application/octet-stream" }));
 
     const xhr = new XMLHttpRequest();
@@ -107,7 +124,7 @@ export function uploadAsset(options: UploadOptions): Promise<MediaUploadResult> 
       finish(() => reject(new MediaUploadError("Upload cancelled.", { status: 0, code: "ABORTED", retryable: true })));
     };
 
-    xhr.open("POST", mediaUploadEndpoint(), true);
+    xhr.open("POST", endpoint, true);
     xhr.responseType = "text";
     if (onProgress) {
       xhr.upload.addEventListener("progress", (event) => {
@@ -142,20 +159,7 @@ export function uploadAsset(options: UploadOptions): Promise<MediaUploadResult> 
             parsed = null;
           }
           if (xhr.status >= 200 && xhr.status < 300) {
-            const data = (parsed?.["data"] ?? {}) as Record<string, unknown>;
-            finish(() =>
-              resolve({
-                assetId: Number(data["assetId"] ?? 0),
-                url: String(data["url"] ?? ""),
-                objectKey: String(data["objectKey"] ?? ""),
-                version: Number(data["version"] ?? 1),
-                bytes: Number(data["bytes"] ?? file.size),
-                contentType: String(data["contentType"] ?? file.type),
-                width: typeof data["width"] === "number" ? data["width"] : null,
-                height: typeof data["height"] === "number" ? data["height"] : null,
-                reused: data["reused"] === true,
-              }),
-            );
+            finish(() => resolve({ data: (parsed?.["data"] ?? {}) as Record<string, unknown>, requestBytes: file.size }));
             return;
           }
           finish(() => reject(toUploadError(xhr.status, parsed, text)));
@@ -175,6 +179,79 @@ export function uploadAsset(options: UploadOptions): Promise<MediaUploadResult> 
         finish(() => reject(new MediaUploadError(err instanceof Error ? err.message : "The session could not be read.", { status: 0, code: "NO_SESSION", retryable: true })));
       });
   });
+}
+
+/** Shared field mapping for both results: the Worker answers with the same keys for either endpoint. */
+function readAssetFields(data: Record<string, unknown>, file: File | Blob): MediaUploadResult {
+  return {
+    assetId: Number(data["assetId"] ?? 0),
+    url: String(data["url"] ?? ""),
+    objectKey: String(data["objectKey"] ?? ""),
+    version: Number(data["version"] ?? 1),
+    bytes: Number(data["bytes"] ?? file.size),
+    contentType: String(data["contentType"] ?? file.type),
+    width: typeof data["width"] === "number" ? data["width"] : null,
+    height: typeof data["height"] === "number" ? data["height"] : null,
+    reused: data["reused"] === true,
+  };
+}
+
+export function uploadAsset(options: UploadOptions): Promise<MediaUploadResult> {
+  const { file, kind, entityId, alt, onProgress, signal, filename } = options;
+  return sendMultipart({
+    endpoint: mediaUploadEndpoint(),
+    fields: { kind, entityId: String(entityId), ...(alt ? { alt } : {}) },
+    file,
+    filename,
+    onProgress,
+    signal,
+    timeoutMs: options.timeoutMs,
+  }).then((sent) => readAssetFields(sent.data, file));
+}
+
+/**
+ * Phase 8: sponsor artwork.
+ *
+ * A different endpoint and a different field name (`slot`, not `variant`) because a sponsor's logo is not
+ * "another image on an entity" — it is a reserved place in a paid arrangement, and the Worker route that
+ * accepts it checks sponsorship rights, per-slot size caps and (in SQL) that the asset belongs to *this*
+ * sponsor. The response carries the sponsor row back for the same reason the media route does not need to:
+ * the badge on the public page is derived from `logo_url`, so the form can show the new logo the moment the
+ * upload resolves instead of waiting for the next band fetch.
+ */
+export interface SponsorBrandingOptions {
+  sponsorId: string;
+  slot: "logo" | "banner";
+  file: File | Blob;
+  alt?: string | null;
+  onProgress?: (fraction: number, loadedBytes: number, totalBytes: number) => void;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  filename?: string;
+}
+
+export interface SponsorBrandingResult extends MediaUploadResult {
+  slot: "logo" | "banner";
+  /** The sponsor as the desk sees it, with the new URL already in place — and, like every response in this
+   *  system, without a contact field: the public projection is what a page renders. */
+  sponsor: Record<string, unknown> | null;
+}
+
+export function uploadSponsorBranding(options: SponsorBrandingOptions): Promise<SponsorBrandingResult> {
+  const { sponsorId, slot, file, alt, onProgress, signal, filename } = options;
+  return sendMultipart({
+    endpoint: sponsorBrandingEndpoint(sponsorId),
+    fields: { slot, ...(alt ? { alt } : {}) },
+    file,
+    filename,
+    onProgress,
+    signal,
+    timeoutMs: options.timeoutMs,
+  }).then((sent) => ({
+    ...readAssetFields(sent.data, file),
+    slot,
+    sponsor: (sent.data["sponsor"] as Record<string, unknown> | undefined) ?? null,
+  }));
 }
 
 /** The Worker's envelope is `{ success: false, error: { code, message, fields } }`, and the

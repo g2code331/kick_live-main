@@ -206,20 +206,103 @@ its own rollback. What shipped, in order:
 uploads (external links stay, on purpose), an avatar UI (nothing renders `avatar_url` today), the
 `teams.gallery` upload path, and deleting legacy Supabase Storage objects (they are the rollback). The
 numbering collision this creates with the advertising phase below is resolved in favour of history:
-advertising becomes **Phase 7**, still unstarted, and its prefixes stay reserved in the key space rather
-than present-but-empty in the schema.
+advertising becomes **Phase 7** (and sponsorship its own Phase 8), with their prefixes reserved in the key
+space rather than present-but-empty in the schema.
 
 **The remaining Phase 6 work is a person, not a patch**: create the three R2 buckets, apply
 `supabase/migrations/20260912120000_phase6_r2_media.sql` to staging, deploy, then run the migration route
 dry-run → real, per kind, until `still_url_pointing_at_storage` is zero. Steps in architecture note §16.
 
-## Phase 7 — advertising and sponsorship (was Phase 6; nothing implemented)
+## Phase 7 — advertising 🟡 code done, ⚠ migration not applied
 
-Separate concepts, separate tables, separate capability families (architecture §13–§14):
-`advertisers/ad_campaigns/ad_placements/ad_placement_events` and
-`sponsor_packages/sponsorships`, each with its own migration, route group and admin surface; slots
-declared in the UI, counters server-written, sponsor packages able to generate campaigns. Exit: a
-campaign can be paused without a deploy, and a billable number exists that no client can influence.
+The heading here used to read "(was Phase 6; nothing implemented)". That is stale, and correcting it is the
+point of this entry: advertising shipped as **Phase 7**, sponsorship split off into its own phase (below),
+and neither has been applied to a hosted database yet.
+
+- **Schema** — `supabase/migrations/20260913120000_phase7_advertising.sql`: eight tables
+  (`advertisers`, `advertisement_campaigns`, `advertisements`, `ad_placements`, `advertisement_placements`,
+  `ad_events`, `advertisement_analytics`, `ad_status_transitions`) and 32 `kicklive_*` functions. RLS with
+  no policies and no client grant, as in Phase 6: the functions are the interface.
+- **Worker** — 19 routes: serving (rotation + targeting + frequency), the advertiser/campaign/creative
+  desks, event ingestion and the analytics rollups. Slots are declared in the UI rather than in a
+  migration, and a slot that is not servable refuses to count.
+- **Counters nobody can influence** — `viewer_key = ^[0-9a-f]{16}$` is an HMAC of the subject plus the UTC
+  day, impressions deduplicate on `'imp|<ad>|<slot>|<key>|<day>'` with `on conflict do nothing`, so an
+  impression count is a distinct-viewer-day floor and never an invoice. `ad_events` stores no IP, no user
+  agent and no user id; `advertisement_analytics` is the rollup the dashboards read.
+- **Rotation** — `priority`, then `min(md5(id || ':' || bucket || ':' || ticket))` over 30-second buckets:
+  deterministic within a bucket, varied between them, and no per-viewer state anywhere.
+
+**Known defect, recorded rather than fixed here**: `workers/src/routes/ads.ts` builds its staff writes with
+`asCaller = false`, which sends them on the service-role key, while `kicklive_ad_save_*` and
+`kicklive_ad_explain` gate on `is_admin()`/`is_admin_or_media()`. On a hosted project PostgREST forwards
+only the bearer key, so `auth.uid()` is `NULL`, `is_admin()` is false and those admin writes answer
+`ADMIN_ONLY`. It survived because the Worker tests stub `fetch` and the SQL flow calls the functions
+directly. Fix as an additive migration (grant those functions to `authenticated`, flip those route calls to
+carry the caller's token) and keep the service client for queue/cron/maintenance paths, which have no user
+token to forward. Phase 8 does not copy this: see the sponsorship note in `docs/SPONSORSHIP_ARCHITECTURE.md` §9.
+No `docs/ADVERTISING_ARCHITECTURE.md` exists yet either; `docs/SECURITY_AUDIT_PHASE1.md` and this file are
+what the phase was reviewed against, which is a documentation gap and not a claim that one does not exist.
+
+## Phase 8 — sponsorship 🟡 code done, ⚠ migration not applied, ⚠ SQL flow not re-run in this sandbox
+
+Design, decisions and honest status: **`docs/SPONSORSHIP_ARCHITECTURE.md`**. Sponsorship is _rights, not
+delivery_: Phase 7 decides what to show in a slot per request, this decides who is entitled to appear on a
+competition, season, team, match, award or event, for how long, in what order — with no rotation, no
+bidding and no per-viewer state. What shipped:
+
+- **Schema** — `supabase/migrations/20260914120000_phase8_sponsorship.sql`: five tables
+  (`sponsors`, `sponsorship_packages` with six seeded rows, `sponsorships`,
+  `sponsorship_status_transitions`, `sponsorship_config`) and 28 functions, additive only, RLS with no
+  policies and no client grant. `sponsorships` is keyed `(target_kind, target_id text)` and given meaning
+  by `kicklive_sponsor_target_exists` (numeric ids must exist as rows; award/event are slugs), which is one
+  index and one trigger set instead of six nullable foreign keys — the cost (`text`, so validated in SQL)
+  is stated in the architecture note §3.
+- **Eligibility in one place** — `kicklive_sponsorship_for` is the only public read and the only thing that
+  decides visibility (active status _and_ the display switch, today inside the window, an approved sponsor,
+  an active package); `kicklive_sponsorship_explain` runs the same predicates so the desk's preview and the
+  fan's page cannot disagree. The projection is an explicit column list with no contact and no money
+  fields, and the published rate card omits `price_*` from its select list — unreachable, not filtered.
+- **Order and exclusivity as named refusals** — `priority, display_order, starts_at desc, id`;
+  `EXCLUSIVITY_TAKEN`, `PACKAGE_LIMIT_FOR_TARGET`, `SLUG_IMMUTABLE`, `KIND_NOT_IN_PACKAGE`,
+  `STATUS_VIA_SET_STATUS_ONLY`, `BRANDING_IS_UPLOADED_NOT_TYPED`, `DISPLAY_SWITCH_VIA_SET_STATUS_ONLY`; and
+  a `double_title` count that is not zero fails the install rather than shipping.
+- **Media** — sponsor artwork reuses Phase 6's pipeline with the reservation swapped
+  (`kicklive_sponsor_reserve_asset` → `publishAsset` → `kicklive_sponsor_attach_asset`), 5 MiB logo /
+  10 MiB banner, no SVG, keys under `sponsors/<uuid>/<slot>/v<n>-<sha8>.<ext>`, and `sponsors` is
+  **registry-only** in `mediaPolicy.ts` (`MEDIA_KINDS` yes, `UPLOADABLE_KINDS` no, `urlColumn: ""`) so the
+  generic publish path physically cannot repoint a logo.
+- **Caching** — the band's `max-age` comes from `sponsorship_config`, its `ETag` carries the epoch, a
+  conditional request is answered before any SQL runs, and every viewer-visible write bumps that epoch in
+  the same transaction. Admin reads are `private, no-store`. No CDN purge is wired, and the note says why.
+- **Privileges** — staff routes forward the caller's own bearer token, because the functions decide the
+  caller from `auth.uid()` and a service-role call has no subject at all. Exactly three functions are
+  anon-executable; `touch_epoch` and `kicklive_asset_url_for_asset` are service-role-only, the latter
+  revoked **by name** because the grant loop's `like 'kicklive_sponsor%'` never saw it.
+- **Frontend** — one query spec, `SponsorBadge` + `SponsorBand` (renders nothing at all when the band is
+  empty; no sponsor name appears in either file), hosted on `MatchDetails` and `TeamProfile`, and an admin
+  _Sponsorship_ tab with three desks, real status arcs from the transition table, an eligibility preview and
+  a branding uploader with progress, cancel and retry.
+- **Tests** — 25 unit cases in `tests/unit/phase8-sponsorship.test.ts` (route↔SQL field drift in both
+  directions, the projection's privacy boundary against the frontend type, the grant matrix, the media seam,
+  the fifteen routes' cache/capability shape, client endpoints against the route table, the expiry rule) plus
+  the sponsorship flow in `scripts/sql-flow.mjs`. Suite: 517 unit tests, 0 failures.
+
+**Not done, and said so rather than hidden**: no billing (money columns exist so a human can reconcile an
+invoice; there is no ledger, no tax, no PDF, no rails), no `auto_flight` (the argument is accepted and
+ignored — generating a campaign needs budget and slot decisions this phase must not invent), no sponsor
+self-service portal, no badge impressions (that is Phase 7's `ad_events` with a target kind added), no CDN
+purge, no automatic expiry caller (the desk route exists; a schedule belongs to Phase 9), and bands on two
+pages only — `award`/`event` targets are supported by SQL with no page to hang them on yet. There is also
+**no `tests/integration/sponsorship-api.test.ts`**, which is the file that would have to assert §9's
+caller-token rule against a fake PostgREST.
+
+**Blocking verification**: this sandbox has no Postgres (`initdb`/`psql` absent, no container runtime), so
+`node scripts/check-sql.mjs` skipped, and the `isActive` refusal plus the field-refusal edits landed after
+the last green run of the flow. Before this migration is applied anywhere, run
+`node scripts/check-sql.mjs --dsn "postgres://kicklive@127.0.0.1:55432/kicklive_scratch" --fresh` and
+require both flows to print `ALL PASS`. Deploy order is staging → seeded rate card → production → desk
+smoke test with devtools open, in architecture note §16.
 
 ## Standing constraints for every phase
 

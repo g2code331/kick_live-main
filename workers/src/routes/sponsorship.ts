@@ -91,7 +91,9 @@ const ASSIGNMENT_KEYS = [
   "linkUrl",
   "logoAssetId",
   "bannerAssetId",
-  "isActive",
+  // No `isActive` here, and that is a refusal rather than an omission: the display switch is the status
+  // route's (`kicklive_sponsorship_set_status`), which writes the transition row and the author. Declaring
+  // it on the save would let a form send it, and the save would answer `ok: true` having changed nothing.
   "valueAmount",
   "valueCurrency",
   "valueBasis",

@@ -4,6 +4,7 @@ import { ArrowLeft, Users, Trophy, Calendar, MapPin, Shirt, TrendingUp, Activity
 import { readOnce, useQuery } from '../lib/data';
 import { squadFor, teamCompetitions, teamFixtures, teamProfile, standings as standingsQuery } from '../lib/data/queries.ts';
 import { FORMATIONS } from '../lib/formations';
+import SponsorBand from '../components/SponsorBand.tsx';
 
 export default function TeamProfile() {
   const { teamId } = useParams<{ teamId: string }>();
@@ -150,6 +151,11 @@ export default function TeamProfile() {
             </div>
           </div>
         </div>
+
+        {/* Club sponsor (Phase 8). The same component the match page uses, aimed at a different target kind:
+            the sponsorship is against the club, so it follows the club across competitions and renders here
+            without a line of copy being written twice. Empty band, empty page — nothing is reserved for it. */}
+        {teamId ? <SponsorBand kind="team" id={teamId} heading="Club sponsor" max={4} className="mb-6" /> : null}
 
         {/* ── Starting XI (lineup) ───────────────────────────────────────── */}
         {savedLineup && savedLineup.players.some(Boolean) && (

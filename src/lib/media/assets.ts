@@ -100,6 +100,12 @@ export function mediaUploadEndpoint(): string {
   return `${base}/api/media/uploads`;
 }
 
+/** Phase 8: sponsor artwork goes to the sponsorship route, not the media route — the media route refuses a
+ *  `sponsors` kind on purpose (it is registry-only), and the rights being checked are sponsorship rights. */
+export function sponsorBrandingEndpoint(sponsorId: string | number): string {
+  return `${mediaAssetBase()}/api/sponsorship/admin/sponsors/${encodeURIComponent(String(sponsorId))}/branding`;
+}
+
 /** And the read endpoint, for the `?purge=true` case and for a restore call. */
 export function mediaAssetEndpoint(assetId: number | string): string {
   return `${mediaAssetBase()}/api/media/assets/${encodeURIComponent(String(assetId))}`;
