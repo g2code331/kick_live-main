@@ -695,12 +695,31 @@ describe("phase6 · configuration and documentation", () => {
     assert.equal(buckets.length, 3);
     assert.match(toml, /binding = "MEDIA_BUCKET"/);
     // Comment lines legitimately *name* other secrets (`wrangler secret put TURNSTILE_SECRET_KEY`);
-    // what must not exist anywhere in this file is an assignment of a bucket credential.
+    // what must not exist anywhere in this file is an assignment of a bucket credential. The scan is
+    // therefore about key NAMES and credential SHAPES, not about substrings of values: the staging
+    // project's ref (`fnefpcjeebaws…`) spells "aws" inside every URL and JWT that carries it, and a
+    // reject-the-word scan fails on a config that contains nothing secret.
     const tomlCode = toml
       .split("\n")
       .filter((l) => !l.trim().startsWith("#"))
       .join("\n");
-    assert.ok(!/r2\.dev|(access|secret)[_-]?key|aws/i.test(tomlCode), "no bucket credential belongs in this file, in any form");
+    for (const line of tomlCode.split("\n")) {
+      const name = /^\s*([A-Za-z0-9_.-]+)\s*=/.exec(line)?.[1];
+      if (!name) continue;
+      assert.ok(!/(access|secret)[_-]?key|aws|account_id|endpoint/i.test(name), `${name} is a bucket-credential shape; MEDIA_BUCKET reaches R2 with this binding alone`);
+    }
+    assert.ok(!/AKIA[0-9A-Z]{16}|-----BEGIN/.test(tomlCode), "no AWS access-key id and no PEM header may be assigned in this file");
+    assert.ok(!/https?:\/\/[^\s"]*r2\.dev/.test(tomlCode), "the r2.dev public dev URL is not this app's read path; media URLs go through the Worker");
+    // The mistake the old substring scan was reaching for, in the shape that can actually happen: an
+    // operator pastes the service-role key into SUPABASE_ANON_KEY because both are JWTs that start
+    // with `eyJ`. [vars] ship inside the deployed config, so every anon-key JWT is decoded here and
+    // its role claim must say anon or authenticated — never service_role. (Publishable `sb_…` keys
+    // carry no JWT to decode; check-secrets.mjs owns the rest.)
+    for (const match of toml.matchAll(/^SUPABASE_ANON_KEY = "(eyJ[^"]*)"/gm)) {
+      const payload = JSON.parse(Buffer.from(match[1]!.split(".")[1]!, "base64url").toString("utf8")) as { role?: string };
+      assert.notEqual(payload.role, "service_role", "the service-role key belongs in `wrangler secret put SUPABASE_SERVICE_ROLE_KEY`, never in [vars]");
+      assert.match(payload.role ?? "", /^(anon|authenticated)$/, "SUPABASE_ANON_KEY should carry an anon/authenticated JWT for the URL's project");
+    }
   });
 
   it("the local env example documents both new phases and still holds no secret", () => {

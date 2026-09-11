@@ -181,6 +181,10 @@ SUPABASE_PROJECT_REF = "fnefpcjeebawsebxjhcf"
 SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZuZWZwY2plZWJhd3NlYnhqaGNmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQwNDAyMTQsImV4cCI6MjA5OTYxNjIxNH0.YkPu5IxtEPZHK9i0oiMTRROrwCT3ZdF1RgCEhaqDhwo"
 # The staging SPA origin, plus the Arena/preview hosts used during review, each spelled exactly.
 ALLOWED_ORIGINS = "https://staging.kicklive.football"
+# Named environments do not inherit [vars], and MEDIA_MAX_BYTES lives here only so the ceiling is
+# explicit: without this line the environment runs the built-in default (25 MiB) and wrangler warns
+# on every deploy. Change media sizes per environment, not at the top, or the change lands in dev only.
+MEDIA_MAX_BYTES = 26214400
 
 # [env.staging.routes] is deployment-time: uncomment with a real zone once DNS exists.
 # [[env.staging.routes]]
@@ -275,6 +279,8 @@ SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS
 # the web app works — the worst possible shape for a bug report. Add its origin when Phase 2 ships
 # the API to the desktop shell.
 ALLOWED_ORIGINS = "https://kicklive.football,https://www.kicklive.football"
+# Same rule as staging: per-environment and explicit, because [vars] are not inherited.
+MEDIA_MAX_BYTES = 26214400
 
 # [[env.production.routes]]
 # pattern = "api.kicklive.football/*"
