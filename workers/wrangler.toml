@@ -41,10 +41,10 @@ AD_EVENTS_QUEUE_NAME = "kicklive-ad-events-dev"
 #  into the notification fan-out. `tests/unit/phase2-api-boundary.test.ts` parses both sides of that
 #  sentence, so the pair cannot drift apart quietly.
 APP_ENV = "development"
-SUPABASE_URL = "https://REPLACE-WITH-STAGING-REF.supabase.co"
-SUPABASE_PROJECT_REF = "REPLACE-WITH-STAGING-REF"
+SUPABASE_URL = "https://fnefpcjeebawsebxjhcf.supabase.co"
+SUPABASE_PROJECT_REF = "fnefpcjeebawsebxjhcf"
 # Publishable/anon key: public by design (the browser ships it), safe in this file.
-SUPABASE_ANON_KEY = "REPLACE-WITH-STAGING-PUBLISHABLE-KEY"
+SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZuZWZwY2plZWJhd3NlYnhqaGNmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQwNDAyMTQsImV4cCI6MjA5OTYxNjIxNH0.YkPu5IxtEPZHK9i0oiMTRROrwCT3ZdF1RgCEhaqDhwo"
 # Exact origins only; `*` is rejected by env.ts. These are the local SPA ports this repo uses.
 ALLOWED_ORIGINS = "http://localhost:5000,http://127.0.0.1:5000,http://localhost:5173,http://127.0.0.1:5173"
 # Secrets for local dev come from workers/.dev.vars (git-ignored) — see .dev.vars.example.
@@ -272,9 +272,9 @@ AD_EVENTS_QUEUE_NAME = "kicklive-ad-events"
 #  into the notification fan-out. `tests/unit/phase2-api-boundary.test.ts` parses both sides of that
 #  sentence, so the pair cannot drift apart quietly.
 APP_ENV = "production"
-SUPABASE_URL = "https://fnefpcjeebawsebxjhcf.supabase.co"
-SUPABASE_PROJECT_REF = "fnefpcjeebawsebxjhcf"
-SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZuZWZwY2plZWJhd3NlYnhqaGNmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQwNDAyMTQsImV4cCI6MjA5OTYxNjIxNH0.YkPu5IxtEPZHK9i0oiMTRROrwCT3ZdF1RgCEhaqDhwo"
+SUPABASE_URL = "https://xvksxqrmdbbinlrjctri.supabase.co"
+SUPABASE_PROJECT_REF = "xvksxqrmdbbinlrjctri"
+SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh2a3N4cXJtZGJiaW5scmpjdHJpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQyMjQ0OTEsImV4cCI6MjA5OTgwMDQ5MX0.5UkQkP7pNVt66IsoY0JE-V4kiQGYEYqvE4-Kxr5sH8w"                     
 # The packaged desktop renderer must be listed too, or desktop builds fail on every API call while
 # the web app works — the worst possible shape for a bug report. Add its origin when Phase 2 ships
 # the API to the desktop shell.
