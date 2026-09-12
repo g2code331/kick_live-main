@@ -21,11 +21,12 @@ Sources of truth, in case this file and the code disagree (the code wins):
 ```bash
 git fetch origin
 git checkout main
-git merge --ff-only origin/arena/01a08671-kick-live-main || git merge origin/arena/01a08671-kick-live-main
+git merge --ff-only origin/arena/01a095cb-kick-live-main || git merge origin/arena/01a095cb-kick-live-main
 npm ci
 npm run typecheck && npm run test:unit && npm run test:integration && npm run format:check
-npm run ci:install          # copies ci/*.yml into .github/workflows/ (the repo forbids commits that touch that dir)
-git add -f .github/workflows && git commit -m "ci: install workflows"   # -f: the dir is deliberately gitignored
+npm run ci:check            # must be silent: the four workflows ride on main since 2026-09-12; if it
+                            # reports drift, repair with `npm run ci:install` (plus `git add -f` — the dir
+                            # stays gitignored so automation tokens cannot touch it)
 ```
 
 ### If the checks die with `ERR_UNKNOWN_FILE_EXTENSION: Unknown file extension ".ts"`
@@ -65,17 +66,19 @@ The cleanest fix, if you do not want to carry a loader at all, is a stock Node �
 with `npm 9.2.0` (Node 22 ships npm 10.x) is the signature of a repackaged build, and the `EBADENGINE` warning about
 `ini@7.0.0` wanting `^22.22.2` is the same version boundary seen from the other side.
 
-Also worth knowing: `npm ci` on that machine reported 13 vulnerabilities, and `npm audit --omit=dev` reports none
-— they are all in the desktop/packaging dev chain (`electron-builder`'s `glob`/`rimraf`/`boolean`), not in
-anything the browser or the Worker loads. Do not run `npm audit fix --force`: it breaks pinned versions, and the
-pins are load-bearing for the packaging pipeline (`docs/RELEASE-PIPELINE.md`).
+Also worth knowing: `npm audit --omit=dev` reports none — every remaining finding is in the desktop/packaging
+dev chain (`electron-builder`'s `glob`/`rimraf`/`boolean`), not in anything the browser or the Worker loads.
+(That was briefly untrue for `react-router-dom@7.18.1`, which carried GHSA-qwww-vcr4-c8h2; it was fixed by a
+surgical `npm install react-router-dom@7.18.3`, deliberately not by `npm audit fix`, whose lockfile rewrite is
+far wider than the fix.) Do not run `npm audit fix --force`: it breaks pinned versions, and the pins are
+load-bearing for the packaging pipeline (`docs/RELEASE-PIPELINE.md`).
 
 Then check the branch actually contains the nine migrations and the two new docs:
 
 ```bash
 ls supabase/migrations | wc -l          # 9
 ls docs/OBSERVABILITY_ARCHITECTURE.md RELEASE_CHECKLIST.md README.md
-node scripts/worker-routes.mjs --check  # "README lists all 101 declared routes"
+npm run worker:routes -- --check  # "README lists all 101 declared routes" (npm form: carries the ts-loader flag)
 ```
 
 ---
@@ -229,7 +232,7 @@ JWT-shaped literal in shipped source, and `supabaseAdmin()` exists only under `w
 ### 4.4 Bindings (not variables — declare in `wrangler.toml`, create in §1)
 
 `MEDIA_BUCKET` (R2) · `NOTIFICATION_QUEUE`, `AD_EVENTS_QUEUE` (Queues) ·
-`RATE_LIMIT_KV` (KV; **currently commented out in both environments**) · `LIVE_MATCH_ROOM` (Durable Object).
+`RATE_LIMIT_KV` (KV; **bound in both environments since 2026-09-10** — §1) · `LIVE_MATCH_ROOM` (Durable Object).
 
 ---
 
@@ -293,10 +296,10 @@ locally as well.
 
 ```bash
 npm run typecheck                 # both tsconfig projects
-npm run test:unit                 # 577 tests — `node --test tests/unit` is not the same thing, it finds nothing
+npm run test:unit                 # 583 tests — `node --test tests/unit` is not the same thing, it finds nothing
 npm run test:integration          # 99 tests
 npm run format:check              # one violation fails
-npm run gates                     # 21 pass / 1 fail (until ci:install) / 4 skip
+npm run gates                     # 23 pass / 0 fail / 3 skip
 npm run worker:routes             # the route catalogue README table vs the router
 node scripts/query-audit.mjs      # the performance ratchet; add --write only when you changed a query
 node scripts/check-secrets.mjs --json

@@ -294,3 +294,39 @@ describe("the SQL checker is wired in, not decorative", () => {
     assert.ok(flow.includes("kicklive_ad_serve") && flow.includes("kicklive_ad_record_event"), "the flow must cover the two public functions by name");
   });
 });
+
+describe("a LANGUAGE sql function is never created before the table its body reads", () => {
+  // The bug this file exists for: KICKLIVE_FINAL_SCHEMA.sql created `is_admin()` (`LANGUAGE sql`, body
+  // `SELECT 1 FROM public.profiles`) in SECTION 2, while `profiles` was not created until SECTION 3. Postgres
+  // parses and plans the body of a `LANGUAGE sql` function at CREATE FUNCTION time, so the whole file failed on
+  // an empty project with `42P01: relation "public.profiles" does not exist` — the first paste a real staging
+  // project ever got. A migration that references a table created by an EARLIER file is fine (operators apply
+  // them in order); a file that references its own later creations is not, and that ordering is invisible in a
+  // text review unless someone knows Postgres validates `sql` bodies eagerly but leaves `plpgsql` bodies lazy.
+  const targets: Array<[string, string]> = [
+    ["KICKLIVE_FINAL_SCHEMA.sql", fs.readFileSync(path.join(REPO, "KICKLIVE_FINAL_SCHEMA.sql"), "utf8")],
+    ...files.map((f) => [f, fs.readFileSync(path.join(MIGRATIONS_DIR, f), "utf8")] as [string, string]),
+  ];
+
+  for (const [name, raw] of targets) {
+    it(`${name}: every LANGUAGE sql body reads only tables the file already created`, () => {
+      const lines = raw.split("\n");
+      const created = new Map<string, number>();
+      lines.forEach((line, i) => {
+        const m = /^\s*CREATE TABLE\s+(?:IF NOT EXISTS\s+)?(?:public\.)?"?(\w+)"?/i.exec(line);
+        if (m && !created.has(m[1]!.toLowerCase())) created.set(m[1]!.toLowerCase(), i + 1);
+      });
+      for (const fn of raw.matchAll(/CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+[\w.]+\s*\([^)]*\)[^;]*?LANGUAGE\s+sql\b[\s\S]*?\$\$([\s\S]*?)\$\$\s*;/gi)) {
+        const at = raw.slice(0, fn.index).split("\n").length;
+        for (const ref of fn[1]!.matchAll(/\b(?:FROM|JOIN|INTO)\s+(?:public\.)?([a-z_]\w*)/gi)) {
+          const line = created.get(ref[1]!.toLowerCase());
+          if (line === undefined) continue; // table from another file, or a CTE alias — neither is this rule
+          assert.ok(
+            line <= at,
+            `${name}: the function at line ${at} reads ${ref[1]}, which the file only creates at line ${line} — Postgres plans LANGUAGE sql bodies at CREATE FUNCTION time (42P01 on an empty database)`,
+          );
+        }
+      }
+    });
+  }
+});

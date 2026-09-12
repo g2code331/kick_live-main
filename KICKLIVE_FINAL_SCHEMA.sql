@@ -38,36 +38,10 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 
 -- ────────────────────────────────────────────────────────────────
--- SECTION 2 — HELPER FUNCTIONS (role checks used by RLS)
--- SECURITY DEFINER means they bypass RLS internally → no recursion
+-- SECTION 2 — CREATE TABLES (idempotent)
 -- ────────────────────────────────────────────────────────────────
 
-CREATE OR REPLACE FUNCTION public.is_admin()
-RETURNS BOOLEAN
-LANGUAGE sql STABLE SECURITY DEFINER
-AS $$
-  SELECT EXISTS (
-    SELECT 1 FROM public.profiles
-    WHERE id = auth.uid() AND role = 'admin'
-  );
-$$;
-
-CREATE OR REPLACE FUNCTION public.is_admin_or_media()
-RETURNS BOOLEAN
-LANGUAGE sql STABLE SECURITY DEFINER
-AS $$
-  SELECT EXISTS (
-    SELECT 1 FROM public.profiles
-    WHERE id = auth.uid() AND role IN ('admin', 'media')
-  );
-$$;
-
-
--- ────────────────────────────────────────────────────────────────
--- SECTION 3 — CREATE TABLES (idempotent)
--- ────────────────────────────────────────────────────────────────
-
--- ── 3.1  profiles ───────────────────────────────────────────────
+-- ── 2.1  profiles ───────────────────────────────────────────────
 --  One row per authenticated user. Created automatically by trigger.
 CREATE TABLE IF NOT EXISTS public.profiles (
   id          UUID        PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -82,7 +56,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   updated_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
--- ── 3.2  teams ──────────────────────────────────────────────────
+-- ── 2.2  teams ──────────────────────────────────────────────────
 --  A club / team. Can be created by a team_manager (status = 'pending')
 --  and approved by an admin (status = 'active').
 CREATE TABLE IF NOT EXISTS public.teams (
@@ -104,7 +78,7 @@ CREATE TABLE IF NOT EXISTS public.teams (
   updated_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
--- ── 3.3  players ────────────────────────────────────────────────
+-- ── 2.3  players ────────────────────────────────────────────────
 --  Squad members belonging to a team.
 CREATE TABLE IF NOT EXISTS public.players (
   id              SERIAL      PRIMARY KEY,
@@ -131,7 +105,7 @@ CREATE TABLE IF NOT EXISTS public.players (
   updated_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
--- ── 3.4  seasons ────────────────────────────────────────────────
+-- ── 2.4  seasons ────────────────────────────────────────────────
 --  Season management (used by SeasonManagement admin panel).
 CREATE TABLE IF NOT EXISTS public.seasons (
   id          SERIAL      PRIMARY KEY,
@@ -142,7 +116,7 @@ CREATE TABLE IF NOT EXISTS public.seasons (
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
--- ── 3.5  competitions ───────────────────────────────────────────
+-- ── 2.5  competitions ───────────────────────────────────────────
 --  Tournaments / leagues.
 CREATE TABLE IF NOT EXISTS public.competitions (
   id              SERIAL      PRIMARY KEY,
@@ -164,7 +138,7 @@ CREATE TABLE IF NOT EXISTS public.competitions (
   updated_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
--- ── 3.6  matches ────────────────────────────────────────────────
+-- ── 2.6  matches ────────────────────────────────────────────────
 --  Individual match fixture with live-score support.
 CREATE TABLE IF NOT EXISTS public.matches (
   id                              SERIAL      PRIMARY KEY,
@@ -203,7 +177,7 @@ CREATE TABLE IF NOT EXISTS public.matches (
   updated_at                      TIMESTAMPTZ DEFAULT NOW()
 );
 
--- ── 3.7  match_events ───────────────────────────────────────────
+-- ── 2.7  match_events ───────────────────────────────────────────
 --  Goals, cards, substitutions, etc.
 CREATE TABLE IF NOT EXISTS public.match_events (
   id                SERIAL  PRIMARY KEY,
@@ -234,7 +208,7 @@ CREATE TABLE IF NOT EXISTS public.match_events (
   created_at        TIMESTAMPTZ DEFAULT NOW()
 );
 
--- ── 3.8  match_commentary ───────────────────────────────────────
+-- ── 2.8  match_commentary ───────────────────────────────────────
 --  Live text commentary lines for a match.
 CREATE TABLE IF NOT EXISTS public.match_commentary (
   id            SERIAL      PRIMARY KEY,
@@ -245,7 +219,7 @@ CREATE TABLE IF NOT EXISTS public.match_commentary (
   created_at    TIMESTAMPTZ DEFAULT NOW()
 );
 
--- ── 3.9  match_statistics ───────────────────────────────────────
+-- ── 2.9  match_statistics ───────────────────────────────────────
 --  Aggregated stats per match (one row per match).
 CREATE TABLE IF NOT EXISTS public.match_statistics (
   id                    SERIAL      PRIMARY KEY,
@@ -275,7 +249,7 @@ CREATE TABLE IF NOT EXISTS public.match_statistics (
   updated_at            TIMESTAMPTZ DEFAULT NOW()
 );
 
--- ── 3.10  media ─────────────────────────────────────────────────
+-- ── 2.10  media ─────────────────────────────────────────────────
 --  News articles / media posts (written by admin or media role).
 CREATE TABLE IF NOT EXISTS public.media (
   id          SERIAL      PRIMARY KEY,
@@ -298,7 +272,7 @@ CREATE TABLE IF NOT EXISTS public.media (
   updated_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
--- ── 3.11  team_news ─────────────────────────────────────────────
+-- ── 2.11  team_news ─────────────────────────────────────────────
 --  Posts written by team managers for their own fans.
 CREATE TABLE IF NOT EXISTS public.team_news (
   id          SERIAL      PRIMARY KEY,
@@ -309,7 +283,7 @@ CREATE TABLE IF NOT EXISTS public.team_news (
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
--- ── 3.12  notifications ─────────────────────────────────────────
+-- ── 2.12  notifications ─────────────────────────────────────────
 --  System / match-event notifications (e.g. goal alerts).
 CREATE TABLE IF NOT EXISTS public.notifications (
   id          SERIAL      PRIMARY KEY,
@@ -320,7 +294,7 @@ CREATE TABLE IF NOT EXISTS public.notifications (
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
--- ── 3.13  activity_logs ─────────────────────────────────────────
+-- ── 2.13  activity_logs ─────────────────────────────────────────
 --  Admin audit trail.
 CREATE TABLE IF NOT EXISTS public.activity_logs (
   id          SERIAL      PRIMARY KEY,
@@ -335,7 +309,7 @@ CREATE TABLE IF NOT EXISTS public.activity_logs (
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
--- ── 3.14  standings ─────────────────────────────────────────────
+-- ── 2.14  standings ─────────────────────────────────────────────
 --  Pre-computed league table cache (one row per team per competition).
 CREATE TABLE IF NOT EXISTS public.standings (
   id              SERIAL      PRIMARY KEY,
@@ -356,7 +330,7 @@ CREATE TABLE IF NOT EXISTS public.standings (
   UNIQUE (competition_id, team_id, "group")
 );
 
--- ── 3.15  team_staff ────────────────────────────────────────────
+-- ── 2.15  team_staff ────────────────────────────────────────────
 --  Coaching / backroom staff per team.
 CREATE TABLE IF NOT EXISTS public.team_staff (
   id              SERIAL      PRIMARY KEY,
@@ -373,6 +347,36 @@ CREATE TABLE IF NOT EXISTS public.team_staff (
   photo_url       TEXT,
   created_at      TIMESTAMPTZ DEFAULT NOW()
 );
+
+
+-- ────────────────────────────────────────────────────────────────
+-- SECTION 3 — HELPER FUNCTIONS (role checks used by RLS)
+-- They live AFTER the tables on purpose: CREATE FUNCTION for LANGUAGE sql parses and plans the
+-- body immediately, so a body reading public.profiles cannot be created while the table is still
+-- lines away from existing. The empty-project failure this ordering prevents is `42P01: relation
+-- "public.profiles" does not exist` on line ~50 — the first thing a real deployment ever hit.
+-- SECURITY DEFINER means they bypass RLS internally → no recursion
+-- ────────────────────────────────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS BOOLEAN
+LANGUAGE sql STABLE SECURITY DEFINER
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE id = auth.uid() AND role = 'admin'
+  );
+$$;
+
+CREATE OR REPLACE FUNCTION public.is_admin_or_media()
+RETURNS BOOLEAN
+LANGUAGE sql STABLE SECURITY DEFINER
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE id = auth.uid() AND role IN ('admin', 'media')
+  );
+$$;
 
 
 -- ────────────────────────────────────────────────────────────────

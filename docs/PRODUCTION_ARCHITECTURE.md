@@ -820,11 +820,11 @@ live_updated_at/seconds_since_update`; `sponsorship`'s projection has no contact
 
 Recorded here because "we could not get to it" is only honest when it names the thing and the cost.
 
-1. **`RATE_LIMIT_KV` is commented out in `env.staging` and `env.production`.** The limiter therefore shapes
-   traffic per isolate, not per project. It is not a fake — it does clamp a burst inside a hot worker — but the
-   ceiling in `middleware/ratelimit.ts` is not what an operator would read it to be. Closing it is one namespace
-   and two uncommented lines, so it is configuration rather than code; shipping it inert would misrepresent §1 of
-   the checklist.
+1. **CLOSED 2026-09-10 — `RATE_LIMIT_KV` is bound in `env.staging` and `env.production`.** (Was: commented
+   out, so the limiter shaped traffic per isolate while the ceiling in `middleware/ratelimit.ts` read as global.)
+   Both namespaces exist with their ids in `workers/wrangler.toml`, `tests/unit/phase2-api-boundary.test.ts`
+   fails if either block regresses, and the post-deploy proof is `x-ratelimit-store: kv` on any rate-limited
+   response. Kept in this list so the closure has a date; the live statement is `RELEASE_CHECKLIST.md` §3.
 2. **The match desk has three surfaces** (`MatchControlPro.tsx`, `MatchDashboard.tsx`, the AdminPortal match
    tab) sharing `src/lib/MatchAutomation.ts`. Phase 10 step 9 asked for one canonical control center; merging
    them is a product decision about which desk an operator actually opens on a match night, and the state model
