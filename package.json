@@ -78,6 +78,7 @@
     "tailwindcss": "4.1.17",
     "typescript": "5.9.3",
     "vite": "7.3.2",
+    "wrangler": "^4.130.0",
     "yaml": "^2.9.0"
   },
   "homepage": "https://github.com/g2code331/kick_live-main",
