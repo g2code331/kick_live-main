@@ -3,7 +3,7 @@
 # server/static-server.ts. The failure this catches is real and common: a platform-level SPA rewrite
 # that swallows /assets/*.js and answers a 404 with index.html + 200.
 #
-#   bash scripts/ci/probe-deploy.sh https://kicklive.vercel.app
+#   bash scripts/ci/probe-deploy.sh https://kicklive-web.pages.dev
 set -uo pipefail
 
 url="${1:-}"

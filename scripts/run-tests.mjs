@@ -12,6 +12,27 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+// Self-heal for the one invocation style that misses the loader: `node scripts/run-tests.mjs unit` typed by
+// hand is not an npm script, so it has no `--import ./scripts/lib/ts-loader.mjs`, and on a Node build without
+// type stripping every test file dies with ERR_UNKNOWN_FILE_EXTENSION. If stripping is unavailable and the
+// loader is not already in NODE_OPTIONS, re-exec once with it. The re-exec has to happen here, at the top of
+// a module that imports no .ts itself — and NODE_OPTIONS, not argv, because the `node --test` children this
+// file spawns inherit the environment and need the loader too. A loader path containing a space cannot be
+// expressed in NODE_OPTIONS (it splits on whitespace), so such an install keeps the old behavior and the npm
+// script remains the supported route.
+if (!process.features.typescript) {
+  const loader = new URL("./lib/ts-loader.mjs", import.meta.url);
+  const hasLoader = (process.env.NODE_OPTIONS ?? "").includes("ts-loader.mjs") || process.execArgv.some((a) => a.includes("ts-loader.mjs"));
+  if (!hasLoader && !loader.pathname.includes("%20")) {
+    const child = spawnSync(process.execPath, [fileURLToPath(import.meta.url), ...process.argv.slice(2)], {
+      stdio: "inherit",
+      env: { ...process.env, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --import ${loader.href}`.trim() },
+    });
+    process.exit(child.status ?? 1);
+  }
+}
 
 const REPO = path.resolve(import.meta.dirname, "..");
 const args = process.argv.slice(2);

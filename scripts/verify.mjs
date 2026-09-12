@@ -47,19 +47,41 @@ function checkHooks() {
   return { problems, notes };
 }
 
-function checkVercelRewrite() {
-  const file = path.join(REPO_ROOT, "vercel.json");
-  if (!fs.existsSync(file)) return ["vercel.json is missing"];
-  const cfg = JSON.parse(fs.readFileSync(file, "utf8"));
+function checkPagesContract() {
+  // The web host is Cloudflare Pages, and the SPA-fallback/cache contract lives in three files under
+  // public/ that Vite ships inside the bundle: a functions catch-all (dotted misses are real 404s,
+  // extensionless routes get the shell), _routes.json (which requests the function sees), and _headers
+  // (cache). They deploy silently wrong if edited, so the only check is here, pre-build. This replaces
+  // vercel.json's rewrite rule — the same contract, expressed in the two files Pages reads.
   const problems = [];
-  const rewrites = cfg.rewrites ?? [];
-  const catchAll = rewrites.find((r) => r.source === "/(.*)" || r.source === "/((?!.*\\.).*)" || (r.source ?? "").includes(".*"));
-  if (!catchAll) problems.push("vercel.json: no SPA rewrite at all (deep links will 404)");
-  else if (catchAll.source === "/(.*)")
-    problems.push('vercel.json: rewrite "/(.*)" -> /index.html also swallows missing assets, so a typo\'d /assets/x.js returns HTML with a 200; exclude dotted paths');
-  const headers = cfg.headers ?? [];
-  const hasJsType = headers.some((h) => JSON.stringify(h).includes("text/javascript"));
-  if (!hasJsType) problems.push("vercel.json: no explicit Content-Type for /assets/*.js (defence in depth for module scripts)");
+  if (fs.existsSync(path.join(REPO_ROOT, "vercel.json")))
+    problems.push("vercel.json is back: the web host is Cloudflare Pages; the contract lives in public/functions/, public/_routes.json and public/_headers");
+  if (fs.existsSync(path.join(REPO_ROOT, "public", "_redirects")))
+    problems.push(
+      "public/_redirects is forbidden: a blanket `/* /index.html 200` answers missing hashed assets with HTML-200, which is the exact failure pages/functions documents. The shell fallback belongs in public/functions/.",
+    );
+  const fn = path.join(REPO_ROOT, "public", "functions", "[[catchall]].js");
+  if (!fs.existsSync(fn)) problems.push("public/functions/[[catchall]].js is missing: every deep link (/team/4) will 404 instead of booting the SPA");
+  else {
+    const src = fs.readFileSync(fn, "utf8");
+    if (!/ASSETS\.fetch/.test(src)) problems.push("the catch-all must read the shell from env.ASSETS (the static asset the build just uploaded), not from a URL fetch");
+    if (!src.includes(String.raw`\.[A-Za-z0-9]+$`)) problems.push("the catch-all must keep extension-bearing misses as 404 (PWA pinning guard) while falling back for routes");
+  }
+  const routes = path.join(REPO_ROOT, "public", "_routes.json");
+  if (!fs.existsSync(routes)) problems.push("public/_routes.json is missing: without it the function runs in front of every hashed asset, paying a Worker invocation per immutable file");
+  else {
+    const cfg = JSON.parse(fs.readFileSync(routes, "utf8"));
+    if (!(cfg.exclude ?? []).includes("/assets/*")) problems.push("public/_routes.json must exclude /assets/* — hashed files are static content, not routes");
+    if (!(cfg.include ?? []).includes("/*")) problems.push("public/_routes.json must include /* so extensionless routes reach the fallback");
+  }
+  const headers = path.join(REPO_ROOT, "public", "_headers");
+  if (!fs.existsSync(headers)) problems.push("public/_headers is missing: hashed assets would not be immutable and sw.js would be cached past its own update");
+  else {
+    const h = fs.readFileSync(headers, "utf8");
+    if (!/\/assets\/\*[\s\S]*max-age=31536000, immutable/.test(h)) problems.push("public/_headers: /assets/* must carry Cache-Control: public, max-age=31536000, immutable");
+    if (!/\/sw\.js[\s\S]*no-store/.test(h)) problems.push("public/_headers: /sw.js must be no-store — a cached service worker pins the old app through updates");
+    if (!/Service-Worker-Allowed: \//.test(h)) problems.push("public/_headers: /sw.js needs Service-Worker-Allowed: / (scope for the whole origin)");
+  }
   return problems;
 }
 
@@ -193,7 +215,7 @@ export async function main() {
   else results.push({ label: "hook script conventions", ok: true, code: 0, out: hooks.notes.join("\n") });
 
   for (const [label, problems] of [
-    ["vercel.json rewrite", checkVercelRewrite()],
+    ["Pages contract (public/_redirects + _headers)", checkPagesContract()],
     [".gitattributes", checkGitattributes()],
     ["package-lock sanity", checkNoStaleLockfileVersion()],
     ["update manifest templates", checkManifestSamples()],

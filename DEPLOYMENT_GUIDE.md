@@ -1,242 +1,74 @@
-# 🚀 KICKLIVE - VERCEL DEPLOYMENT GUIDE
+# 🚀 KICKLIVE - DEPLOYMENT GUIDE (Cloudflare)
 
-## **PREREQUISITES**
+**What each part is.** Pages hosts the frontend bundle; a Worker is the entire API (no Vercel, no Node
+server in production — `server/cli.ts` is the local reference host with the same contract); Supabase is
+Postgres + RLS + auth, nothing else. The Pages app calls `/api` **same-origin**, and Cloudflare routes
+`kicklive.football/api/*` to the Worker — that is why the browser never needs the Worker's URL and why no
+wildcard CORS exists anywhere.
 
-✅ Vercel account (g2code331@gmail.com)
-✅ GitHub account
-✅ New Supabase project credentials
+## Step 1 — The cloud pieces once per environment
 
----
+Work through `docs/ENVIRONMENT_SETUP.md` §1–§4. It is one page per provider and lists every var, every
+secret, the six queue names, both buckets, and the (already-done) KV wiring. Short form: queues → R2
+(enable in dashboard, then create) → `supabase/SETUP.sql` into the project's SQL editor → Worker vars and
+secrets with `wrangler secret put`, per `--env`.
 
-## **STEP 1: PUSH CODE TO GITHUB**
-
-### **Option A: If You Have Git Installed**
+## Step 2 — Deploy the Worker
 
 ```bash
-# Initialize git (if not already done)
-git init
-
-# Add all files
-git add .
-
-# Commit
-git commit -m "KickLive - Ready for Vercel deployment"
-
-# Create repository on GitHub
-# Go to github.com/new
-# Create repository named "kicklive"
-
-# Connect and push
-git remote add origin https://github.com/YOUR_USERNAME/kicklive.git
-git branch -M main
-git push -u origin main
+npm run worker:deploy:staging       # then curl https://staging.kicklive.football/api/health
+npm run worker:deploy:production    # then curl https://kicklive.football/api/health
 ```
 
-### **Option B: Download and Upload Manually**
+Both scripts are `cd workers && npx wrangler deploy --env …`. The deploy reads `workers/wrangler.toml`;
+named environments do **not** inherit top-level `[vars]`, which is why the staging/production blocks each
+carry their own `MEDIA_MAX_BYTES`, queue names, and Supabase triple.
 
-1. **Download all project files** from this chat
-2. **Go to GitHub.com**
-3. **Create new repository** → Name it "kicklive"
-4. **Upload all files** using "Upload files" button
-5. **Commit changes**
+## Step 3 — The Pages project exists once
 
----
-
-## **STEP 2: DEPLOY TO VERCEL**
-
-### **1. Go to Vercel Dashboard**
-```
-https://vercel.com/dashboard
+```bash
+npx wrangler pages project create kicklive-web --production-branch main
+npx wrangler pages project create kicklive-web-staging --production-branch main
 ```
 
-### **2. Login**
-- Click "Continue with GitHub"
-- Authorize Vercel
+Attach `kicklive.football`/`www` to the first project and `staging.kicklive.football` to the second
+(Pages → Custom domains — the zone is already on Cloudflare so DNS is automatic). Then add the Worker
+route `<host>/api/*` → `kicklive-api` for each hostname.
 
-### **3. Import Project**
-- Click **"Add New..."** → **"Project"**
-- Under "Import Git Repository", find **"kicklive"**
-- Click **"Import"**
+## Step 4 — Deploy the frontend
 
-### **4. Configure Project**
+Normal path: the **Deploy web** GitHub Action (push to `main` or workflow_dispatch with
+`preview|staging|production`). It builds `dist/web` using the GitHub environment's
+`VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY`, runs `verify-packaging.mjs`, deploys via
+`wrangler pages deploy`, and finishes by running `scripts/ci/probe-deploy.sh` against the live URL.
 
-**Framework Preset:** Vite (should auto-detect)
+Manual/emergency path:
 
-**Root Directory:** `./` (leave as default)
-
-**Build Command:** `npm run build` (should auto-fill)
-
-**Output Directory:** `dist` (should auto-fill)
-
-**Install Command:** `npm install` (should auto-fill)
-
-### **5. Set Environment Variables** ️ **CRITICAL!**
-
-Click **"Environment Variables"** and add:
-
-```
-VITE_SUPABASE_URL = https://fnefpcjeebawsebxjhcf.supabase.co
-VITE_SUPABASE_ANON_KEY = <paste the publishable/anon key from Supabase → Settings → API>
-# The key is public by design (RLS enforces access), but it is still project-specific: pasting
-# one from a guide instead of your project was how this repo ended up with a URL and a key for
-# two different projects. Neither value is committed to git any more — see .env.example.
+```bash
+npm run build:web
+npx wrangler pages deploy dist/web --project-name kicklive-web --branch main
+bash scripts/ci/probe-deploy.sh https://kicklive-web.pages.dev
 ```
 
-### **6. Deploy**
-- Click **"Deploy"**
-- Wait 2-3 minutes for build to complete
-- You'll see **"🎉 Congratulations!"** when done
+Never paste a superseded schema file as part of "setting the database" — `SUPABASE_NEW_PROJECT_SETUP.sql`
+and `SUPABASE_COMPLETE_SCHEMA.sql` were removed from the tree on 2026-09-12 for exactly this reason;
+`supabase/SETUP.sql` is the only file that runs.
 
----
+## Step 5 — Verify and, if needed, roll back
 
-## **STEP 3: VERIFY DEPLOYMENT**
+`docs/DEPLOYMENT_VERIFICATION.md` — sixteen checks with one command each. Rollback:
 
-### **1. Get Your Vercel URL**
-After deployment, you'll get a URL like:
-```
-https://kicklive-xxx.vercel.app
+```bash
+npx wrangler pages deployment list --project-name kicklive-web
+npx wrangler pages rollback <DEPLOYMENT_ID> --project-name kicklive-web
 ```
 
-### **2. Test the App**
-- Open the URL in **Incognito mode** (Ctrl+Shift+N)
-- Open Console (F12)
-- Look for: `[DataLoader] ✓ Data refreshed:`
+Frontend and API roll back independently (Worker: `npx wrangler rollback --env …`). Database migrations
+are additive-only; there is nothing to un-run when shipping a bundle.
 
-**Should show:**
-```
-{teams: 0, players: 0, competitions: 0, matches: 0}
-```
-✅ This means NEW project is active (empty database)
+## CI note
 
-### **3. Sign Up Fresh**
-- Click **"Sign Up"**
-- Use a **NEW email** (not used before)
-- Complete signup
-- Login with new account
-
----
-
-## **STEP 4: RUN SUPABASE SQL**
-
-### **1. Go to New Supabase Project**
-```
-https://supabase.com/dashboard/project/fnefpcjeebawsebxjhcf
-```
-
-### **2. Open SQL Editor**
-- Click **"SQL Editor"** in left sidebar
-- Click **"New Query"**
-
-### **3. Run Schema Setup**
-- Paste `KICKLIVE_FINAL_SCHEMA.sql` → **Run** (base schema: 15 tables, triggers, the policy set)
-- Then paste each file in `supabase/migrations/` in filename order → **Run** after each
-- Stop on the first error. The phase migrations end with a `do $verify$` block that *raises* rather than
-  installing quietly, so a red message means a policy or a grant did not land — which is what it is for
-
-**Never run `SUPABASE_NEW_PROJECT_SETUP.sql` or `SUPABASE_COMPLETE_SCHEMA.sql`.** Both are superseded, both are
-banner-labelled as such, and both are weaker than what Phase 1 hardened: `SUPABASE_COMPLETE_SCHEMA.sql` has an
-`UPDATE` policy with `USING` and no `WITH CHECK`, which is privilege escalation, and
-`SUPABASE_NEW_PROJECT_SETUP.sql` creates no `profiles` policies at all. `supabase/README.md` says which file is
-authoritative and why the others are kept.
-
----
-
-## **STEP 5: TEST EVERYTHING**
-
-### **Test Match Control:**
-1. Go to **Admin Portal** → **Match Control**
-2. Click **CONTROL MATCH** on any match
-3. Click **KICK OFF**
-4. Timer should run smoothly
-5. **Refresh page** - Timer should continue (not reset!)
-6. **Leave for 1 minute** - Come back, timer should be correct
-
-### **Test Zero Bandwidth:**
-1. Open **Supabase Dashboard** → **Usage**
-2. Watch **"Egress"** usage
-3. Should stay at **~0 MB** while timer runs
-4. Old way used **11.8 GB** - New way uses **~1 MB**!
-
----
-
-## **TROUBLESHOOTING**
-
-### **Problem: Old Data Still Shows**
-
-**Solution:**
-1. Go to Vercel Dashboard
-2. Click on your project
-3. Go to **"Settings"** → **"Environment Variables"**
-4. Verify URLs are correct
-5. Go to **"Deployments"**
-6. Click **"Redeploy"** on latest deployment
-
-### **Problem: Build Fails**
-
-**Solution:**
-1. Check build logs in Vercel
-2. Usually caused by missing dependencies
-3. Run locally: `npm run build`
-4. Fix any errors
-5. Push to GitHub
-6. Vercel will auto-redeploy
-
-### **Problem: Supabase Connection Error**
-
-**Solution:**
-1. Verify Supabase URL is correct
-2. Verify Anon Key is correct
-3. Check Supabase project is active
-4. Run SQL schema in new project
-
----
-
-## **AUTOMATIC DEPLOYMENTS**
-
-After initial setup:
-- **Every push to GitHub** = Auto deploy to Vercel
-- **No manual steps needed**
-- **Changes appear in ~2 minutes**
-
----
-
-## **CUSTOM DOMAIN (Optional)**
-
-To add custom domain:
-1. Vercel Dashboard → Your Project
-2. **"Domains"** tab
-3. Add your domain
-4. Follow DNS instructions
-5. SSL is automatic!
-
----
-
-## **SUCCESS CHECKLIST**
-
-- [ ] Code pushed to GitHub
-- [ ] Project imported to Vercel
-- [ ] Environment variables set correctly
-- [ ] Deployment successful
-- [ ] Supabase SQL schema run
-- [ ] Can sign up with new account
-- [ ] Timer works and persists
-- [ ] No bandwidth errors
-
----
-
-## **NEED HELP?**
-
-Check Vercel logs:
-- Vercel Dashboard → Project → **"Deployments"**
-- Click on latest deployment
-- View build logs
-
-Check Supabase logs:
-- Supabase Dashboard → **"Logs"**
-- View database queries
-
----
-
-**🎉 YOU'RE READY TO DEPLOY!**
-
-Follow the steps above and your app will be live on Vercel with the new zero-bandwidth timer!
+`.github/workflows/*` are installed copies of `ci/workflows/*` (`npm run ci:install`, `npm run ci:check`
+fails on drift). `Deploy web` runs typecheck-independent gates already covered by `npm run gates`; a push
+that is green locally is green in CI. If the runner cannot push `.github/workflows` (a repository push
+rule), that rule lives in Settings → Rules — you own the repo, relax it or commit with `git add -f`.
