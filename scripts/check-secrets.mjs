@@ -19,7 +19,7 @@ import process from "node:process";
 
 /**
  * `required` means: without it the artifact is wrong, not just unpatched. `optional` means a job
- * degrades (no Vercel preview, no notarization) and the run summary has to say so out loud.
+ * degrades (no Pages deploy, no notarization) and the run summary has to say so out loud.
  */
 const SECRETS = [
   {
@@ -30,9 +30,14 @@ const SECRETS = [
     note: "since Phase 1 there is no fallback project in src/lib/supabase.ts: `npm run build` still succeeds, but the app refuses to boot and prints which variable is missing (src/lib/env.ts)",
   },
   { name: "VITE_SUPABASE_ANON_KEY", required: true, jobs: ["web", "desktop", "release", "deploy-web"], why: "same as above; it is a public anon key, but it must be the one matching the URL" },
-  { name: "VERCEL_TOKEN", required: false, jobs: ["deploy-web"], why: "without it the preview/production deploy step is skipped", fallback: "deploy by running `npm run build:web` + your own host" },
-  { name: "VERCEL_PROJECT_ID", required: false, jobs: ["deploy-web"], why: "needed with VERCEL_TOKEN" },
-  { name: "VERCEL_ORG_ID", required: false, jobs: ["deploy-web"], why: "needed with VERCEL_TOKEN" },
+  {
+    name: "CLOUDFLARE_API_TOKEN",
+    required: false,
+    jobs: ["deploy-web"],
+    why: "the Pages deploy step cannot run without it",
+    fallback: "deploy by hand: `npm run build:web` then `npx wrangler pages deploy dist/web --project-name kicklive-web`",
+  },
+  { name: "CLOUDFLARE_ACCOUNT_ID", required: false, jobs: ["deploy-web"], why: "needed with CLOUDFLARE_API_TOKEN" },
   { name: "NPM_TOKEN", required: false, jobs: [], why: "unused today; listed so a future private-package dependency does not get added silently" },
   // ── Phase 2 (Workers) ──────────────────────────────────────────────────────────────────────
   // Declared now so the registry is the single list of what this product has secrets for, and so a

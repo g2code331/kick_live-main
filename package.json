@@ -33,6 +33,8 @@
     "version:check": "node --import ./scripts/lib/ts-loader.mjs scripts/version.mjs check",
     "version:write": "node --import ./scripts/lib/ts-loader.mjs scripts/version.mjs write",
     "check:sql": "node --import ./scripts/lib/ts-loader.mjs scripts/check-sql.mjs",
+    "sql:bundle": "node --import ./scripts/lib/ts-loader.mjs scripts/build-sql-bundle.mjs",
+    "sql:bundle:check": "node --import ./scripts/lib/ts-loader.mjs scripts/build-sql-bundle.mjs --check",
     "verify": "node --import ./scripts/lib/ts-loader.mjs scripts/verify.mjs check",
     "verify:write": "node --import ./scripts/lib/ts-loader.mjs scripts/verify.mjs write",
     "verify:packaging": "node --import ./scripts/lib/ts-loader.mjs scripts/verify-packaging.mjs",

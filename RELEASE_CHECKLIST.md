@@ -282,8 +282,9 @@ kicklive-media-staging`, `kicklive-media`) — but R2 must be enabled on the acc
   [`docs/ENVIRONMENT_SETUP.md`](docs/ENVIRONMENT_SETUP.md), including the names that must match each other across
   files (`NOTIFICATION_QUEUE_NAME` vs the `[[env.*.queues]]` blocks, and the KV id after you create it).
 - `READY` — documented order: migrations (base + nine, filename order) → Worker (`wrangler deploy`, then
-  `--env staging|production` per `workers/README.md`) → web (`npm run build:web` → Vercel/static host,
-  `vercel.json` for SPA + `/api` rewrite) → smoke (`GET /api/health`, the Monitoring panel, one upload, one
+  `--env staging|production` per `workers/README.md`) → web (`npm run build:web` → Cloudflare Pages,
+  `public/functions` + `_routes.json` for the SPA fallback, same zone so `/api` is same-origin) → smoke
+  (`GET /api/health`, the Monitoring panel, one upload, one
   push). `DEPLOYMENT.md`, `DEPLOYMENT_GUIDE.md` and `DEPLOYMENT_CHECKLIST.md` describe this repository, and
   their schema steps were corrected in Phase 10 to stop naming a superseded file.
 - `REQUIRES CONFIGURATION` — every var and secret listed in `.env.example` and `workers/.dev.vars.example`

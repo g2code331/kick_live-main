@@ -49,7 +49,7 @@ canonical location with a symlink-free copy step; nothing else changes.
 |                  |                           | `desktop` (×2)     | electron-builder for `x64` and `arm64`, full layout tests, xvfb smoke (x64 only)                                                                          | `desktop-x64`, `desktop-arm64`                                                          |
 |                  |                           | `web`              | `build:web` with real Supabase env, `verify-packaging`, `version.json` assertion                                                                          | `web-bundle`                                                                            |
 |                  |                           | `release`          | **manifest built from the real artifact bytes**, validated, GitHub Release, published-manifest + sha256 re-verification                                   | `release-manifests`                                                                     |
-| `deploy-web.yml` | push `main`, dispatch     | `build` → `deploy` | builds `dist/web`, Vercel preview/production, then `probe-deploy.sh` against the live URL                                                                 | `web-deploy-bundle`                                                                     |
+| `deploy-web.yml` | push `main`, dispatch     | `build` → `deploy` | builds `dist/web`, Cloudflare Pages preview/staging/production (`wrangler pages deploy`), then `probe-deploy.sh` against the live URL                     | `web-deploy-bundle`                                                                     |
 | `nightly.yml`    | 03:30 UTC                 | `gates`            | clean `npm ci`, `node scripts/gates.mjs` (all six), real packaging, xvfb smoke, **installs the .deb with dpkg and uninstalls it**, live-feed client check | `nightly-smoke-logs`                                                                    |
 
 Artifact naming is fixed by `electron-builder.yml`'s `linux.artifactName`:
@@ -119,8 +119,8 @@ fallback. The three rules the spec demands, and how they are enforced:
    (`.js .mjs .css .png .webmanifest …`, shared with the service worker via `isAssetExtension`)
    returns `404` + `X-KickLive-Reason: missing-asset` and a `text/plain` body. Only extensionless
    navigation routes fall back to `index.html`, and those carry `X-KickLive-App-Shell: 1` so you can
-   tell a shell-served page from a real file in the logs. `vercel.json` implements the same rule with
-   the rewrite `/(?!.*\.).*/` → `/index.html` (dotted paths are never rewritten).
+   tell a shell-served page from a real file in the logs. Cloudflare Pages implements the same rule with
+   `public/functions/[[catchall]].js` + `public/_routes.json` (extensionless → shell, dotted misses → 404, `/assets/*` never enters the function).
 3. **MIME types.** `.js/.mjs → text/javascript; charset=utf-8` (ES modules are _refused_ by the
    browser without a JS type), `.webmanifest → application/manifest+json`, `.wasm →
 application/wasm`, `.svg → image/svg+xml`, unknown → `application/octet-stream` (never HTML),
@@ -301,9 +301,9 @@ the job summary. `KICKLIVE_ALLOW_MISSING_SECRETS=1` downgrades required to warni
 | ------------------------ | ------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `VITE_SUPABASE_URL`      | yes (build jobs)    | web, desktop, release, deploy  | **no error from GitHub** — `${{ secrets.X }}` renders empty, Vite inlines the fallback URL baked in `src/lib/supabase.ts`, and the app ships pointed at the wrong project. `check-secrets.mjs` fails the job instead: `::error::secret VITE_SUPABASE_URL is unset`. |
 | `VITE_SUPABASE_ANON_KEY` | yes (build jobs)    | same                           | same shape; symptom is an empty schedule board. Note the key and URL in that file disagree in the checked-in fallbacks — set both secrets and stop relying on the fallback.                                                                                         |
-| `VERCEL_TOKEN`           | no (deploy-web)     | deploy-web                     | the deploy step prints `::error::VERCEL_TOKEN is not set: the web deploy cannot run. Configure it under Settings → Secrets and variables → Actions` and exits 1; `build` still produces `web-deploy-bundle`                                                         |
-| `VERCEL_PROJECT_ID`      | no (deploy-web)     | deploy-web                     | as above, naming that secret                                                                                                                                                                                                                                        |
-| `VERCEL_ORG_ID`          | no (deploy-web)     | deploy-web                     | as above, naming that secret                                                                                                                                                                                                                                        |
+| `CLOUDFLARE_API_TOKEN`   | no (deploy-web)     | deploy-web                     | the deploy step prints `::error::CLOUDFLARE_API_TOKEN is not set: the web deploy cannot run. Configure it under Settings → Environments` and exits 1; `build` still produces `web-deploy-bundle`                                                                    |
+| `CLOUDFLARE_ACCOUNT_ID`  | no (deploy-web)     | deploy-web                     | as above, naming that secret                                                                                                                                                                                                                                        |
+| ~~`VERCEL_*`~~           | —                   | —                              | removed with the Vercel host on 2026-09-12; Pages needs only the two secrets above                                                                                                                                                                                  |
 | `GITHUB_TOKEN`           | provided by Actions | release (assets + channel tag) | `release.yml` needs `permissions: contents: write`; without it `gh release create` fails with `HTTP 403: Resource not accessible by integration`                                                                                                                    |
 
 No secret is needed for the update feed: the manifest and the artifacts are **public release assets**,
@@ -378,7 +378,7 @@ Properties that make this safe, and their limits:
 npm run typecheck          # both tsconfigs
 npm test                   # 152 unit + 54 integration (real sockets, real files)
 npm run format:check
-npm run verify             # 17 checks: branding, version, hooks, yaml, vercel.json, lockfile, manifest templates
+npm run verify             # 17 checks: branding, version, hooks, yaml, Pages contract, lockfile, manifest templates
 npm run build              # web + renderer + desktop bundles
 npm run verify:packaging   # tier A (45 checks incl. a real asar pack/list/extract)
 node scripts/gates.mjs     # the §7 gate run with the table below
@@ -461,7 +461,7 @@ slipped through it because prettier _did_ run, on the wrong input.
 | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | window paints the diagnostic page                      | `~/.config/kicklive/logs/main-YYYYMMDD.log`, grep `[kicklive:renderer]`; `EXHAUSTED` means both sources failed → check `asarUnpack` and `renderer/dist` in the asar: `npx asar list release/linux-unpacked/resources/app.asar \| head` |
 | "Failed to load module script" in the renderer console | the asset was served without a JS MIME type — `curl -sI …/assets/x.js \| grep -i content-type`                                                                                                                                         |
-| deep link 404s on the deployed web build               | host-level SPA rewrite missing (`vercel.json` is correct; a different host needs the same dotted-path exclusion)                                                                                                                       |
+| deep link 404s on the deployed web build               | host-level SPA fallback missing (`public/functions/[[catchall]].js` + `_routes.json` are the contract; a different host needs the same dotted-path exclusion)                                                                          |
 | `dpkg -i` fails with "unmet dependencies"              | t64 renames: compare `dpkg-deb -f release/kicklive_*.deb Depends` with `packaging/../electron-builder.yml`                                                                                                                             |
 | `dpkg -i` warns about `chrome-sandbox`                 | the setuid helper: after-install only sets it when unprivileged userns is unavailable; run `unshare --user true` to see which branch you are in                                                                                        |
 | header control stuck on `unknown`                      | feed unreachable or misconfigured: `curl -fsSL <manifest-url>`; `data-feed-configured="false"` in the DOM means the URL never got resolved                                                                                             |
