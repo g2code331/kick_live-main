@@ -10,16 +10,18 @@ Status vocabulary, used literally and nowhere softened:
 | `BLOCKED`                | cannot be verified from this workspace at all, and nothing here pretends otherwise                 |
 | `NOT IMPLEMENTED`        | the capability does not exist; see the named "deliberately not done" section that explains why     |
 
-Verified in this workspace on 2026-09-10 with no Postgres, no Cloudflare login and no browser:
+Verified in this workspace on 2026-09-12 with no Postgres, no Cloudflare login and no browser:
 `npm run typecheck` (all three `tsc` projects) 0 errors — re-run with exit codes preserved, after it emerged that
 an earlier pass had been piping `tsc` into `tail` and reading `tail`'s status; a claim that rested on a broken
-command is not a verification · `npm run build:web` succeeds (fan boot 529.8 KiB raw /
-156.6 KiB gzipped over 5 chunks; 74 files, 7.31 MiB total) · `npm run build:desktop` bundles main+preload ·
-`npm run test:unit` 577 pass / 0 fail · `npm run test:integration` 99 pass / 0 fail ·
-`node scripts/worker-routes.mjs --check` 101/101 · `node scripts/check-secrets.mjs` finds no committed secret
+command is not a verification · `npm run build:web` succeeds (fan boot 514.5 KiB raw /
+152.3 KiB gzipped over 5 chunks; 74 files, 7.30 MiB total) · `npm run build:desktop` bundles main+preload ·
+`npm run test:unit` 583 pass / 0 fail · `npm run test:integration` 99 pass / 0 fail ·
+`npm run worker:routes -- --check` 101/101 · `node scripts/check-secrets.mjs` finds no committed secret
 and reports the 2 required CI secrets as unset here (correct — this sandbox has none) · `npm run format:check`
-clean · `npm run gates` 21 pass / 1 fail / 4 skip (the one failure is `_github/workflows` not installed here:
-run `npm run ci:install`). **`npm run check:sql` did not run: there is no Postgres binary, no container runtime
+clean · `npm run gates` 23 pass / 0 fail / 3 skip (workflows ride on `main` now, so the old `ci:install`
+failure is gone; each skip names the CI job that covers it) · `npx wrangler deploy --dry-run` exits 0 for
+both `staging` and `production`
+(all bindings resolve, no warnings). **`npm run check:sql` did not run: there is no Postgres binary, no container runtime
 and no root in this environment, so `initdb` is impossible.** That single fact is why five rows below say
 `REQUIRES TESTING` rather than `READY`.
 
@@ -58,8 +60,9 @@ and no root in this environment, so `initdb` is impossible.** That single fact i
   see `BLOCKED` in §2).
 - `BLOCKED` — no independent secret rotation has been exercised: `AD_VIEWER_KEY_SECRET`, `SUPABASE_JWT_SECRET`
   and `FCM_SERVICE_ACCOUNT` each have a documented rotation story, none has been performed here.
-- `REQUIRES CONFIGURATION` — `npm run ci:install` to place the two workflow files in `.github/workflows/`,
-  otherwise the security/branding gates never run on a push (`gates` fails here on exactly that).
+- `READY` (2026-09-12) — the four workflow files ride on `main` (byte-identical to `ci/workflows/`), so the
+  security/branding gates run on every push; `gates` passes with 0 fail. Re-run `npm run ci:install` after
+  any edit under `ci/` — drift fails `verify` by design.
 
 ## 2. DATABASE
 
@@ -126,7 +129,8 @@ and no root in this environment, so `initdb` is impossible.** That single fact i
 kicklive-media-staging`, `kicklive-media`) — but R2 must be enabled on the account by a human in the
   dashboard first (`Please enable R2 through the Cloudflare Dashboard [code: 10042]`; a payment method is
   required even for the free tier). Then decide the public bucket policy (a
-  custom domain / `token`-less public access is what `urlColumn` assumes) and set `MEDIA_MAX_BYTES` per env.
+  custom domain / `token`-less public access is what `urlColumn` assumes). `MEDIA_MAX_BYTES` is already
+  explicit in all three `[vars]` blocks — move the ceiling per environment if it ever needs to move.
 - `REQUIRES TESTING` — phase 6's deferred work is still open: no thumbnail/`og:` variants, no resize, no video
   handling, no avatar upload UI, `teams.gallery` has no upload path, and legacy `media`-table objects are not
   deleted. `AdminPortal.tsx` still reads the legacy `media` table for its recent-media card, which is why that
@@ -289,8 +293,8 @@ kicklive-media-staging`, `kicklive-media`) — but R2 must be enabled on the acc
 - `REQUIRES CONFIGURATION` — every var and secret listed in `.env.example` and `workers/.dev.vars.example`
   (which is now complete through phase 9, including `AD_VIEWER_KEY_SECRET` and `LOG_MODE`); the Vite build
   refuses a mismatched ref/key pair, so a half-configured deploy fails loudly.
-- `REQUIRES CONFIGURATION` — `npm run ci:install` (workflows live in `ci/` and are copied into
-  `.github/workflows/`, because this repository's push rules reject commits that touch that directory).
+- `READY` (2026-09-12) — workflows installed on `main` (see §1); `ci/` remains the source of truth and
+  `npm run ci:install` the repair command if the two ever drift.
 - `REQUIRES TESTING` — `verify.mjs check` (17 checks) and `gates` in CI on the pushed branch, plus a staging
   deploy observed through one live match.
 - `BLOCKED` — nothing in this checklist has been deployed; no claim below is based on a successful deploy.
@@ -329,8 +333,7 @@ Two things stop this from being an unqualified `READY`:
    `npm run check:sql` — which is the only check that can see whether a constraint fires — cannot run in this
    workspace, and Phase 8's identical gap is what produced the phase-8 `runSponsorshipFlow`. Ship after the
    `--fresh` run in §2 prints `ALL PASS` on staging.
-2. **`REQUIRES FIXES`:** `workers/wrangler.toml`'s commented-out `RATE_LIMIT_KV` (a rate limiter that is not
-   global is not the mitigation §1 assumes it is), the three-surface match desk that has not been consolidated
+2. **`REQUIRES FIXES`:** the three-surface match desk that has not been consolidated
    to one canonical control center, the two admin libraries that still `select('*')` and log to the console, and
    the 344 `<button>` elements without a `type` attribute (in React, a `button` in a form defaults to `submit` —
    an accidental submit on the referee desk is a real event, not a lint nit; `aria` coverage is thin at
