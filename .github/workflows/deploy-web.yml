@@ -1,0 +1,110 @@
+# Deploy the web/PWA surface (docs/RELEASE-PIPELINE.md § deploy-web).
+#
+# Desktop artifacts are NOT part of this workflow: they are GitHub Release assets and Vercel never
+# sees them. This job only ever publishes `dist/web`, which is why the same commit can be live on the
+# web while the desktop release is still a draft.
+name: Deploy web
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "packaging/**"
+      - "*.md"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Deploy target"
+        type: choice
+        required: true
+        default: production
+        options: [preview, production]
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: deploy-web-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build dist/web
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.18.0"
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: "Secrets audit (optional here: a missing key still builds, it just ships the fallback backend)"
+        run: node scripts/check-secrets.mjs --job=web || echo "::warning::continuing the web deploy with unset optional secrets"
+      - name: Build
+        run: npm run build:web
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+      - name: Assert the built bundle is servable (404s stay 404s, JS stays JS)
+        run: node scripts/verify-packaging.mjs
+      - id: ver
+        name: Version of what is being deployed
+        run: |
+          echo "version=$(cat VERSION)" >> "$GITHUB_OUTPUT"
+          grep -o 'name="kicklive:version" content="[^"]*"' dist/web/index.html || echo "note: the version meta is stamped at runtime"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-deploy-bundle
+          path: dist/web
+          if-no-files-found: error
+
+  deploy:
+    name: Deploy to ${{ github.event.inputs.environment || 'production' }}
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: ${{ github.event.inputs.environment || 'production' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.18.0"
+          cache: npm
+      - name: Secrets audit
+        run: node scripts/check-secrets.mjs --job=deploy-web
+      - name: Install Vercel CLI
+        run: npm i -g vercel@latest
+      - name: Deploy
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for s in VERCEL_TOKEN VERCEL_PROJECT_ID VERCEL_ORG_ID; do
+            if [ -z "${!s:-}" ]; then echo "::error::$s is not set: the web deploy cannot run. Configure it under Settings → Secrets and variables → Actions → repository secrets ($s)."; missing=1; fi
+          done
+          [ "$missing" = "0" ] || exit 1
+          npm ci --no-audit --no-fund
+          npm run build:web
+          args=(--yes --token "$VERCEL_TOKEN" --project "$VERCEL_PROJECT_ID" --scope "$VERCEL_ORG_ID")
+          if [ "${{ github.event.inputs.environment || 'production' }}" = "preview" ]; then
+            vercel deploy "${args[@]}" | tee /tmp/url.txt
+          else
+            vercel deploy --prod "${args[@]}" | tee /tmp/url.txt
+          fi
+          url=$(tail -1 /tmp/url.txt)
+          echo "deployed=$url" >> "$GITHUB_ENV"
+          echo "### Web deploy" >> "$GITHUB_STEP_SUMMARY"
+          echo "- bundle version: \`${{ needs.build.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- url: $url" >> "$GITHUB_STEP_SUMMARY"
+      - name: Post-deploy probe (the deployed host must honour the 404/MIME contract)
+        if: env.deployed != ''
+        run: bash scripts/ci/probe-deploy.sh "$deployed"
