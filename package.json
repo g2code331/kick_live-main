@@ -48,6 +48,7 @@
     "ci:check": "node --import ./scripts/lib/ts-loader.mjs scripts/install-ci.mjs --check",
     "package:linux:dir": "node --import ./scripts/lib/ts-loader.mjs scripts/package-linux.mjs --dir",
     "worker:dev": "wrangler dev --config workers/wrangler.toml --port 8787 --inspector-port 0",
+    "worker:secret": "wrangler secret put --config workers/wrangler.toml",
     "worker:local": "node --import ./scripts/lib/ts-loader.mjs scripts/worker-local.mjs",
     "worker:deploy:staging": "wrangler deploy --config workers/wrangler.toml --env staging",
     "worker:deploy:production": "wrangler deploy --config workers/wrangler.toml --env production",
@@ -80,7 +81,7 @@
     "prettier": "3.9.6",
     "tailwindcss": "4.1.17",
     "typescript": "5.9.3",
-    "vite": "7.3.2",
+    "vite": "7.3.6",
     "wrangler": "^4.130.0",
     "yaml": "^2.9.0"
   },

@@ -483,6 +483,19 @@ describe("privilege assertions in the migrations read the catalog, not the super
   });
 });
 
+describe("the worker editor mirror is an extends, never a copy of the options", () => {
+  // `workers/tsconfig.json` exists only so a language service opened under `workers/` resolves the same program the
+  // build does. When it re-listed `lib`/`types` itself, the editor could not resolve the `types` entry from inside
+  // `workers/` (type reference directives search `<config dir>/node_modules/@types` first) and reported "Cannot find
+  // type definition file for '@cloudflare/workers-types'" on a config the build was passing. Extending the build's
+  // own file means there is exactly one list of options, and the editor cannot drift from a config that is already
+  // checked in CI.
+  const mirror = JSON.parse(fs.readFileSync(path.join(REPO, "workers/tsconfig.json"), "utf8"));
+  assert.equal(mirror.extends, "../tsconfig.workers.json", "the mirror must extend the build config, not restate it");
+  assert.ok(!("compilerOptions" in mirror), "compilerOptions here would be a second source of truth for the Worker program");
+  assert.deepEqual(mirror.include, ["src"], "and it adds nothing but the include, so tsc -p on it checks the same files");
+});
+
 describe("the admin bootstrap refuses to guess who the admin is", () => {
   // Every rule here is a guard that exists because a one-paste admin grant is the most expensive file in the
   // repository. The first version hardcoded a real address and a UUID and blindly upserted `role = 'admin'`;

@@ -72,11 +72,11 @@ Production gets its secrets from `wrangler secret put`, per environment.
 The database and the Worker talk to FCM directly; there is no Firebase SDK in the browser and no VAPID key. You need three things
 from the **Firebase console** (console.firebase.google.com → your project → ⚙ Project settings):
 
-| what                                                             | where                                                                                           | how the app learns it                      |
-| ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| Project id (the string in the console URL, e.g. `kicklive-push`) | `workers/wrangler.toml` → `[env.production.vars]` **and** `[env.staging.vars]`                  | `FCM_PROJECT_ID` (a var, not a secret)     |
-| The downloaded service-account JSON                              | `npx wrangler secret put FCM_SERVICE_ACCOUNT --env production` (and `--env staging`)            | `FCM_SERVICE_ACCOUNT` (secret only)        |
-| For a laptop, both lines above                                   | instead: the same two entries in `workers/.dev.vars` (git-ignored, read only by `wrangler dev`) | nothing — that file never reaches a deploy |
+| what                                                             | where                                                                                                               | how the app learns it                      |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| Project id (the string in the console URL, e.g. `kicklive-push`) | `workers/wrangler.toml` → `[env.production.vars]` **and** `[env.staging.vars]`                                      | `FCM_PROJECT_ID` (a var, not a secret)     |
+| The downloaded service-account JSON                              | `npx wrangler secret put FCM_SERVICE_ACCOUNT --config workers/wrangler.toml --env production` (and `--env staging`) | `FCM_SERVICE_ACCOUNT` (secret only)        |
+| For a laptop, both lines above                                   | instead: the same two entries in `workers/.dev.vars` (git-ignored, read only by `wrangler dev`)                     | nothing — that file never reaches a deploy |
 
 Then, in the **Google Cloud** console for that same project (APIs & Services → Library), enable **Firebase Cloud Messaging API
 (V1)**. Without it every send answers `403 PERMISSION_DENIED`, and the Worker's queue path will look like a push bug rather than a
@@ -98,13 +98,19 @@ And the three rules that make this safe:
 
 ## 4 · The rest of the Cloudflare secret list (one command each, per environment)
 
+Every `wrangler` command that touches the Worker needs `--config workers/wrangler.toml`, because that is where the config
+lives. Run one without it from the repo root and wrangler finds no config at all, so it reports `No environment found in
+configuration with name "staging"` and then `Required Worker name missing` — a confusing pair, since both names are in the
+file you were told to read. Only `pages …`, `queues …`, `r2 …` and `kv namespace …` are account-level and need nothing.
+`npm run worker:secret -- <NAME> --env staging` is the same command with the flag already in it.
+
 ```bash
-npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY --env staging     # then --env production, with that project's key
-npx wrangler secret put SUPABASE_JWT_SECRET --env staging
-npx wrangler secret put TURNSTILE_SECRET_KEY --env staging          # unset = the bot check is skipped (fine locally, not in prod)
-npx wrangler secret put AD_VIEWER_KEY_SECRET --env staging          # unset = derived from SUPABASE_JWT_SECRET (works, couples rotations)
-npx wrangler secret put FCM_SERVICE_ACCOUNT --env staging            # only if push must really leave the account
-npx wrangler secret list --env production                            # must show all of them
+npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY --config workers/wrangler.toml --env staging     # then --env production, with that project's key
+npx wrangler secret put SUPABASE_JWT_SECRET --config workers/wrangler.toml --env staging
+npx wrangler secret put TURNSTILE_SECRET_KEY --config workers/wrangler.toml --env staging          # unset = the bot check is skipped (fine locally, not in prod)
+npx wrangler secret put AD_VIEWER_KEY_SECRET --config workers/wrangler.toml --env staging          # unset = derived from SUPABASE_JWT_SECRET (works, couples rotations)
+npx wrangler secret put FCM_SERVICE_ACCOUNT --config workers/wrangler.toml --env staging            # only if push must really leave the account
+npx wrangler secret list --config workers/wrangler.toml --env production                            # must show all of them
 ```
 
 `TURNSTILE_SITE_KEY` is the browser half of Turnstile and goes in the SPA build env (GitHub environment, or `.env.local` locally) —

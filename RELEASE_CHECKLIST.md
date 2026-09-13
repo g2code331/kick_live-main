@@ -68,6 +68,31 @@ Two new `sql-shape` lints pin the shape (no comparison of `privilege_type` to an
 `aclexplode` branch must filter through the translated set) and one pins that the migrations keep at least two
 positive assertions, since a suite of only negatives cannot detect a comparison that never matches.
 
+## Operator run (2026-09-13, staging + production deployed) — and one documentation bug it exposed
+
+`kicklive-api-staging` (`4a0b276e…`) and `kicklive-api` (`c3df1979…`) are deployed to the account, both from a clean
+`--dry-run`, with the queue producers/consumers and the two crons attached; the two Pages projects exist but have
+**no deployment yet**, so `*.pages.dev` 404s and `probe-deploy.sh` reports FAIL — correct for an empty project, and
+step 5 of the walkthrough (build with an explicit `VITE_*` pair, then `pages deploy dist/web`) is what closes it.
+Production's `queues.consumers` were missing on the account before this deploy and are now set from the repo config.
+
+The operator's `npx wrangler secret put … --env staging` attempts all failed with _"No environment found with name
+staging"_ + _"Required Worker name missing"_. That was a bug in **this repository's instructions**: the config lives
+at `workers/wrangler.toml`, so every `wrangler` command that targets the Worker needs `--config` and the docs said
+so on the deploy lines but not on the secret lines. Fixed across the nine files that carried a bare `wrangler secret`,
+`npm run worker:secret -- NAME --env staging` added so the flag cannot be forgotten, and the walkthrough now names
+which commands are account-level (`pages`/`queues`/`r2`/`kv`) and therefore need nothing.
+
+That same deploy output showed `FCM_SERVICE_ACCOUNT` present in production's **vars** — the whole service-account
+JSON, private key included. The key is exposed (account config, terminal scrollback, deploy history) and the deploy
+has now removed it from vars without re-adding it as a secret. **Rotation is an operator action and is not done
+here**: see the walkthrough's "If a deploy warns that the remote config has `FCM_SERVICE_ACCOUNT` under `vars`".
+
+Dependency state moved too: `vite` 7.3.2 → **7.3.6** (the `server.fs.deny` bypass in the dev server, which matters
+specifically because the preview binds `0.0.0.0`) and `npm audit fix` for the transitive `postcss` /
+`brace-expansion` / `sharp` advisories. `npm audit` now reports **0 vulnerabilities** — previously 14 (7 high) —
+and nothing else in the tree was pinned back.
+
 ## Re-verified again at `4d4fc7b` + the editor/gate follow-up
 
 Two SQL corrections landed after the paragraph above, both on the `SETUP.sql` apply path, both proven by paste:
