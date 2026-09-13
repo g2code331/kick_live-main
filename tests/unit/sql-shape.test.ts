@@ -387,6 +387,75 @@ describe("privilege assertions in the migrations read the catalog, not the super
     assert.deepEqual(offenders, [], "privilege codes must match the object kind, or the check passes without looking");
   });
 
+  it("the privilege value compared with aclexplode is a long name, never an ACL letter", () => {
+    // The bug this rule exists for. aclexplode() reports privilege_type as a LONG name (EXECUTE, SELECT,
+    // UPDATE), while r a w d D x t U X are the codes used by acldefault() and by GRANT/REVOKE text. A
+    // comparison of the two matches nothing, for any role, which reads as "not granted": every NEGATIVE
+    // assertion in nine migrations passed while checking nothing, and the single POSITIVE one in phase 3
+    // failed the apply. That failure is the only reason anyone found it. The helper now takes a letter (so
+    // a call site still reads like the GRANT above it) and translates it here, where the set of legal
+    // names is knowable - and raises on an argument that is neither a letter nor a name.
+    const NAMES = ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER", "USAGE", "EXECUTE"];
+    const files = fs
+      .readdirSync(MIGRATIONS_DIR)
+      .filter((f) => f.endsWith(".sql"))
+      .sort();
+    const offenders: string[] = [];
+    for (const f of files) {
+      const text = fs.readFileSync(path.join(MIGRATIONS_DIR, f), "utf8");
+      text.split("\n").forEach((line, i) => {
+        if (line.trim().startsWith("--")) return;
+        const m = /privilege_type\s*=\s*'([^']{1,3})'/.exec(line);
+        if (m && !NAMES.includes(m[1]!)) offenders.push(f + ":" + (i + 1) + " compares privilege_type to a value no ACL can hold: " + m[1]);
+      });
+    }
+    assert.deepEqual(offenders, [], "privilege_type may only be compared with a name aclexplode can report; the letters belong in kicklive_has_grant");
+
+    const p1 = fs.readFileSync(path.join(MIGRATIONS_DIR, "20260909120000_phase1_security_hardening.sql"), "utf8");
+    const body = p1.slice(p1.indexOf("create or replace function public.kicklive_has_grant("), p1.indexOf("$hg$;"));
+    // every long name must be reachable from the translation, and every branch of the helper must filter
+    // through it - a branch left comparing the raw argument is the same bug in one path instead of four.
+    const quote = String.fromCharCode(39); // an SQL string literal's delimiter, without escaping noise here
+    const missing = NAMES.filter((n) => !body.includes(quote + n + quote));
+    assert.deepEqual(missing, [], "the helper must be able to produce every privilege name aclexplode reports here");
+    const executable = body
+      .split("\n")
+      .filter((l) => !l.trim().startsWith("--"))
+      .join("\n"); // aclexplode is named in the prose above the helper; only code can compare to it
+    const branches = (executable.match(/aclexplode\(/g) ?? []).length;
+    const viaNames = (executable.match(/privilege_type = any\s*\(v_names\)/g) ?? []).length;
+    assert.ok(branches >= 4, "four ACL paths expected: function, table, table-wide-covers-column, column");
+    assert.equal(viaNames, branches, "every aclexplode branch must compare the translated name set, not the argument");
+    assert.match(body, /raise exception\s*'kicklive_has_grant: % is neither/, "an unrecognised privilege argument must raise, not answer false");
+  });
+
+  it("a positive assertion in a verify block exists at all, because negatives cannot prove a translation", () => {
+    // Every hardening assertion is `if granted then raise` — with a broken comparison all of them hold while
+    // nothing is true. The migrations therefore need at least one `if not granted then raise`, which is the
+    // shape that fails loudly when the privilege read stops matching reality. Phase 3 has one per client-facing
+    // RPC; that is deliberate and must stay.
+    const files = fs
+      .readdirSync(MIGRATIONS_DIR)
+      .filter((f) => f.endsWith(".sql"))
+      .sort();
+    const positives: string[] = [];
+    for (const f of files) {
+      const text = fs.readFileSync(path.join(MIGRATIONS_DIR, f), "utf8");
+      const n = (text.match(/if not public\.kicklive_has_grant\(/g) ?? []).length;
+      if (n) positives.push(`${f}:${n}`);
+    }
+    assert.ok(positives.length >= 2, `expected a positive "is it really granted?" assertion in more than one phase, saw ${positives.join(" ")}`);
+    // and each must be paired with a raise, or it is a no-op expression statement: the failure mode is
+    // someone turning `if not granted then raise` into `v_x := kicklive_has_grant(...)` and the assertion
+    // vanishing while the suite still finds the call. What the message says is the author's business.
+    for (const f of files) {
+      const text = fs.readFileSync(path.join(MIGRATIONS_DIR, f), "utf8");
+      for (const m of text.matchAll(/if not public\.kicklive_has_grant\([\s\S]{0,400}?\) then/g)) {
+        const tail = text.slice(m.index, m.index + m[0].length + 260);
+        assert.ok(/raise exception/.test(tail), `${f}: a positive assertion with no raise is not an assertion`);
+      }
+    }
+  });
   it("a `from public` revoke never stands alone where the same file grants a client role", () => {
     // The second half of the same bug: revoking from PUBLIC does not remove the anon/authenticated aclitem
     // entries Supabase's default privileges create. Where a file grants a client role execute, the revoke

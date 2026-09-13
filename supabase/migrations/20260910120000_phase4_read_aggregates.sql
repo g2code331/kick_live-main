@@ -279,9 +279,12 @@ begin
        and p.proname in ('kicklive_is_final_status','kicklive_competition_standings','kicklive_squad_sizes')
        -- read the ACL rather than has_function_privilege(): the latter is true for the superuser the SQL
        -- editor runs as, which would make this count 3 on a database where the grant never landed.
+       -- 'EXECUTE', not the 'X' of an ACL letter: aclexplode reports the long name, and a letter here would
+       -- make this count 0 and raise on a *correctly granted* database. That asymmetry is how the letter bug
+       -- was found at all — it is the one assertion in the bundle whose truth had to be a real yes.
        and exists (
          select 1 from pg_roles r, aclexplode(p.proacl) g
-          where r.rolname = 'anon' and g.privilege_type = 'X' and (g.grantee = r.oid or g.grantee = 0))
+          where r.rolname = 'anon' and g.privilege_type = 'EXECUTE' and (g.grantee = r.oid or g.grantee = 0))
   ) <> 3 then
     raise exception 'phase4 verification failed: anon cannot execute one of the read aggregates';
   end if;

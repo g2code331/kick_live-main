@@ -33,8 +33,12 @@ PUBLIC does not touch them. `tests/unit/sql-shape.test.ts` fails if either rule 
 an unresolvable `object` name **raises** rather than answering `false`, because a verifier that certifies a typo is
 worse than no verifier. Two more shapes are pinned there because this repository has no Postgres between writing SQL
 and applying it in a dashboard: `aclexplode()` exposes exactly `grantor`, `grantee`, `privilege_type`,
-`is_grantable` (nothing named `objid`, and per-column grants are not in `relacl` at all), and a privilege code must
-belong to the object kind it is asked about — `U` is USAGE on a sequence or function, UPDATE on a table column is `w`.
+`is_grantable` (nothing named `objid`, and per-column grants are not in `relacl` at all), and a privilege code must belong to the object kind it is asked about — `U` is USAGE on a sequence or function, UPDATE on a
+table column is `w`. Third: that letter is a **code**, and `aclexplode()` reports the long name, so the helper translates
+`r a w d D x t U X` into `SELECT INSERT UPDATE DELETE TRUNCATE REFERENCES TRIGGER USAGE EXECUTE` and an argument that is
+neither raises. A letter compared straight to `privilege_type` matches nothing for anybody, which reads as "not granted"
+and quietly vacuates every negative assertion in nine migrations — that is what `hardening failed: the record function is
+not granted EXECUTE to authenticated` was, on a database where the grant had landed.
 
 ## What `authenticated` may project (Phase 10)
 
