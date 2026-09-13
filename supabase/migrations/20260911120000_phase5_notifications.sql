@@ -1367,13 +1367,13 @@ begin
   end if;
 
   -- 9.3 no client role may read a device token, in any form.
-  if has_table_privilege('authenticated', 'public.notification_devices', 'insert')
-     or has_table_privilege('anon', 'public.notification_devices', 'select') then
+  if public.kicklive_has_grant('authenticated', 'public.notification_devices', 'a')
+     or public.kicklive_has_grant('anon', 'public.notification_devices', 'r') then
     raise exception 'phase5 verification failed: a client role can write or read notification_devices directly; registration is an RPC and the token is not selectable';
   end if;
-  if has_table_privilege('authenticated', 'public.notification_jobs', 'insert')
-     or has_table_privilege('anon', 'public.notification_jobs', 'select')
-     or has_table_privilege('authenticated', 'public.notification_deliveries', 'insert') then
+  if public.kicklive_has_grant('authenticated', 'public.notification_jobs', 'a')
+     or public.kicklive_has_grant('anon', 'public.notification_jobs', 'r')
+     or public.kicklive_has_grant('authenticated', 'public.notification_deliveries', 'a') then
     raise exception 'phase5 verification failed: jobs and deliveries are not client-writable, and that is the only thing standing between an anon key and a mass send';
   end if;
 
@@ -1476,8 +1476,10 @@ commit;
 --  VERIFY:  select count(*) from pg_policies where tablename like 'notification%';
 --  VERIFY:  select policyname, cmd, qual from pg_policies where tablename = 'notifications';
 --           -- must show "notifications: owner or broadcast read" and NOT "notifications: public read"
---  VERIFY:  select has_table_privilege('authenticated','public.notification_devices','select');   -- false
---  VERIFY:  select has_table_privilege('anon','public.notification_jobs','select');                -- false
+--  VERIFY:  select public.kicklive_has_grant('authenticated','public.notification_devices','r');   -- false
+--  VERIFY:  select public.kicklive_has_grant('anon','public.notification_jobs','r');                -- false
+--  (Use that, not has_table_privilege(): from the superuser session of the SQL editor the latter answers "true"
+--   for every role and proves nothing. Same reason the verify block above reads the ACLs.)
 --  VERIFY:  select * from kicklive_pending_notification_jobs(5);                                   -- {"jobIds": [], …}
 --  VERIFY:  -- register a device as a real user (via the Worker route), then:
 --           --   select id, provider, platform, active from notification_devices order by created_at desc limit 1;

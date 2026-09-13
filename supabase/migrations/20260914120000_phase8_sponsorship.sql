@@ -2058,7 +2058,7 @@ begin
   -- enumerated because a list of names here is a second place to remember them, and the grants loop above is
   -- where they are actually decided.
   select count(1) into n from pg_proc p join pg_namespace nn on nn.oid = p.pronamespace
-   where nn.nspname = 'public' and has_function_privilege('anon', p.oid, 'execute')
+   where nn.nspname = 'public' and public.kicklive_has_grant('anon', p.oid::regprocedure::text, 'X')
      and p.proname like 'kicklive_sponsor%';
   if n <> 3 then
     raise exception 'kicklive migration verification failed: anon may execute % sponsorship function(s), expected 3 (the read, the epoch and the rate card)', n;
@@ -2067,13 +2067,13 @@ begin
   -- And the shape of the staff grant, stated as the two facts that matter rather than as a count: an
   -- authenticated caller can reach the writers (so `is_admin()` has a subject to judge), and cannot reach the
   -- cache-version writer or the private-object helper at all.
-  if not has_function_privilege('authenticated', 'public.kicklive_sponsor_save(jsonb)', 'execute') then
+  if not public.kicklive_has_grant('authenticated', 'public.kicklive_sponsor_save(jsonb)', 'X') then
     raise exception 'kicklive migration verification failed: the staff surface is not executable as `authenticated`, so every admin write would arrive with auth.uid() = NULL and be refused by its own is_admin() check';
   end if;
-  if has_function_privilege('authenticated', 'public.kicklive_sponsorship_touch_epoch(boolean)', 'execute') then
+  if public.kicklive_has_grant('authenticated', 'public.kicklive_sponsorship_touch_epoch(boolean)', 'X') then
     raise exception 'kicklive migration verification failed: a client role may bump the sponsorship cache epoch directly';
   end if;
-  if has_function_privilege('authenticated', 'public.kicklive_asset_url_for_asset(bigint)', 'execute') then
+  if public.kicklive_has_grant('authenticated', 'public.kicklive_asset_url_for_asset(bigint)', 'X') then
     raise exception 'kicklive migration verification failed: a client role may trade an asset id for a stored key';
   end if;
 

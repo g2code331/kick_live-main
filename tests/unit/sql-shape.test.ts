@@ -295,6 +295,111 @@ describe("the SQL checker is wired in, not decorative", () => {
   });
 });
 
+describe("privilege assertions in the migrations read the catalog, not the superuser shortcut", () => {
+  // This rule exists because of a real paste. `supabase/SETUP.sql` into the Supabase SQL editor runs as a
+  // superuser, and `has_column_privilege()` / `has_table_privilege()` / `has_function_privilege()` answer
+  // "true" for a superuser (and for the owner of the object) no matter what was revoked. So the Phase 1
+  // self-check raised `hardening failed: authenticated can still update profiles.role directly` on a
+  // database where that revoke had landed perfectly — and, far worse, the same class of function made every
+  // POSITIVE assertion in these files pass while checking nothing at all. A verifier that cannot fail is
+  // how three phases of privilege work went unproven.
+  const files = fs
+    .readdirSync(MIGRATIONS_DIR)
+    .filter((f) => f.endsWith(".sql"))
+    .sort();
+
+  it("no executable SQL asks a has_*_privilege() function what a grant is", () => {
+    const offenders: string[] = [];
+    for (const f of ["KICKLIVE_FINAL_SCHEMA.sql", ...files.map((x) => `supabase/migrations/${x}`)]) {
+      const body = code(fs.readFileSync(path.join(REPO, f), "utf8"));
+      body.split("\n").forEach((line, i) => {
+        if (/has_(column|table|function)_privilege\s*\(/.test(line)) {
+          offenders.push(`${f}:${i + 1}: ${line.trim().slice(0, 96)}`);
+        }
+      });
+    }
+    assert.deepEqual(offenders, [], "privilege assertions must read relacl/proacl via public.kicklive_has_grant; see the note in the Phase 1 hardening migration");
+  });
+
+  it("the grant reader exists, is callable by anyone, and answers from the ACL", () => {
+    const p1 = fs.readFileSync(path.join(MIGRATIONS_DIR, "20260909120000_phase1_security_hardening.sql"), "utf8");
+    assert.match(p1, /create or replace function public\.kicklive_has_grant\(/, "the helper is defined in the first migration, before anything uses it");
+    assert.match(p1, /grant execute on function public\.kicklive_has_grant\(text, text, text, text\) to public;/, "a verifier an operator cannot call is a verifier that reports nothing");
+    assert.match(p1, /select relacl into v_acl|from pg_catalog\.pg_class/, "it reads pg_class.relacl");
+    assert.match(p1, /aclexplode\(v_acl\)/, "and pg_proc.proacl, through aclexplode — no has_*_privilege anywhere");
+    assert.match(p1, /if v_acl is null then\s*\n\s*return false;/, "a NULL ACL (owner-only) must answer false for non-owners, not error");
+  });
+
+  it("a `from public` revoke never stands alone where the same file grants a client role", () => {
+    // The second half of the same bug: revoking from PUBLIC does not remove the anon/authenticated aclitem
+    // entries Supabase's default privileges create. Where a file grants a client role execute, the revoke
+    // must name that role (the grant then puts it back on purpose); where a file grants nobody, the revoke
+    // is left alone so trigger functions and internal helpers keep working for the role that fires them.
+    const missing: string[] = [];
+    for (const f of files) {
+      const raw = fs.readFileSync(path.join(MIGRATIONS_DIR, f), "utf8");
+      const granted = new Map<string, Set<string>>();
+      for (const m of raw.matchAll(/grant\s+execute\s+on\s+function\s+(?:public\.)?(\w+)\s*(?:\([^;]*?\))?\s+to\s+([^;]+);/gi)) {
+        const set = granted.get(m[1]!.toLowerCase()) ?? new Set<string>();
+        for (const r of m[2]!.matchAll(/[a-z_]+/g)) set.add(r[0]!.toLowerCase());
+        granted.set(m[1]!.toLowerCase(), set);
+      }
+      raw.split("\n").forEach((line, i) => {
+        const m = /^(?:\s*)?revoke all on function (?:public\.)?([\w]+)\s*(?:\([^;]*\))? from public;$/.exec(line.trim());
+        if (!m || m[1] === "kicklive_has_grant") return;
+        const roles = granted.get(m[1]!.toLowerCase());
+        if (!roles) return;
+        const unremoved = ["anon", "authenticated"].filter((r) => roles.has(r));
+        if (unremoved.length) missing.push(`${f}:${i + 1} ${m[1]} — granted to ${unremoved.join("/")} but revoked only from PUBLIC`);
+      });
+    }
+    assert.deepEqual(missing, [], "a `revoke … from public` leaves the client roles' own grants in place; name them");
+  });
+});
+
+describe("the admin bootstrap refuses to guess who the admin is", () => {
+  // Every rule here is a guard that exists because a one-paste admin grant is the most expensive file in the
+  // repository. The first version hardcoded a real address and a UUID and blindly upserted `role = 'admin'`;
+  // the second version asked the operator to paste an address into an editor whose markdown autolinking turns
+  // `a@b.com` into `[a@b.com](mailto:a@b.com)`, which used to fail as "no such user" (or, worse, match nothing
+  // and be re-run against a different row). So: the placeholder must be unfilled-able-to-something-real, the
+  // markdown shape must be caught by name, and no identity may ever be committed.
+  // `code()` on purpose: this file explains in its own header what it no longer does, and a rule about
+  // executable SQL must not be answered by prose (the header mentions the deleted ON CONFLICT … DO UPDATE).
+  const sql = code(fs.readFileSync(path.join(REPO, "CREATE_ADMIN_PROFILE.sql"), "utf8"));
+
+  it("it is a reviewed bootstrap, not a bundle member, and it never upserts a role blindly", () => {
+    assert.match(sql, /p_email\s+text\s*:=\s*'REPLACE-WITH-AN-EXISTING-ACCOUNT-EMAIL'/, "one named placeholder, filled in by a human");
+    assert.match(sql, /raise exception\s*\n?\s*'nothing to do on purpose/, "an unedited file must raise, not run");
+    assert.match(sql, /on conflict \(id\) do nothing/, "the profile insert must not write over a real account's row");
+    assert.ok(!/on conflict[^;\n]*do update[^;\n]*role/i.test(sql), "an ON CONFLICT … DO UPDATE that touches role is how a paste grants admin to whatever the address typo'd into");
+    assert.match(sql, /lower\(u\.email\) = lower\(v_input\)/, "the lookup is by the operator's typed input, once, into a variable");
+  });
+
+  it("a markdown-linked address is named as the mistake it is", () => {
+    assert.match(sql, /mailto/, "the guard must know what an autolinked address looks like");
+    assert.match(sql, /\[\[:space:\]\<\>\(\)\\\[\\\]/, "brackets, parens and quotes in p_email are refused before the lookup");
+    assert.match(sql, /does not look like an address \(one @, no spaces, a dot in the domain\)/, "and a malformed one too, rather than matching nothing");
+    assert.match(sql, /no auth\.users row for %/, "the miss says what to do (sign up first) and how many users exist");
+  });
+
+  it("nothing in the tree names a person", () => {
+    // `\b` is deliberate: the point is that the file cannot be copy-pasted into a repo again with an identity in it.
+    const raw = fs.readFileSync(path.join(REPO, "CREATE_ADMIN_PROFILE.sql"), "utf8");
+    assert.ok(!/[A-Za-z0-9._%+-]+@(?:gmail|googlemail|outlook|hotmail|yahoo|icloud|proton)[A-Za-z0-9.-]*/i.test(raw), "CREATE_ADMIN_PROFILE.sql must not contain a real address, in code or in prose");
+    for (const f of ["CREATE_ADMIN_PROFILE.sql", "supabase/SETUP.sql", "KICKLIVE_FINAL_SCHEMA.sql"]) {
+      const body = fs.readFileSync(path.join(REPO, f), "utf8");
+      assert.ok(!/[A-Za-z0-9._%+-]+@(?:gmail|googlemail|outlook|hotmail|yahoo|icloud|proton)[A-Za-z0-9.-]*/i.test(body), `${f} carries a personal address`);
+    }
+    for (const stray of ["repomix-output.xml", "output.md", ".replit"]) {
+      assert.ok(
+        !fs.existsSync(path.join(REPO, stray)),
+        `${stray} came back: a whole-tree dump (or a provider config with a duplicated key) is how deleted values reappear in docs, in CI scans and in the next audit`,
+      );
+    }
+  });
+});
+
 describe("a LANGUAGE sql function is never created before the table its body reads", () => {
   // The bug this file exists for: KICKLIVE_FINAL_SCHEMA.sql created `is_admin()` (`LANGUAGE sql`, body
   // `SELECT 1 FROM public.profiles`) in SECTION 2, while `profiles` was not created until SECTION 3. Postgres

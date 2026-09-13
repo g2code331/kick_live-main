@@ -51,6 +51,13 @@ function generate() {
 -- supabase_migrations.sql) were deleted on 2026-09-12. They exist only in git history.
 -- The admin bootstrap (CREATE_ADMIN_PROFILE.sql) is NOT part of this bundle on purpose:
 -- it assumes a superuser session and names a real user; see docs/ENVIRONMENT_SETUP.md §2.
+--
+-- If you are pasting this into the Supabase SQL editor, you are running as a superuser, and
+-- that has one consequence worth knowing: the privilege assertions in here deliberately read
+-- relacl/proacl (via public.kicklive_has_grant) rather than has_table/column/function_privilege,
+-- because those three functions answer "yes" for a superuser whatever was actually revoked. A
+-- revoke that lands and a revoke that never ran are indistinguishable to them — which is exactly
+-- how a half-hardened project once passed every self-check in this bundle.
 -- ============================================================================
 `);
   const all = sources();

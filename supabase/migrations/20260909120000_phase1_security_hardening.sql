@@ -68,8 +68,8 @@ as $$
 $$;
 
 -- Helper functions do not need to be callable from SQL beyond policy evaluation; keep them tight.
-revoke all on function public.is_admin() from public;
-revoke all on function public.is_admin_or_media() from public;
+revoke all on function public.is_admin() from public, anon, authenticated;
+revoke all on function public.is_admin_or_media() from public, anon, authenticated;
 grant execute on function public.is_admin() to anon, authenticated, service_role;
 grant execute on function public.is_admin_or_media() to anon, authenticated, service_role;
 
@@ -99,8 +99,8 @@ as $$
   );
 $$;
 
-revoke all on function public.is_media() from public;
-revoke all on function public.is_team_manager() from public;
+revoke all on function public.is_media() from public, anon, authenticated;
+revoke all on function public.is_team_manager() from public, anon, authenticated;
 grant execute on function public.is_media() to anon, authenticated, service_role;
 grant execute on function public.is_team_manager() to anon, authenticated, service_role;
 
@@ -209,10 +209,94 @@ create trigger kicklive_guard_profile_privileges
 
 -- Column-level revoke: even if someone later re-creates a permissive policy, the role/email columns
 -- are simply not updatable by client roles. Grants are checked before policies, so this wins.
+-- `from public` is not a courtesy here: with the default privileges Supabase creates the client roles hold their own
+-- ACL entries, and a revoke that names only PUBLIC leaves those entries exactly where they were.
 revoke update (role)  on public.profiles from authenticated;
 revoke update (role)  on public.profiles from anon;
 revoke update (email) on public.profiles from authenticated;
 revoke update (email) on public.profiles from anon;
+revoke update (role), update (email) on public.profiles from public;
+
+-- ============================================================================
+-- 2a · HOW A GRANT IS CHECKED IN THIS REPOSITORY (used by every verify block that
+--      follows, in this file and in the later phases)
+-- ============================================================================
+-- `has_table_privilege()` / `has_column_privilege()` / `has_function_privilege()` are not usable inside a
+-- migration that a human runs from the Supabase SQL editor. Those functions answer "may this role do this,
+-- after every shortcut is applied", and two of those shortcuts are always on here: a superuser may do
+-- everything, and the owner of a table may do anything on it. Supabase hands the SQL editor one of
+-- those identities. So every NEGATIVE assertion built on them fires on a correctly hardened database — the
+-- `hardening failed: authenticated can still update profiles.role directly` paste was a `revoke update
+-- (role)` that had landed perfectly, reported as a failure — and every POSITIVE one passes without checking
+-- anything. An assertion that cannot fail is worse than no assertion: it is the reason the privilege work in
+-- three phases of this repository was never actually proven.
+--
+-- The catalog does not care what role the editor runs as. `relacl`/`proacl` record what was granted, to whom,
+-- which is exactly the property these verify blocks claim, so that is what they read now. A NULL ACL means
+-- "owner only, no explicit grants to anyone", which is answered false for every non-owner: the same answer a
+-- real non-superuser client would get.
+--
+-- Deliberately granted to PUBLIC: this is a catalog reader with no data in it, and it has to be callable
+-- from the least privileged session that exists. A verifier nobody may execute is a verifier that silently
+-- reports nothing — which is the bug this section replaces.
+
+create or replace function public.kicklive_has_grant(
+  p_role text, p_object text, p_privilege text, p_column text default null
+)
+returns boolean
+language plpgsql stable
+as $hg$
+declare
+  v_acl  aclitem[];
+  v_rel  oid;
+begin
+  v_rel := pg_catalog.to_regclass(p_object);
+  if v_rel is null then
+    -- Not a relation this session can see, so it is a function signature: `public.f(integer)`. The same
+    -- shape `has_function_privilege()` took, which is what lets a call site be converted by renaming the
+    -- function and nothing else — a mechanical diff is an auditable diff.
+    select proacl into v_acl
+      from pg_catalog.pg_proc
+     where oid = pg_catalog.to_regprocedure(p_object);
+  else
+    select relacl into v_acl
+      from pg_catalog.pg_class
+     where oid = v_rel;
+  end if;
+
+  if v_acl is null then
+    return false;                      -- owner-only: nothing is granted to anybody explicitly
+  end if;
+
+  if p_column is not null and not exists (
+    select 1 from pg_catalog.pg_attribute
+     where attrelid = v_rel and attname = p_column
+  ) then
+    return false;
+  end if;
+
+  return exists (
+    select 1
+      from pg_catalog.pg_roles r
+      join pg_catalog.aclexplode(v_acl) g on g.privilege_type = p_privilege
+     where r.rolname = p_role
+       and (g.grantee = r.oid or g.grantee = 0)     -- 0 is PUBLIC, which every role inherits
+       -- A grant on the whole table (objid = 0) covers the column; a grant on some other column does not.
+       and (g.objid = 0
+            or (p_column is not null and g.objid = (
+                  select c.attnum from pg_catalog.pg_attribute c
+                   where c.attrelid = v_rel and c.attname = p_column)))
+  );
+end;
+$hg$;
+
+grant execute on function public.kicklive_has_grant(text, text, text, text) to public;
+
+comment on function public.kicklive_has_grant(text, text, text, text) is
+  'Is there a real GRANT of this privilege to this role, ignoring the superuser and owner shortcuts? The only '
+  'privilege question a migration can answer correctly from the SQL editor. p_object is a table/view '
+  '(''public.profiles'') or a function identity signature (''public.f(integer)''), told apart by to_regclass; '
+  'p_privilege is an ACL letter (r a w d D x t X); p_column narrows a table check to one column.';
 
 -- ============================================================================
 -- 3 · ANONYMOUS READS AND WRITES
@@ -373,7 +457,7 @@ $$;
 comment on function public.kicklive_record_media_view(integer) is
   'Atomic +1 on media.views for a published article. The only anonymous write in the product.';
 
-revoke all on function public.kicklive_record_media_view(integer) from public;
+revoke all on function public.kicklive_record_media_view(integer) from public, authenticated;
 grant execute on function public.kicklive_record_media_view(integer) to anon, authenticated;
 
 -- Nobody updates a counter by hand any more.
@@ -617,10 +701,10 @@ $$;
 comment on function public.kicklive_set_user_role(uuid, text) is
   'The only supported way to change a role. Admin-only, audited, refuses to demote the last admin.';
 
-revoke all on function public.kicklive_request_access(text, text) from public;
-revoke all on function public.kicklive_decide_access_request(uuid, text, text) from public;
-revoke all on function public.kicklive_cancel_access_request(uuid) from public;
-revoke all on function public.kicklive_set_user_role(uuid, text) from public;
+revoke all on function public.kicklive_request_access(text, text) from public, anon;
+revoke all on function public.kicklive_decide_access_request(uuid, text, text) from public, anon;
+revoke all on function public.kicklive_cancel_access_request(uuid) from public, anon;
+revoke all on function public.kicklive_set_user_role(uuid, text) from public, anon;
 grant execute on function public.kicklive_request_access(text, text) to authenticated;
 grant execute on function public.kicklive_decide_access_request(uuid, text, text) to authenticated;
 grant execute on function public.kicklive_cancel_access_request(uuid) to authenticated;
@@ -669,8 +753,20 @@ begin
     raise exception 'hardening failed: anonymous read of profiles is still enabled';
   end if;
 
-  if has_column_privilege('authenticated', 'public.profiles', 'role', 'UPDATE') then
-    raise exception 'hardening failed: authenticated can still update profiles.role directly';
+  -- Who is running this, recorded rather than assumed: the answer decides whether `has_*_privilege()` could
+  -- have told the truth at all, and it is the first line to read when a privilege assertion is argued about.
+  if exists (select 1 from pg_roles where rolname = current_user and rolsuper) then
+    raise notice 'phase 1 verify: applying as the superuser %; privilege checks here read relacl/proacl, not has_*_privilege()', current_user;
+  end if;
+
+  if public.kicklive_has_grant('authenticated', 'public.profiles', 'U', 'role') then
+    raise exception 'hardening failed: profiles.role is still granted UPDATE to authenticated — revoke did not land';
+  end if;
+  if public.kicklive_has_grant('anon', 'public.profiles', 'U', 'role') then
+    raise exception 'hardening failed: profiles.role is still granted UPDATE to anon';
+  end if;
+  if public.kicklive_has_grant('authenticated', 'public.profiles', 'U', 'email') then
+    raise exception 'hardening failed: profiles.email is still granted UPDATE to authenticated';
   end if;
 end;
 $$;

@@ -191,9 +191,9 @@ comment on function kicklive_squad_sizes() is
 --  Same posture as Phase 1/3: revoke broadly, then grant the one privilege the read path needs. These are
 --  functions, so there is nothing to revoke DML on; the point of the revoke is that `execute` is granted to
 --  PUBLIC by default in a fresh database.
-revoke all on function kicklive_is_final_status(text) from public;
-revoke all on function kicklive_competition_standings(integer) from public;
-revoke all on function kicklive_squad_sizes() from public;
+revoke all on function kicklive_is_final_status(text) from public, anon, authenticated;
+revoke all on function kicklive_competition_standings(integer) from public, anon, authenticated;
+revoke all on function kicklive_squad_sizes() from public, anon, authenticated;
 
 grant execute on function kicklive_is_final_status(text) to anon, authenticated, service_role;
 grant execute on function kicklive_competition_standings(integer) to anon, authenticated, service_role;
@@ -277,7 +277,11 @@ begin
     select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
      where n.nspname = 'public'
        and p.proname in ('kicklive_is_final_status','kicklive_competition_standings','kicklive_squad_sizes')
-       and has_function_privilege('anon', p.oid, 'execute')
+       -- read the ACL rather than has_function_privilege(): the latter is true for the superuser the SQL
+       -- editor runs as, which would make this count 3 on a database where the grant never landed.
+       and exists (
+         select 1 from pg_roles r, aclexplode(p.proacl) g
+          where r.rolname = 'anon' and g.privilege_type = 'X' and (g.grantee = r.oid or g.grantee = 0))
   ) <> 3 then
     raise exception 'phase4 verification failed: anon cannot execute one of the read aggregates';
   end if;

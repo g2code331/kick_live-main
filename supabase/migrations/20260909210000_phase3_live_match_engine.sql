@@ -285,7 +285,7 @@ $$;
 comment on function public.kicklive_match_rights(integer) is
   'The per-match authority snapshot for the current JWT subject. Read by the engine functions and by GET /api/matches/:id/access.';
 
-revoke all on function public.kicklive_match_rights(integer) from public;
+revoke all on function public.kicklive_match_rights(integer) from public, anon;
 grant execute on function public.kicklive_match_rights(integer) to authenticated;
 
 -- The one flag the column guards look for to recognise the engine's own writes. Transaction-local
@@ -302,7 +302,7 @@ begin
 end;
 $$;
 
-revoke all on function public.kicklive_enter_engine() from public;
+revoke all on function public.kicklive_enter_engine() from public, anon;
 grant execute on function public.kicklive_enter_engine() to authenticated;
 
 -- The derived score: a fold over the surviving rows, in one place so every caller agrees.
@@ -338,7 +338,7 @@ $$;
 comment on function public.kicklive_match_score(integer) is
   'home/away/shootout derived from active match_events. Own goals credit the opposing side; a shoot-out goal never enters the match score. Must stay equal to scoreFromEvents() in workers/src/lib/matchEvents.ts (pinned by tests/unit/live-match-engine.test.ts).';
 
-revoke all on function public.kicklive_match_score(integer) from public;
+revoke all on function public.kicklive_match_score(integer) from public, anon, authenticated;
 grant execute on function public.kicklive_match_score(integer) to anon, authenticated;
 
 -- The derived clock. `matches.minute` is a *rendering* of these three inputs, never an input itself.
@@ -395,7 +395,7 @@ begin
 end;
 $$;
 
-revoke all on function public.kicklive_match_clock(integer) from public;
+revoke all on function public.kicklive_match_clock(integer) from public, anon, authenticated;
 grant execute on function public.kicklive_match_clock(integer) to anon, authenticated;
 
 -- The event's own status, for the "is this legal right now" question both sides ask.
@@ -701,7 +701,7 @@ begin
 end;
 $$;
 
-revoke all on function public.kicklive_assert_match_event(integer, text, integer, integer, integer, integer, boolean) from public;
+revoke all on function public.kicklive_assert_match_event(integer, text, integer, integer, integer, integer, boolean) from public, authenticated;
 grant execute on function public.kicklive_assert_match_event(integer, text, integer, integer, integer, integer, boolean) to authenticated;
 
 -- One place that turns a row into the wire shape, so the socket feed, the REST timeline and the
@@ -734,7 +734,7 @@ as $$
     ) e;
 $$;
 
-revoke all on function public.kicklive_event_frame(integer) from public;
+revoke all on function public.kicklive_event_frame(integer) from public, anon, authenticated;
 grant execute on function public.kicklive_event_frame(integer) to anon, authenticated;
 
 -- Per-match team aggregates, derived from the same ledger. Only the columns the events can actually
@@ -779,7 +779,7 @@ begin
 end;
 $$;
 
-revoke all on function public.kicklive_sync_match_statistics(integer) from public;
+revoke all on function public.kicklive_sync_match_statistics(integer) from public, authenticated;
 grant execute on function public.kicklive_sync_match_statistics(integer) to authenticated;
 
 -- ============================================================================
@@ -952,7 +952,7 @@ $$;
 comment on function public.kicklive_record_match_event(integer, text, text, integer, integer, integer, integer, integer, text, text, text, jsonb, integer, boolean) is
   'The only supported way to append a match event. Authorises, deduplicates on client_event_id, allocates the sequence, derives the score and audits — in one transaction.';
 
-revoke all on function public.kicklive_record_match_event(integer, text, text, integer, integer, integer, integer, integer, text, text, text, jsonb, integer, boolean) from public;
+revoke all on function public.kicklive_record_match_event(integer, text, text, integer, integer, integer, integer, integer, text, text, text, jsonb, integer, boolean) from public, authenticated;
 grant execute on function public.kicklive_record_match_event(integer, text, text, integer, integer, integer, integer, integer, text, text, text, jsonb, integer, boolean) to authenticated;
 
 -- ============================================================================
@@ -1122,7 +1122,7 @@ begin
 end;
 $$;
 
-revoke all on function public.kicklive_transition_match(integer, text, text, smallint, integer) from public;
+revoke all on function public.kicklive_transition_match(integer, text, text, smallint, integer) from public, authenticated;
 grant execute on function public.kicklive_transition_match(integer, text, text, smallint, integer) to authenticated;
 
 -- ============================================================================
@@ -1287,7 +1287,7 @@ begin
 end;
 $$;
 
-revoke all on function public.kicklive_correct_match_event(integer, text, jsonb, integer) from public;
+revoke all on function public.kicklive_correct_match_event(integer, text, jsonb, integer) from public, authenticated;
 grant execute on function public.kicklive_correct_match_event(integer, text, jsonb, integer) to authenticated;
 
 -- ============================================================================
@@ -1367,7 +1367,7 @@ begin
 end;
 $$;
 
-revoke all on function public.kicklive_finalize_match(integer, boolean) from public;
+revoke all on function public.kicklive_finalize_match(integer, boolean) from public, authenticated;
 grant execute on function public.kicklive_finalize_match(integer, boolean) to authenticated;
 
 create or replace function public.kicklive_set_match_lock(p_match_id integer, p_locked boolean, p_reason text default null)
@@ -1403,7 +1403,7 @@ begin
 end;
 $$;
 
-revoke all on function public.kicklive_set_match_lock(integer, boolean, text) from public;
+revoke all on function public.kicklive_set_match_lock(integer, boolean, text) from public, authenticated;
 grant execute on function public.kicklive_set_match_lock(integer, boolean, text) to authenticated;
 
 -- ============================================================================
@@ -1458,7 +1458,7 @@ as $$
    where m.id = p_match_id;
 $$;
 
-revoke all on function public.kicklive_match_live_state(integer) from public;
+revoke all on function public.kicklive_match_live_state(integer) from public, anon, authenticated;
 -- Anon on purpose: this returns what `matches` and `match_events` already make public, and the fan
 -- sockets (and the local adapter) must be able to hydrate a room without anyone's token.
 grant execute on function public.kicklive_match_live_state(integer) to anon, authenticated;
@@ -1534,8 +1534,8 @@ begin
 end;
 $$;
 
-revoke all on function public.kicklive_assign_match(integer, uuid, text, text) from public;
-revoke all on function public.kicklive_stand_down_assignment(uuid) from public;
+revoke all on function public.kicklive_assign_match(integer, uuid, text, text) from public, authenticated;
+revoke all on function public.kicklive_stand_down_assignment(uuid) from public, authenticated;
 grant execute on function public.kicklive_assign_match(integer, uuid, text, text) to authenticated;
 grant execute on function public.kicklive_stand_down_assignment(uuid) to authenticated;
 
@@ -1720,7 +1720,7 @@ revoke all on function public.kicklive_lifecycle_event_for(text, text) from publ
 revoke all on function public.kicklive_guard_match_result_columns() from public;
 revoke all on function public.kicklive_guard_match_events_append_only() from public;
 revoke all on function public.kicklive_sequence_on_insert() from public;
-revoke all on function public.kicklive_assert_match_event(integer, text, integer, integer, integer, integer, boolean) from public;
+revoke all on function public.kicklive_assert_match_event(integer, text, integer, integer, integer, integer, boolean) from public, authenticated;
 grant execute on function public.kicklive_assert_match_event(integer, text, integer, integer, integer, integer, boolean) to authenticated;
 
 -- ============================================================================
@@ -1765,20 +1765,20 @@ begin
     raise exception 'hardening failed: % transition rows name an unknown status', v_count;
   end if;
 
-  if not has_function_privilege('authenticated','public.kicklive_record_match_event(integer,text,text,integer,integer,integer,integer,integer,text,text,text,jsonb,integer,boolean)','execute') then
-    raise exception 'hardening failed: the record function is not executable by authenticated';
+  if not public.kicklive_has_grant('authenticated','public.kicklive_record_match_event(integer,text,text,integer,integer,integer,integer,integer,text,text,text,jsonb,integer,boolean)','X') then
+    raise exception 'hardening failed: the record function is not granted EXECUTE to authenticated';
   end if;
-  if has_function_privilege('anon','public.kicklive_record_match_event(integer,text,text,integer,integer,integer,integer,integer,text,text,text,jsonb,integer,boolean)','execute') then
-    raise exception 'hardening failed: anon can record match events';
+  if public.kicklive_has_grant('anon','public.kicklive_record_match_event(integer,text,text,integer,integer,integer,integer,integer,text,text,text,jsonb,integer,boolean)','X') then
+    raise exception 'hardening failed: anon is granted EXECUTE on the record function';
   end if;
-  if not has_function_privilege('anon','public.kicklive_match_live_state(integer)','execute') then
-    raise exception 'hardening failed: the fan snapshot function is not executable by anon';
+  if not public.kicklive_has_grant('anon','public.kicklive_match_live_state(integer)','X') then
+    raise exception 'hardening failed: the fan snapshot function is not granted EXECUTE to anon';
   end if;
-  if has_table_privilege('authenticated','public.match_assignments','insert') then
-    raise exception 'hardening failed: assignments are writable outside kicklive_assign_match()';
+  if public.kicklive_has_grant('authenticated','public.match_assignments','a') then
+    raise exception 'hardening failed: assignments are granted INSERT outside kicklive_assign_match()';
   end if;
-  if has_column_privilege('authenticated','public.match_events','event_type','update') then
-    raise exception 'hardening failed: match_events is still updatable by a client role';
+  if public.kicklive_has_grant('authenticated','public.match_events','U','event_type') then
+    raise exception 'hardening failed: match_events is granted UPDATE to a client role';
   end if;
 
   -- By NAME, not by pattern. A `like 'kicklive_%'` count over these tables is a claim about the whole

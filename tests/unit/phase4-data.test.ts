@@ -144,7 +144,9 @@ describe("phase4 · the safety properties of a read aggregate", () => {
     const pins = (src.match(/set search_path = public, pg_temp/g) ?? []).length;
     assert.ok(pins >= 3, "each function pins its search path");
     for (const fn of ["kicklive_is_final_status(text)", "kicklive_competition_standings(integer)", "kicklive_squad_sizes()"]) {
-      assert.ok(src.includes(`revoke all on function ${fn} from public;`), `${fn} is revoked from public first`);
+      // Revoking from PUBLIC alone would leave the anon/authenticated entries Supabase creates by default,
+      // which is the difference between "granted to exactly the read roles" and "granted to whoever asks".
+      assert.ok(new RegExp(`revoke all on function ${fn.replace(/[()]/g, "\\$&")} from public, anon, authenticated;`).test(src), `${fn} is revoked from every client role first`);
       assert.match(src, new RegExp(`grant execute on function ${fn.replace(/[()]/g, "\\$&")} to anon, authenticated, service_role;`), `${fn} is granted to the read roles`);
     }
   });

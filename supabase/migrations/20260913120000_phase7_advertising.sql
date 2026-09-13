@@ -2422,7 +2422,9 @@ begin
             or p.proname in ('kicklive_asset_url_column', 'kicklive_ad_guard_placement_format',
                              'kicklive_ad_guard_advertisement_format', 'touch_updated_at'))
   loop
-    execute format('revoke all on function public.%I(%s) from public', r.proname, r.args);
+    -- Every client role by name. `from public` only would leave the anon/authenticated EXECUTE entries that
+    -- the default privileges Supabase creates, which is precisely the hole the block below asserts against.
+    execute format('revoke all on function public.%I(%s) from public, anon, authenticated', r.proname, r.args);
     execute format('grant execute on function public.%I(%s) to service_role', r.proname, r.args);
     n := n + 1;
   end loop;
@@ -2628,16 +2630,18 @@ begin
     from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
    where ns.nspname = 'public'
      and p.proname in ('kicklive_ad_serve', 'kicklive_ad_record_event')
-     and not has_function_privilege('anon', p.oid, 'execute');
+     and not public.kicklive_has_grant('anon', p.oid::regprocedure::text, 'X');
   if not_granted is not null then
     raise exception 'kicklive migration verification failed: public surface not granted to anon: %', not_granted;
   end if;
 
+  -- Read the ACL, not has_function_privilege: the second form answers "true" for every function when the
+  -- applying role is a superuser, so this assertion can only ever fire when it is wrong to fire.
   if exists (
     select 1 from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
      where ns.nspname = 'public' and p.proname like 'kicklive_ad_%'
        and p.proname not in ('kicklive_ad_serve', 'kicklive_ad_record_event')
-       and has_function_privilege('authenticated', p.oid, 'execute')
+       and public.kicklive_has_grant('authenticated', p.oid::regprocedure::text, 'X')
   ) then
     raise exception 'kicklive migration verification failed: an admin-only advertising function is granted to authenticated';
   end if;
