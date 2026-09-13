@@ -628,9 +628,13 @@ describe("phase3 · migration hygiene", () => {
   it("the verification block refuses a half-built engine", () => {
     const verify = /do \$\$([\s\S]*?)\n\$\$;/.exec(MIGRATION_LIVE)?.[1] ?? "";
     assert.ok(verify.length > 500, "the verification block must exist before commit;");
-    for (const needle of ["match_assignments", "match_events", "kicklive_match_transitions", "has_function_privilege", "has_table_privilege", "has_column_privilege", "pg_policies", "pg_trigger"]) {
+    for (const needle of ["match_assignments", "match_events", "kicklive_match_transitions", "kicklive_has_grant", "pg_policies", "pg_trigger"]) {
       assert.ok(verify.includes(needle), `the verification block never checks ${needle}`);
     }
+    // The privilege half must read the catalog: has_*_privilege() answers "true" for the superuser the
+    // Supabase SQL editor runs as, which made every negative check fire on a hardened database and every
+    // positive one pass unchecked. See the note in the Phase 1 hardening migration.
+    assert.ok(!/has_(column|table|function)_privilege\s*\(/.test(verify), "the engine self-check must read relacl/proacl, not has_*_privilege()");
     assert.ok(verify.indexOf("raise exception") < verify.indexOf("commit;") || verify.includes("raise exception"), "failures must be raised, not logged");
   });
 });

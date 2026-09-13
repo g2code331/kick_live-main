@@ -295,6 +295,68 @@ describe("the SQL checker is wired in, not decorative", () => {
   });
 });
 
+describe("privilege assertions in the migrations read the catalog, not the superuser shortcut", () => {
+  // This rule exists because of a real paste. `supabase/SETUP.sql` into the Supabase SQL editor runs as a
+  // superuser, and `has_column_privilege()` / `has_table_privilege()` / `has_function_privilege()` answer
+  // "true" for a superuser (and for the owner of the object) no matter what was revoked. So the Phase 1
+  // self-check raised `hardening failed: authenticated can still update profiles.role directly` on a
+  // database where that revoke had landed perfectly — and, far worse, the same class of function made every
+  // POSITIVE assertion in these files pass while checking nothing at all. A verifier that cannot fail is
+  // how three phases of privilege work went unproven.
+  const files = fs
+    .readdirSync(MIGRATIONS_DIR)
+    .filter((f) => f.endsWith(".sql"))
+    .sort();
+
+  it("no executable SQL asks a has_*_privilege() function what a grant is", () => {
+    const offenders: string[] = [];
+    for (const f of ["KICKLIVE_FINAL_SCHEMA.sql", ...files.map((x) => `supabase/migrations/${x}`)]) {
+      const body = code(fs.readFileSync(path.join(REPO, f), "utf8"));
+      body.split("\n").forEach((line, i) => {
+        if (/has_(column|table|function)_privilege\s*\(/.test(line)) {
+          offenders.push(`${f}:${i + 1}: ${line.trim().slice(0, 96)}`);
+        }
+      });
+    }
+    assert.deepEqual(offenders, [], "privilege assertions must read relacl/proacl via public.kicklive_has_grant; see the note in the Phase 1 hardening migration");
+  });
+
+  it("the grant reader exists, is callable by anyone, and answers from the ACL", () => {
+    const p1 = fs.readFileSync(path.join(MIGRATIONS_DIR, "20260909120000_phase1_security_hardening.sql"), "utf8");
+    assert.match(p1, /create or replace function public\.kicklive_has_grant\(/, "the helper is defined in the first migration, before anything uses it");
+    assert.match(p1, /grant execute on function public\.kicklive_has_grant\(text, text, text, text\) to public;/, "a verifier an operator cannot call is a verifier that reports nothing");
+    assert.match(p1, /select relacl into v_acl|from pg_catalog\.pg_class/, "it reads pg_class.relacl");
+    assert.match(p1, /aclexplode\(v_acl\)/, "and pg_proc.proacl, through aclexplode — no has_*_privilege anywhere");
+    assert.match(p1, /if v_acl is null then\s*\n\s*return false;/, "a NULL ACL (owner-only) must answer false for non-owners, not error");
+  });
+
+  it("a `from public` revoke never stands alone where the same file grants a client role", () => {
+    // The second half of the same bug: revoking from PUBLIC does not remove the anon/authenticated aclitem
+    // entries Supabase's default privileges create. Where a file grants a client role execute, the revoke
+    // must name that role (the grant then puts it back on purpose); where a file grants nobody, the revoke
+    // is left alone so trigger functions and internal helpers keep working for the role that fires them.
+    const missing: string[] = [];
+    for (const f of files) {
+      const raw = fs.readFileSync(path.join(MIGRATIONS_DIR, f), "utf8");
+      const granted = new Map<string, Set<string>>();
+      for (const m of raw.matchAll(/grant\s+execute\s+on\s+function\s+(?:public\.)?(\w+)\s*(?:\([^;]*?\))?\s+to\s+([^;]+);/gi)) {
+        const set = granted.get(m[1]!.toLowerCase()) ?? new Set<string>();
+        for (const r of m[2]!.matchAll(/[a-z_]+/g)) set.add(r[0]!.toLowerCase());
+        granted.set(m[1]!.toLowerCase(), set);
+      }
+      raw.split("\n").forEach((line, i) => {
+        const m = /^(?:\s*)?revoke all on function (?:public\.)?([\w]+)\s*(?:\([^;]*\))? from public;$/.exec(line.trim());
+        if (!m || m[1] === "kicklive_has_grant") return;
+        const roles = granted.get(m[1]!.toLowerCase());
+        if (!roles) return;
+        const unremoved = ["anon", "authenticated"].filter((r) => roles.has(r));
+        if (unremoved.length) missing.push(`${f}:${i + 1} ${m[1]} — granted to ${unremoved.join("/")} but revoked only from PUBLIC`);
+      });
+    }
+    assert.deepEqual(missing, [], "a `revoke … from public` leaves the client roles' own grants in place; name them");
+  });
+});
+
 describe("a LANGUAGE sql function is never created before the table its body reads", () => {
   // The bug this file exists for: KICKLIVE_FINAL_SCHEMA.sql created `is_admin()` (`LANGUAGE sql`, body
   // `SELECT 1 FROM public.profiles`) in SECTION 2, while `profiles` was not created until SECTION 3. Postgres

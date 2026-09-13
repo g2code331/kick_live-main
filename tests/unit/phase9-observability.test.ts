@@ -532,7 +532,7 @@ describe("phase 9 · monitoring endpoints leak nothing they were not given", () 
     assert.ok(grantBlock.length > 200, "the grant section is present");
     assert.ok(/if f[.]proname = 'kicklive_health_read' then/.test(CODE), "the only anon grant is the public health read");
     assert.ok(/revoke all on function %s from public, anon, authenticated/.test(CODE), "everything in scope is revoked from the client roles first");
-    assert.match(CODE, /has_function_privilege\('anon', p\.oid, 'EXECUTE'\)[\s\S]{0,120}n <> 1/, "and §16 counts anon-executable functions at apply time");
+    assert.match(CODE, /kicklive_has_grant\('anon', p\.oid::regprocedure::text, 'X'\)[\s\S]{0,120}n <> 1/, "and §16 counts anon-executable functions at apply time, from the ACL");
   });
 });
 

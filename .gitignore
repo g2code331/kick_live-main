@@ -33,3 +33,6 @@ output.md
 .replit
 replit.md
 replit.nix
+# `wrangler dev` / `wrangler deploy` scratch space. It is a build cache with copies of the Worker's
+# sources in it, and prettier/lint sweeps over a dev box's leftover bundles is not a signal about anything.
+.wrangler/

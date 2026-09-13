@@ -14,6 +14,13 @@
 -- supabase_migrations.sql) were deleted on 2026-09-12. They exist only in git history.
 -- The admin bootstrap (CREATE_ADMIN_PROFILE.sql) is NOT part of this bundle on purpose:
 -- it assumes a superuser session and names a real user; see docs/ENVIRONMENT_SETUP.md §2.
+--
+-- If you are pasting this into the Supabase SQL editor, you are running as a superuser, and
+-- that has one consequence worth knowing: the privilege assertions in here deliberately read
+-- relacl/proacl (via public.kicklive_has_grant) rather than has_table/column/function_privilege,
+-- because those three functions answer "yes" for a superuser whatever was actually revoked. A
+-- revoke that lands and a revoke that never ran are indistinguishable to them — which is exactly
+-- how a half-hardened project once passed every self-check in this bundle.
 -- ============================================================================
 
 -- >>> BEGIN section 1: KICKLIVE_FINAL_SCHEMA.sql >>>
@@ -995,8 +1002,8 @@ as $$
 $$;
 
 -- Helper functions do not need to be callable from SQL beyond policy evaluation; keep them tight.
-revoke all on function public.is_admin() from public;
-revoke all on function public.is_admin_or_media() from public;
+revoke all on function public.is_admin() from public, anon, authenticated;
+revoke all on function public.is_admin_or_media() from public, anon, authenticated;
 grant execute on function public.is_admin() to anon, authenticated, service_role;
 grant execute on function public.is_admin_or_media() to anon, authenticated, service_role;
 
@@ -1026,8 +1033,8 @@ as $$
   );
 $$;
 
-revoke all on function public.is_media() from public;
-revoke all on function public.is_team_manager() from public;
+revoke all on function public.is_media() from public, anon, authenticated;
+revoke all on function public.is_team_manager() from public, anon, authenticated;
 grant execute on function public.is_media() to anon, authenticated, service_role;
 grant execute on function public.is_team_manager() to anon, authenticated, service_role;
 
@@ -1136,10 +1143,94 @@ create trigger kicklive_guard_profile_privileges
 
 -- Column-level revoke: even if someone later re-creates a permissive policy, the role/email columns
 -- are simply not updatable by client roles. Grants are checked before policies, so this wins.
+-- `from public` is not a courtesy here: with the default privileges Supabase creates the client roles hold their own
+-- ACL entries, and a revoke that names only PUBLIC leaves those entries exactly where they were.
 revoke update (role)  on public.profiles from authenticated;
 revoke update (role)  on public.profiles from anon;
 revoke update (email) on public.profiles from authenticated;
 revoke update (email) on public.profiles from anon;
+revoke update (role), update (email) on public.profiles from public;
+
+-- ============================================================================
+-- 2a · HOW A GRANT IS CHECKED IN THIS REPOSITORY (used by every verify block that
+--      follows, in this file and in the later phases)
+-- ============================================================================
+-- `has_table_privilege()` / `has_column_privilege()` / `has_function_privilege()` are not usable inside a
+-- migration that a human runs from the Supabase SQL editor. Those functions answer "may this role do this,
+-- after every shortcut is applied", and two of those shortcuts are always on here: a superuser may do
+-- everything, and the owner of a table may do anything on it. Supabase hands the SQL editor one of
+-- those identities. So every NEGATIVE assertion built on them fires on a correctly hardened database — the
+-- `hardening failed: authenticated can still update profiles.role directly` paste was a `revoke update
+-- (role)` that had landed perfectly, reported as a failure — and every POSITIVE one passes without checking
+-- anything. An assertion that cannot fail is worse than no assertion: it is the reason the privilege work in
+-- three phases of this repository was never actually proven.
+--
+-- The catalog does not care what role the editor runs as. `relacl`/`proacl` record what was granted, to whom,
+-- which is exactly the property these verify blocks claim, so that is what they read now. A NULL ACL means
+-- "owner only, no explicit grants to anyone", which is answered false for every non-owner: the same answer a
+-- real non-superuser client would get.
+--
+-- Deliberately granted to PUBLIC: this is a catalog reader with no data in it, and it has to be callable
+-- from the least privileged session that exists. A verifier nobody may execute is a verifier that silently
+-- reports nothing — which is the bug this section replaces.
+
+create or replace function public.kicklive_has_grant(
+  p_role text, p_object text, p_privilege text, p_column text default null
+)
+returns boolean
+language plpgsql stable
+as $hg$
+declare
+  v_acl  aclitem[];
+  v_rel  oid;
+begin
+  v_rel := pg_catalog.to_regclass(p_object);
+  if v_rel is null then
+    -- Not a relation this session can see, so it is a function signature: `public.f(integer)`. The same
+    -- shape `has_function_privilege()` took, which is what lets a call site be converted by renaming the
+    -- function and nothing else — a mechanical diff is an auditable diff.
+    select proacl into v_acl
+      from pg_catalog.pg_proc
+     where oid = pg_catalog.to_regprocedure(p_object);
+  else
+    select relacl into v_acl
+      from pg_catalog.pg_class
+     where oid = v_rel;
+  end if;
+
+  if v_acl is null then
+    return false;                      -- owner-only: nothing is granted to anybody explicitly
+  end if;
+
+  if p_column is not null and not exists (
+    select 1 from pg_catalog.pg_attribute
+     where attrelid = v_rel and attname = p_column
+  ) then
+    return false;
+  end if;
+
+  return exists (
+    select 1
+      from pg_catalog.pg_roles r
+      join pg_catalog.aclexplode(v_acl) g on g.privilege_type = p_privilege
+     where r.rolname = p_role
+       and (g.grantee = r.oid or g.grantee = 0)     -- 0 is PUBLIC, which every role inherits
+       -- A grant on the whole table (objid = 0) covers the column; a grant on some other column does not.
+       and (g.objid = 0
+            or (p_column is not null and g.objid = (
+                  select c.attnum from pg_catalog.pg_attribute c
+                   where c.attrelid = v_rel and c.attname = p_column)))
+  );
+end;
+$hg$;
+
+grant execute on function public.kicklive_has_grant(text, text, text, text) to public;
+
+comment on function public.kicklive_has_grant(text, text, text, text) is
+  'Is there a real GRANT of this privilege to this role, ignoring the superuser and owner shortcuts? The only '
+  'privilege question a migration can answer correctly from the SQL editor. p_object is a table/view '
+  '(''public.profiles'') or a function identity signature (''public.f(integer)''), told apart by to_regclass; '
+  'p_privilege is an ACL letter (r a w d D x t X); p_column narrows a table check to one column.';
 
 -- ============================================================================
 -- 3 · ANONYMOUS READS AND WRITES
@@ -1300,7 +1391,7 @@ $$;
 comment on function public.kicklive_record_media_view(integer) is
   'Atomic +1 on media.views for a published article. The only anonymous write in the product.';
 
-revoke all on function public.kicklive_record_media_view(integer) from public;
+revoke all on function public.kicklive_record_media_view(integer) from public, authenticated;
 grant execute on function public.kicklive_record_media_view(integer) to anon, authenticated;
 
 -- Nobody updates a counter by hand any more.
@@ -1544,10 +1635,10 @@ $$;
 comment on function public.kicklive_set_user_role(uuid, text) is
   'The only supported way to change a role. Admin-only, audited, refuses to demote the last admin.';
 
-revoke all on function public.kicklive_request_access(text, text) from public;
-revoke all on function public.kicklive_decide_access_request(uuid, text, text) from public;
-revoke all on function public.kicklive_cancel_access_request(uuid) from public;
-revoke all on function public.kicklive_set_user_role(uuid, text) from public;
+revoke all on function public.kicklive_request_access(text, text) from public, anon;
+revoke all on function public.kicklive_decide_access_request(uuid, text, text) from public, anon;
+revoke all on function public.kicklive_cancel_access_request(uuid) from public, anon;
+revoke all on function public.kicklive_set_user_role(uuid, text) from public, anon;
 grant execute on function public.kicklive_request_access(text, text) to authenticated;
 grant execute on function public.kicklive_decide_access_request(uuid, text, text) to authenticated;
 grant execute on function public.kicklive_cancel_access_request(uuid) to authenticated;
@@ -1596,8 +1687,20 @@ begin
     raise exception 'hardening failed: anonymous read of profiles is still enabled';
   end if;
 
-  if has_column_privilege('authenticated', 'public.profiles', 'role', 'UPDATE') then
-    raise exception 'hardening failed: authenticated can still update profiles.role directly';
+  -- Who is running this, recorded rather than assumed: the answer decides whether `has_*_privilege()` could
+  -- have told the truth at all, and it is the first line to read when a privilege assertion is argued about.
+  if exists (select 1 from pg_roles where rolname = current_user and rolsuper) then
+    raise notice 'phase 1 verify: applying as the superuser %; privilege checks here read relacl/proacl, not has_*_privilege()', current_user;
+  end if;
+
+  if public.kicklive_has_grant('authenticated', 'public.profiles', 'U', 'role') then
+    raise exception 'hardening failed: profiles.role is still granted UPDATE to authenticated — revoke did not land';
+  end if;
+  if public.kicklive_has_grant('anon', 'public.profiles', 'U', 'role') then
+    raise exception 'hardening failed: profiles.role is still granted UPDATE to anon';
+  end if;
+  if public.kicklive_has_grant('authenticated', 'public.profiles', 'U', 'email') then
+    raise exception 'hardening failed: profiles.email is still granted UPDATE to authenticated';
   end if;
 end;
 $$;
@@ -1940,7 +2043,7 @@ $$;
 comment on function public.kicklive_match_rights(integer) is
   'The per-match authority snapshot for the current JWT subject. Read by the engine functions and by GET /api/matches/:id/access.';
 
-revoke all on function public.kicklive_match_rights(integer) from public;
+revoke all on function public.kicklive_match_rights(integer) from public, anon;
 grant execute on function public.kicklive_match_rights(integer) to authenticated;
 
 -- The one flag the column guards look for to recognise the engine's own writes. Transaction-local
@@ -1957,7 +2060,7 @@ begin
 end;
 $$;
 
-revoke all on function public.kicklive_enter_engine() from public;
+revoke all on function public.kicklive_enter_engine() from public, anon;
 grant execute on function public.kicklive_enter_engine() to authenticated;
 
 -- The derived score: a fold over the surviving rows, in one place so every caller agrees.
@@ -1993,7 +2096,7 @@ $$;
 comment on function public.kicklive_match_score(integer) is
   'home/away/shootout derived from active match_events. Own goals credit the opposing side; a shoot-out goal never enters the match score. Must stay equal to scoreFromEvents() in workers/src/lib/matchEvents.ts (pinned by tests/unit/live-match-engine.test.ts).';
 
-revoke all on function public.kicklive_match_score(integer) from public;
+revoke all on function public.kicklive_match_score(integer) from public, anon, authenticated;
 grant execute on function public.kicklive_match_score(integer) to anon, authenticated;
 
 -- The derived clock. `matches.minute` is a *rendering* of these three inputs, never an input itself.
@@ -2050,7 +2153,7 @@ begin
 end;
 $$;
 
-revoke all on function public.kicklive_match_clock(integer) from public;
+revoke all on function public.kicklive_match_clock(integer) from public, anon, authenticated;
 grant execute on function public.kicklive_match_clock(integer) to anon, authenticated;
 
 -- The event's own status, for the "is this legal right now" question both sides ask.
@@ -2356,7 +2459,7 @@ begin
 end;
 $$;
 
-revoke all on function public.kicklive_assert_match_event(integer, text, integer, integer, integer, integer, boolean) from public;
+revoke all on function public.kicklive_assert_match_event(integer, text, integer, integer, integer, integer, boolean) from public, authenticated;
 grant execute on function public.kicklive_assert_match_event(integer, text, integer, integer, integer, integer, boolean) to authenticated;
 
 -- One place that turns a row into the wire shape, so the socket feed, the REST timeline and the
@@ -2389,7 +2492,7 @@ as $$
     ) e;
 $$;
 
-revoke all on function public.kicklive_event_frame(integer) from public;
+revoke all on function public.kicklive_event_frame(integer) from public, anon, authenticated;
 grant execute on function public.kicklive_event_frame(integer) to anon, authenticated;
 
 -- Per-match team aggregates, derived from the same ledger. Only the columns the events can actually
@@ -2434,7 +2537,7 @@ begin
 end;
 $$;
 
-revoke all on function public.kicklive_sync_match_statistics(integer) from public;
+revoke all on function public.kicklive_sync_match_statistics(integer) from public, authenticated;
 grant execute on function public.kicklive_sync_match_statistics(integer) to authenticated;
 
 -- ============================================================================
@@ -2607,7 +2710,7 @@ $$;
 comment on function public.kicklive_record_match_event(integer, text, text, integer, integer, integer, integer, integer, text, text, text, jsonb, integer, boolean) is
   'The only supported way to append a match event. Authorises, deduplicates on client_event_id, allocates the sequence, derives the score and audits — in one transaction.';
 
-revoke all on function public.kicklive_record_match_event(integer, text, text, integer, integer, integer, integer, integer, text, text, text, jsonb, integer, boolean) from public;
+revoke all on function public.kicklive_record_match_event(integer, text, text, integer, integer, integer, integer, integer, text, text, text, jsonb, integer, boolean) from public, authenticated;
 grant execute on function public.kicklive_record_match_event(integer, text, text, integer, integer, integer, integer, integer, text, text, text, jsonb, integer, boolean) to authenticated;
 
 -- ============================================================================
@@ -2777,7 +2880,7 @@ begin
 end;
 $$;
 
-revoke all on function public.kicklive_transition_match(integer, text, text, smallint, integer) from public;
+revoke all on function public.kicklive_transition_match(integer, text, text, smallint, integer) from public, authenticated;
 grant execute on function public.kicklive_transition_match(integer, text, text, smallint, integer) to authenticated;
 
 -- ============================================================================
@@ -2942,7 +3045,7 @@ begin
 end;
 $$;
 
-revoke all on function public.kicklive_correct_match_event(integer, text, jsonb, integer) from public;
+revoke all on function public.kicklive_correct_match_event(integer, text, jsonb, integer) from public, authenticated;
 grant execute on function public.kicklive_correct_match_event(integer, text, jsonb, integer) to authenticated;
 
 -- ============================================================================
@@ -3022,7 +3125,7 @@ begin
 end;
 $$;
 
-revoke all on function public.kicklive_finalize_match(integer, boolean) from public;
+revoke all on function public.kicklive_finalize_match(integer, boolean) from public, authenticated;
 grant execute on function public.kicklive_finalize_match(integer, boolean) to authenticated;
 
 create or replace function public.kicklive_set_match_lock(p_match_id integer, p_locked boolean, p_reason text default null)
@@ -3058,7 +3161,7 @@ begin
 end;
 $$;
 
-revoke all on function public.kicklive_set_match_lock(integer, boolean, text) from public;
+revoke all on function public.kicklive_set_match_lock(integer, boolean, text) from public, authenticated;
 grant execute on function public.kicklive_set_match_lock(integer, boolean, text) to authenticated;
 
 -- ============================================================================
@@ -3113,7 +3216,7 @@ as $$
    where m.id = p_match_id;
 $$;
 
-revoke all on function public.kicklive_match_live_state(integer) from public;
+revoke all on function public.kicklive_match_live_state(integer) from public, anon, authenticated;
 -- Anon on purpose: this returns what `matches` and `match_events` already make public, and the fan
 -- sockets (and the local adapter) must be able to hydrate a room without anyone's token.
 grant execute on function public.kicklive_match_live_state(integer) to anon, authenticated;
@@ -3189,8 +3292,8 @@ begin
 end;
 $$;
 
-revoke all on function public.kicklive_assign_match(integer, uuid, text, text) from public;
-revoke all on function public.kicklive_stand_down_assignment(uuid) from public;
+revoke all on function public.kicklive_assign_match(integer, uuid, text, text) from public, authenticated;
+revoke all on function public.kicklive_stand_down_assignment(uuid) from public, authenticated;
 grant execute on function public.kicklive_assign_match(integer, uuid, text, text) to authenticated;
 grant execute on function public.kicklive_stand_down_assignment(uuid) to authenticated;
 
@@ -3375,7 +3478,7 @@ revoke all on function public.kicklive_lifecycle_event_for(text, text) from publ
 revoke all on function public.kicklive_guard_match_result_columns() from public;
 revoke all on function public.kicklive_guard_match_events_append_only() from public;
 revoke all on function public.kicklive_sequence_on_insert() from public;
-revoke all on function public.kicklive_assert_match_event(integer, text, integer, integer, integer, integer, boolean) from public;
+revoke all on function public.kicklive_assert_match_event(integer, text, integer, integer, integer, integer, boolean) from public, authenticated;
 grant execute on function public.kicklive_assert_match_event(integer, text, integer, integer, integer, integer, boolean) to authenticated;
 
 -- ============================================================================
@@ -3420,20 +3523,20 @@ begin
     raise exception 'hardening failed: % transition rows name an unknown status', v_count;
   end if;
 
-  if not has_function_privilege('authenticated','public.kicklive_record_match_event(integer,text,text,integer,integer,integer,integer,integer,text,text,text,jsonb,integer,boolean)','execute') then
-    raise exception 'hardening failed: the record function is not executable by authenticated';
+  if not public.kicklive_has_grant('authenticated','public.kicklive_record_match_event(integer,text,text,integer,integer,integer,integer,integer,text,text,text,jsonb,integer,boolean)','X') then
+    raise exception 'hardening failed: the record function is not granted EXECUTE to authenticated';
   end if;
-  if has_function_privilege('anon','public.kicklive_record_match_event(integer,text,text,integer,integer,integer,integer,integer,text,text,text,jsonb,integer,boolean)','execute') then
-    raise exception 'hardening failed: anon can record match events';
+  if public.kicklive_has_grant('anon','public.kicklive_record_match_event(integer,text,text,integer,integer,integer,integer,integer,text,text,text,jsonb,integer,boolean)','X') then
+    raise exception 'hardening failed: anon is granted EXECUTE on the record function';
   end if;
-  if not has_function_privilege('anon','public.kicklive_match_live_state(integer)','execute') then
-    raise exception 'hardening failed: the fan snapshot function is not executable by anon';
+  if not public.kicklive_has_grant('anon','public.kicklive_match_live_state(integer)','X') then
+    raise exception 'hardening failed: the fan snapshot function is not granted EXECUTE to anon';
   end if;
-  if has_table_privilege('authenticated','public.match_assignments','insert') then
-    raise exception 'hardening failed: assignments are writable outside kicklive_assign_match()';
+  if public.kicklive_has_grant('authenticated','public.match_assignments','a') then
+    raise exception 'hardening failed: assignments are granted INSERT outside kicklive_assign_match()';
   end if;
-  if has_column_privilege('authenticated','public.match_events','event_type','update') then
-    raise exception 'hardening failed: match_events is still updatable by a client role';
+  if public.kicklive_has_grant('authenticated','public.match_events','U','event_type') then
+    raise exception 'hardening failed: match_events is granted UPDATE to a client role';
   end if;
 
   -- By NAME, not by pattern. A `like 'kicklive_%'` count over these tables is a claim about the whole
@@ -3745,9 +3848,9 @@ comment on function kicklive_squad_sizes() is
 --  Same posture as Phase 1/3: revoke broadly, then grant the one privilege the read path needs. These are
 --  functions, so there is nothing to revoke DML on; the point of the revoke is that `execute` is granted to
 --  PUBLIC by default in a fresh database.
-revoke all on function kicklive_is_final_status(text) from public;
-revoke all on function kicklive_competition_standings(integer) from public;
-revoke all on function kicklive_squad_sizes() from public;
+revoke all on function kicklive_is_final_status(text) from public, anon, authenticated;
+revoke all on function kicklive_competition_standings(integer) from public, anon, authenticated;
+revoke all on function kicklive_squad_sizes() from public, anon, authenticated;
 
 grant execute on function kicklive_is_final_status(text) to anon, authenticated, service_role;
 grant execute on function kicklive_competition_standings(integer) to anon, authenticated, service_role;
@@ -3831,7 +3934,11 @@ begin
     select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
      where n.nspname = 'public'
        and p.proname in ('kicklive_is_final_status','kicklive_competition_standings','kicklive_squad_sizes')
-       and has_function_privilege('anon', p.oid, 'execute')
+       -- read the ACL rather than has_function_privilege(): the latter is true for the superuser the SQL
+       -- editor runs as, which would make this count 3 on a database where the grant never landed.
+       and exists (
+         select 1 from pg_roles r, aclexplode(p.proacl) g
+          where r.rolname = 'anon' and g.privilege_type = 'X' and (g.grantee = r.oid or g.grantee = 0))
   ) <> 3 then
     raise exception 'phase4 verification failed: anon cannot execute one of the read aggregates';
   end if;
@@ -5236,13 +5343,13 @@ begin
   end if;
 
   -- 9.3 no client role may read a device token, in any form.
-  if has_table_privilege('authenticated', 'public.notification_devices', 'insert')
-     or has_table_privilege('anon', 'public.notification_devices', 'select') then
+  if public.kicklive_has_grant('authenticated', 'public.notification_devices', 'a')
+     or public.kicklive_has_grant('anon', 'public.notification_devices', 'r') then
     raise exception 'phase5 verification failed: a client role can write or read notification_devices directly; registration is an RPC and the token is not selectable';
   end if;
-  if has_table_privilege('authenticated', 'public.notification_jobs', 'insert')
-     or has_table_privilege('anon', 'public.notification_jobs', 'select')
-     or has_table_privilege('authenticated', 'public.notification_deliveries', 'insert') then
+  if public.kicklive_has_grant('authenticated', 'public.notification_jobs', 'a')
+     or public.kicklive_has_grant('anon', 'public.notification_jobs', 'r')
+     or public.kicklive_has_grant('authenticated', 'public.notification_deliveries', 'a') then
     raise exception 'phase5 verification failed: jobs and deliveries are not client-writable, and that is the only thing standing between an anon key and a mass send';
   end if;
 
@@ -5345,8 +5452,10 @@ commit;
 --  VERIFY:  select count(*) from pg_policies where tablename like 'notification%';
 --  VERIFY:  select policyname, cmd, qual from pg_policies where tablename = 'notifications';
 --           -- must show "notifications: owner or broadcast read" and NOT "notifications: public read"
---  VERIFY:  select has_table_privilege('authenticated','public.notification_devices','select');   -- false
---  VERIFY:  select has_table_privilege('anon','public.notification_jobs','select');                -- false
+--  VERIFY:  select public.kicklive_has_grant('authenticated','public.notification_devices','r');   -- false
+--  VERIFY:  select public.kicklive_has_grant('anon','public.notification_jobs','r');                -- false
+--  (Use that, not has_table_privilege(): from the superuser session of the SQL editor the latter answers "true"
+--   for every role and proves nothing. Same reason the verify block above reads the ACLs.)
 --  VERIFY:  select * from kicklive_pending_notification_jobs(5);                                   -- {"jobIds": [], …}
 --  VERIFY:  -- register a device as a real user (via the Worker route), then:
 --           --   select id, provider, platform, active from notification_devices order by created_at desc limit 1;
@@ -6472,12 +6581,18 @@ begin
       and (p.proname like 'kicklive_%asset%' or p.proname in
            ('kicklive_sweep_media', 'kicklive_migration_seen', 'kicklive_upload_quota_bytes'))
   loop
-    execute format('revoke all on function public.%I(%s) from public', r.proname, r.args);
+    -- `from public` alone would have been the Phase 7 mistake: with the default privileges Supabase creates, anon and
+    -- authenticated hold their own EXECUTE entries, so the revoke has to name them to mean anything.
+    execute format('revoke all on function public.%I(%s) from public, anon, authenticated', r.proname, r.args);
     execute format('grant execute on function public.%I(%s) to service_role', r.proname, r.args);
     -- The four the browser calls directly, with identity from auth.uid() inside.
     if r.proname in ('kicklive_reserve_asset_upload', 'kicklive_finalize_asset_upload',
                      'kicklive_entity_assets', 'kicklive_delete_asset', 'kicklive_restore_asset') then
       execute format('grant execute on function public.%I(%s) to authenticated', r.proname, r.args);
+    end if;
+    -- The one anonymous write in the product, re-granted by name because the revoke above now takes it too.
+    if r.proname in ('kicklive_record_media_view', 'kicklive_asset_url_column') then
+      execute format('grant execute on function public.%I(%s) to anon, authenticated', r.proname, r.args);
     end if;
     n := n + 1;
   end loop;
@@ -9009,7 +9124,9 @@ begin
             or p.proname in ('kicklive_asset_url_column', 'kicklive_ad_guard_placement_format',
                              'kicklive_ad_guard_advertisement_format', 'touch_updated_at'))
   loop
-    execute format('revoke all on function public.%I(%s) from public', r.proname, r.args);
+    -- Every client role by name. `from public` only would leave the anon/authenticated EXECUTE entries that
+    -- the default privileges Supabase creates, which is precisely the hole the block below asserts against.
+    execute format('revoke all on function public.%I(%s) from public, anon, authenticated', r.proname, r.args);
     execute format('grant execute on function public.%I(%s) to service_role', r.proname, r.args);
     n := n + 1;
   end loop;
@@ -9215,16 +9332,18 @@ begin
     from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
    where ns.nspname = 'public'
      and p.proname in ('kicklive_ad_serve', 'kicklive_ad_record_event')
-     and not has_function_privilege('anon', p.oid, 'execute');
+     and not public.kicklive_has_grant('anon', p.oid::regprocedure::text, 'X');
   if not_granted is not null then
     raise exception 'kicklive migration verification failed: public surface not granted to anon: %', not_granted;
   end if;
 
+  -- Read the ACL, not has_function_privilege: the second form answers "true" for every function when the
+  -- applying role is a superuser, so this assertion can only ever fire when it is wrong to fire.
   if exists (
     select 1 from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
      where ns.nspname = 'public' and p.proname like 'kicklive_ad_%'
        and p.proname not in ('kicklive_ad_serve', 'kicklive_ad_record_event')
-       and has_function_privilege('authenticated', p.oid, 'execute')
+       and public.kicklive_has_grant('authenticated', p.oid::regprocedure::text, 'X')
   ) then
     raise exception 'kicklive migration verification failed: an admin-only advertising function is granted to authenticated';
   end if;
@@ -11390,7 +11509,7 @@ begin
   -- enumerated because a list of names here is a second place to remember them, and the grants loop above is
   -- where they are actually decided.
   select count(1) into n from pg_proc p join pg_namespace nn on nn.oid = p.pronamespace
-   where nn.nspname = 'public' and has_function_privilege('anon', p.oid, 'execute')
+   where nn.nspname = 'public' and public.kicklive_has_grant('anon', p.oid::regprocedure::text, 'X')
      and p.proname like 'kicklive_sponsor%';
   if n <> 3 then
     raise exception 'kicklive migration verification failed: anon may execute % sponsorship function(s), expected 3 (the read, the epoch and the rate card)', n;
@@ -11399,13 +11518,13 @@ begin
   -- And the shape of the staff grant, stated as the two facts that matter rather than as a count: an
   -- authenticated caller can reach the writers (so `is_admin()` has a subject to judge), and cannot reach the
   -- cache-version writer or the private-object helper at all.
-  if not has_function_privilege('authenticated', 'public.kicklive_sponsor_save(jsonb)', 'execute') then
+  if not public.kicklive_has_grant('authenticated', 'public.kicklive_sponsor_save(jsonb)', 'X') then
     raise exception 'kicklive migration verification failed: the staff surface is not executable as `authenticated`, so every admin write would arrive with auth.uid() = NULL and be refused by its own is_admin() check';
   end if;
-  if has_function_privilege('authenticated', 'public.kicklive_sponsorship_touch_epoch(boolean)', 'execute') then
+  if public.kicklive_has_grant('authenticated', 'public.kicklive_sponsorship_touch_epoch(boolean)', 'X') then
     raise exception 'kicklive migration verification failed: a client role may bump the sponsorship cache epoch directly';
   end if;
-  if has_function_privilege('authenticated', 'public.kicklive_asset_url_for_asset(bigint)', 'execute') then
+  if public.kicklive_has_grant('authenticated', 'public.kicklive_asset_url_for_asset(bigint)', 'X') then
     raise exception 'kicklive migration verification failed: a client role may trade an asset id for a stored key';
   end if;
 
@@ -13235,7 +13354,7 @@ begin
        and (p.proname like 'kicklive_observability%' or p.proname like 'kicklive_metrics%'
             or p.proname like 'kicklive_health%' or p.proname like 'kicklive_audit%')
   loop
-    if has_function_privilege('anon', f.sig, 'EXECUTE') then
+    if public.kicklive_has_grant('anon', f.sig, 'X') then
       v_anon := v_anon + 1;
     end if;
   end loop;
@@ -13434,23 +13553,23 @@ begin
    where ns.nspname = 'public'
      and (p.proname like 'kicklive_observability%' or p.proname like 'kicklive_metrics%'
           or p.proname like 'kicklive_health%' or p.proname like 'kicklive_audit%')
-     and has_function_privilege('anon', p.oid, 'EXECUTE');
+     and public.kicklive_has_grant('anon', p.oid::regprocedure::text, 'X');
   if n <> 1 then
     raise exception 'phase 9 verify: % observability functions are executable by anon, and only kicklive_health_read may be',
       n using errcode = '42501';
   end if;
 
-  if not has_function_privilege('anon', 'public.kicklive_health_read()', 'EXECUTE') then
+  if not public.kicklive_has_grant('anon', 'public.kicklive_health_read()', 'X') then
     raise exception 'phase 9 verify: the public health read is not executable by anon' using errcode = '42501';
   end if;
-  if has_function_privilege('authenticated', 'public.kicklive_metrics_record(jsonb,timestamptz)', 'EXECUTE') then
+  if public.kicklive_has_grant('authenticated', 'public.kicklive_metrics_record(jsonb,timestamptz)', 'X') then
     raise exception 'phase 9 verify: a client role can write metrics, which is how a dashboard becomes a wish'
       using errcode = '42501';
   end if;
-  if has_function_privilege('authenticated', 'public.kicklive_health_write(text,text,text,jsonb,boolean)', 'EXECUTE') then
+  if public.kicklive_has_grant('authenticated', 'public.kicklive_health_write(text,text,text,jsonb,boolean)', 'X') then
     raise exception 'phase 9 verify: a client role can write component health' using errcode = '42501';
   end if;
-  if not has_function_privilege('authenticated', 'public.kicklive_audit_record(text,text,integer,text,jsonb,text,uuid)', 'EXECUTE') then
+  if not public.kicklive_has_grant('authenticated', 'public.kicklive_audit_record(text,text,integer,text,jsonb,text,uuid)', 'X') then
     raise exception 'phase 9 verify: kicklive_audit_record is not executable by authenticated, so every audit write made with an admin token will be refused'
       using errcode = '42501';
   end if;
@@ -13664,7 +13783,7 @@ as $fn$
          where id = auth.uid()) p
 $fn$;
 
-revoke all on function public.kicklive_profile_self() from public;
+revoke all on function public.kicklive_profile_self() from public, anon;
 grant execute on function public.kicklive_profile_self() to authenticated, service_role;
 
 comment on function public.kicklive_profile_self() is
@@ -13709,7 +13828,7 @@ begin
 end
 $fn$;
 
-revoke all on function public.kicklive_profile_contacts(uuid[], integer) from public;
+revoke all on function public.kicklive_profile_contacts(uuid[], integer) from public, anon;
 grant execute on function public.kicklive_profile_contacts(uuid[], integer) to authenticated, service_role;
 
 comment on function public.kicklive_profile_contacts(uuid[], integer) is
@@ -13727,20 +13846,23 @@ do $verify$
 declare
   n integer;
 begin
-  if has_column_privilege('authenticated', 'public.profiles', 'email', 'select') then
-    raise exception 'phase 10 verify: authenticated can still select profiles.email — the narrowing did not land' using errcode = '42501';
+  -- Every privilege check in this file reads the ACL for the reason recorded in the Phase 1 hardening
+  -- migration (`public.kicklive_has_grant`): from a superuser session has_column_privilege() answers "true"
+  -- for all of them, which turns this whole block into a pass on a database that was never hardened.
+  if public.kicklive_has_grant('authenticated', 'public.profiles', 'r', 'email') then
+    raise exception 'phase 10 verify: profiles.email is still granted SELECT to authenticated — the narrowing did not land' using errcode = '42501';
   end if;
-  if has_column_privilege('authenticated', 'public.profiles', 'phone', 'select') then
-    raise exception 'phase 10 verify: authenticated can still select profiles.phone' using errcode = '42501';
+  if public.kicklive_has_grant('authenticated', 'public.profiles', 'r', 'phone') then
+    raise exception 'phase 10 verify: profiles.phone is still granted SELECT to authenticated' using errcode = '42501';
   end if;
-  if not has_column_privilege('authenticated', 'public.profiles', 'username', 'select') then
+  if not public.kicklive_has_grant('authenticated', 'public.profiles', 'r', 'username') then
     raise exception 'phase 10 verify: the narrowing also took profiles.username, which every public surface reads' using errcode = '42501';
   end if;
-  if not has_column_privilege('service_role', 'public.profiles', 'email', 'select') then
+  if not public.kicklive_has_grant('service_role', 'public.profiles', 'r', 'email') then
     raise exception 'phase 10 verify: service_role lost email — the Worker''s admin client and Phase 5 addressing would break' using errcode = '42501';
   end if;
-  if has_column_privilege('anon', 'public.profiles', 'username', 'select') then
-    raise exception 'phase 10 verify: anon can select from profiles directly; the public surface is profiles_public' using errcode = '42501';
+  if public.kicklive_has_grant('anon', 'public.profiles', 'r', 'username') then
+    raise exception 'phase 10 verify: anon is granted SELECT on profiles directly; the public surface is profiles_public' using errcode = '42501';
   end if;
 
   -- The read policy must survive: column privileges narrow *what* may be projected, RLS narrows which rows,
@@ -13764,11 +13886,11 @@ begin
     end if;
   end loop;
 
-  if has_function_privilege('anon', 'public.kicklive_profile_self()', 'execute')
-    or has_function_privilege('anon', 'public.kicklive_profile_contacts(uuid[], integer)', 'execute') then
+  if public.kicklive_has_grant('anon', 'public.kicklive_profile_self()', 'X')
+    or public.kicklive_has_grant('anon', 'public.kicklive_profile_contacts(uuid[], integer)', 'X') then
     raise exception 'phase 10 verify: a stranger may execute the contact functions' using errcode = '42501';
   end if;
-  if not has_function_privilege('authenticated', 'public.kicklive_profile_self()', 'execute') then
+  if not public.kicklive_has_grant('authenticated', 'public.kicklive_profile_self()', 'X') then
     raise exception 'phase 10 verify: the owner cannot read their own profile back' using errcode = '42501';
   end if;
 end

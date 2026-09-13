@@ -47,3 +47,8 @@ docs/data/phase4-query-inventory.md
 # faithful regeneration look like a hand edit — so the generator owns the formatting.
 scripts/query-audit.baseline.json
 scripts/bundle-budget.json
+
+# wrangler's own scratch bundles (workers/.wrangler/tmp/**): generated per dev run, deleted by the next
+# one, and a `format:check` that reads them reports on a tool rather than on this repository.
+.wrangler
+**/.wrangler

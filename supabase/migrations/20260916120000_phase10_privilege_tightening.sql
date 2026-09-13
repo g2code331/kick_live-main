@@ -72,7 +72,7 @@ as $fn$
          where id = auth.uid()) p
 $fn$;
 
-revoke all on function public.kicklive_profile_self() from public;
+revoke all on function public.kicklive_profile_self() from public, anon;
 grant execute on function public.kicklive_profile_self() to authenticated, service_role;
 
 comment on function public.kicklive_profile_self() is
@@ -117,7 +117,7 @@ begin
 end
 $fn$;
 
-revoke all on function public.kicklive_profile_contacts(uuid[], integer) from public;
+revoke all on function public.kicklive_profile_contacts(uuid[], integer) from public, anon;
 grant execute on function public.kicklive_profile_contacts(uuid[], integer) to authenticated, service_role;
 
 comment on function public.kicklive_profile_contacts(uuid[], integer) is
@@ -135,20 +135,23 @@ do $verify$
 declare
   n integer;
 begin
-  if has_column_privilege('authenticated', 'public.profiles', 'email', 'select') then
-    raise exception 'phase 10 verify: authenticated can still select profiles.email — the narrowing did not land' using errcode = '42501';
+  -- Every privilege check in this file reads the ACL for the reason recorded in the Phase 1 hardening
+  -- migration (`public.kicklive_has_grant`): from a superuser session has_column_privilege() answers "true"
+  -- for all of them, which turns this whole block into a pass on a database that was never hardened.
+  if public.kicklive_has_grant('authenticated', 'public.profiles', 'r', 'email') then
+    raise exception 'phase 10 verify: profiles.email is still granted SELECT to authenticated — the narrowing did not land' using errcode = '42501';
   end if;
-  if has_column_privilege('authenticated', 'public.profiles', 'phone', 'select') then
-    raise exception 'phase 10 verify: authenticated can still select profiles.phone' using errcode = '42501';
+  if public.kicklive_has_grant('authenticated', 'public.profiles', 'r', 'phone') then
+    raise exception 'phase 10 verify: profiles.phone is still granted SELECT to authenticated' using errcode = '42501';
   end if;
-  if not has_column_privilege('authenticated', 'public.profiles', 'username', 'select') then
+  if not public.kicklive_has_grant('authenticated', 'public.profiles', 'r', 'username') then
     raise exception 'phase 10 verify: the narrowing also took profiles.username, which every public surface reads' using errcode = '42501';
   end if;
-  if not has_column_privilege('service_role', 'public.profiles', 'email', 'select') then
+  if not public.kicklive_has_grant('service_role', 'public.profiles', 'r', 'email') then
     raise exception 'phase 10 verify: service_role lost email — the Worker''s admin client and Phase 5 addressing would break' using errcode = '42501';
   end if;
-  if has_column_privilege('anon', 'public.profiles', 'username', 'select') then
-    raise exception 'phase 10 verify: anon can select from profiles directly; the public surface is profiles_public' using errcode = '42501';
+  if public.kicklive_has_grant('anon', 'public.profiles', 'r', 'username') then
+    raise exception 'phase 10 verify: anon is granted SELECT on profiles directly; the public surface is profiles_public' using errcode = '42501';
   end if;
 
   -- The read policy must survive: column privileges narrow *what* may be projected, RLS narrows which rows,
@@ -172,11 +175,11 @@ begin
     end if;
   end loop;
 
-  if has_function_privilege('anon', 'public.kicklive_profile_self()', 'execute')
-    or has_function_privilege('anon', 'public.kicklive_profile_contacts(uuid[], integer)', 'execute') then
+  if public.kicklive_has_grant('anon', 'public.kicklive_profile_self()', 'X')
+    or public.kicklive_has_grant('anon', 'public.kicklive_profile_contacts(uuid[], integer)', 'X') then
     raise exception 'phase 10 verify: a stranger may execute the contact functions' using errcode = '42501';
   end if;
-  if not has_function_privilege('authenticated', 'public.kicklive_profile_self()', 'execute') then
+  if not public.kicklive_has_grant('authenticated', 'public.kicklive_profile_self()', 'X') then
     raise exception 'phase 10 verify: the owner cannot read their own profile back' using errcode = '42501';
   end if;
 end

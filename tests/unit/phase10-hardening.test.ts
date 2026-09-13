@@ -58,22 +58,33 @@ describe("phase 10 · the profiles narrowing", () => {
       /grant execute on function public\.kicklive_profile_contacts\(uuid\[\], integer\) to authenticated, service_role;/,
       "granted to authenticated, because the gate is is_admin() on the caller's token",
     );
-    assert.match(sql, /revoke all on function public\.kicklive_profile_contacts\(uuid\[\], integer\) from public;/, "and closed to nobody else");
+    assert.match(
+      sql,
+      /revoke all on function public\.kicklive_profile_contacts\(uuid\[\], integer\) from public, anon;/,
+      "and closed to nobody else — PUBLIC by itself is not enough: the default privileges anon holds are its own ACL entry",
+    );
   });
 
   it("asserts its own effect at apply time, because a grant that parses is not a grant that lands", () => {
     const verify = sql.slice(sql.indexOf("do $verify$"), sql.indexOf("$verify$;"));
     assert.ok(verify.length > 200, "the verify block is present");
     for (const [needle, why] of [
-      [/has_column_privilege\('authenticated', 'public\.profiles', 'email', 'select'\)/, "the email column is checked"],
-      [/has_column_privilege\('authenticated', 'public\.profiles', 'phone', 'select'\)/, "and the phone column"],
-      [/has_column_privilege\('service_role', 'public\.profiles', 'email', 'select'\)/, "service_role must keep email or the Worker's admin client breaks"],
-      [/has_column_privilege\('anon', 'public\.profiles', 'username', 'select'\)/, "anon must still be excluded"],
+      [/kicklive_has_grant\('authenticated', 'public\.profiles', 'r', 'email'\)/, "the email grant is read from the ACL, not from a superuser-blind function"],
+      [/kicklive_has_grant\('authenticated', 'public\.profiles', 'r', 'phone'\)/, "and the phone column"],
+      [/kicklive_has_grant\('service_role', 'public\.profiles', 'r', 'email'\)/, "service_role must keep email or the Worker's admin client breaks"],
+      [/kicklive_has_grant\('anon', 'public\.profiles', 'r', 'username'\)/, "anon must still be excluded"],
       [/policyname = 'profiles: authenticated read'/, "the row policy survives the column change"],
-      [/has_function_privilege\('anon'[\s\S]{0,240}execute'\)/, "and a stranger cannot execute the new functions"],
+      [/kicklive_has_grant\('anon'[\s\S]{0,240}'X'\)/, "and a stranger cannot execute the new functions"],
     ] as const) {
       assert.match(verify, needle, why);
     }
+    // Prose aside: the block documents *why* it reads the ACL and names the functions it refuses to use, so
+    // the ban is on the executable text, same distinction the sql-shape suite draws.
+    const executable = verify
+      .split("\n")
+      .filter((l) => !l.trim().startsWith("--"))
+      .join("\n");
+    assert.ok(!/has_(column|table|function)_privilege\s*\(/.test(executable), "no has_*_privilege() may reappear here: it answers true for the superuser running the paste");
     assert.match(verify, /raise exception 'phase 10 verify[^\n]*' using errcode = '42501'/, "each failure raises rather than warning");
   });
 });

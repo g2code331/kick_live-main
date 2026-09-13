@@ -27,6 +27,28 @@ and no root in this environment, so `initdb` is impossible.** That single fact i
 
 ---
 
+## Fixed 2026-09-13: the privilege self-checks could not see what they were checking
+
+Caught by an operator, not by the suite: pasting `supabase/SETUP.sql` into the Supabase SQL editor raised
+`hardening failed: authenticated can still update profiles.role directly` on a database where that revoke had
+in fact landed. The assertion was written with `has_column_privilege()`, and the editor session is a superuser —
+so it answers `true` for every role, every negative check fires on a hardened database and every positive check
+passes unchecked — in seven files across four phases (1, 3, 5, 7, 8, 9, 10). Two changes, both asserted by
+`tests/unit/sql-shape.test.ts`:
+
+- every privilege check now reads the ACL (`pg_class.relacl` / `pg_proc.proacl` via the new
+  `public.kicklive_has_grant`), which reports what was granted regardless of who is asking. A NULL ACL is
+  answered `false` for non-owners — the answer a real client role would get.
+- `revoke … from public` no longer stands alone where a file grants a client role execute: with the default
+  privileges Supabase creates, `anon`/`authenticated` hold their own entries, so phases 1, 3, 4, 6 and 7 were
+  revoking from a pseudo-role that never had the grant. The ads block that claims "everything else is
+  service-role only" was true of the RLS policy and false of the grant; it is now both. Trigger and internal helpers are deliberately left to `from public` alone — revoking execute
+  from `authenticated` there would break the inserts whose own triggers call them.
+
+The hole is real but narrow (a signed-in caller could EXECUTE an admin-only `kicklive_ad_*`/media function,
+which each still gates on `is_admin()` internally, so it was a second line of defence rather than a bypass),
+and it is the reason this class of assertion is now unreadable in any other shape.
+
 ## Re-verified 2026-09-13 on the Pages + one-SQL-file tree
 
 Still no Postgres, no Cloudflare credentials and no browser here, so `npm run check:sql` remains a loud `SKIP` and the five

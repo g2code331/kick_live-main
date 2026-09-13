@@ -1758,7 +1758,7 @@ begin
        and (p.proname like 'kicklive_observability%' or p.proname like 'kicklive_metrics%'
             or p.proname like 'kicklive_health%' or p.proname like 'kicklive_audit%')
   loop
-    if has_function_privilege('anon', f.sig, 'EXECUTE') then
+    if public.kicklive_has_grant('anon', f.sig, 'X') then
       v_anon := v_anon + 1;
     end if;
   end loop;
@@ -1957,23 +1957,23 @@ begin
    where ns.nspname = 'public'
      and (p.proname like 'kicklive_observability%' or p.proname like 'kicklive_metrics%'
           or p.proname like 'kicklive_health%' or p.proname like 'kicklive_audit%')
-     and has_function_privilege('anon', p.oid, 'EXECUTE');
+     and public.kicklive_has_grant('anon', p.oid::regprocedure::text, 'X');
   if n <> 1 then
     raise exception 'phase 9 verify: % observability functions are executable by anon, and only kicklive_health_read may be',
       n using errcode = '42501';
   end if;
 
-  if not has_function_privilege('anon', 'public.kicklive_health_read()', 'EXECUTE') then
+  if not public.kicklive_has_grant('anon', 'public.kicklive_health_read()', 'X') then
     raise exception 'phase 9 verify: the public health read is not executable by anon' using errcode = '42501';
   end if;
-  if has_function_privilege('authenticated', 'public.kicklive_metrics_record(jsonb,timestamptz)', 'EXECUTE') then
+  if public.kicklive_has_grant('authenticated', 'public.kicklive_metrics_record(jsonb,timestamptz)', 'X') then
     raise exception 'phase 9 verify: a client role can write metrics, which is how a dashboard becomes a wish'
       using errcode = '42501';
   end if;
-  if has_function_privilege('authenticated', 'public.kicklive_health_write(text,text,text,jsonb,boolean)', 'EXECUTE') then
+  if public.kicklive_has_grant('authenticated', 'public.kicklive_health_write(text,text,text,jsonb,boolean)', 'X') then
     raise exception 'phase 9 verify: a client role can write component health' using errcode = '42501';
   end if;
-  if not has_function_privilege('authenticated', 'public.kicklive_audit_record(text,text,integer,text,jsonb,text,uuid)', 'EXECUTE') then
+  if not public.kicklive_has_grant('authenticated', 'public.kicklive_audit_record(text,text,integer,text,jsonb,text,uuid)', 'X') then
     raise exception 'phase 9 verify: kicklive_audit_record is not executable by authenticated, so every audit write made with an admin token will be refused'
       using errcode = '42501';
   end if;

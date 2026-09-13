@@ -1089,12 +1089,18 @@ begin
       and (p.proname like 'kicklive_%asset%' or p.proname in
            ('kicklive_sweep_media', 'kicklive_migration_seen', 'kicklive_upload_quota_bytes'))
   loop
-    execute format('revoke all on function public.%I(%s) from public', r.proname, r.args);
+    -- `from public` alone would have been the Phase 7 mistake: with the default privileges Supabase creates, anon and
+    -- authenticated hold their own EXECUTE entries, so the revoke has to name them to mean anything.
+    execute format('revoke all on function public.%I(%s) from public, anon, authenticated', r.proname, r.args);
     execute format('grant execute on function public.%I(%s) to service_role', r.proname, r.args);
     -- The four the browser calls directly, with identity from auth.uid() inside.
     if r.proname in ('kicklive_reserve_asset_upload', 'kicklive_finalize_asset_upload',
                      'kicklive_entity_assets', 'kicklive_delete_asset', 'kicklive_restore_asset') then
       execute format('grant execute on function public.%I(%s) to authenticated', r.proname, r.args);
+    end if;
+    -- The one anonymous write in the product, re-granted by name because the revoke above now takes it too.
+    if r.proname in ('kicklive_record_media_view', 'kicklive_asset_url_column') then
+      execute format('grant execute on function public.%I(%s) to anon, authenticated', r.proname, r.args);
     end if;
     n := n + 1;
   end loop;

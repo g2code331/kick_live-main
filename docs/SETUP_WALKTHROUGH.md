@@ -131,6 +131,9 @@ that project or every send returns 403. Leave both unset and delivery silently u
 reason a green local run is not proof a push arrived. `TURNSTILE_SECRET_KEY` unset means the bot check is skipped: fine locally,
 not in production.
 
+The literal file-by-file version — which of `.env.local`, `workers/.dev.vars`, `wrangler.toml`, `wrangler secret put` and the GitHub environments
+gets what, and how Firebase's two halves are split — is [`docs/ENV-AND-KEYS.md`](ENV-AND-KEYS.md).
+
 Then prove it answers:
 
 ```bash
@@ -201,15 +204,16 @@ and watch it replay and catch up), one real push to one device twice for the sam
 
 ## 8 · If a step fails
 
-| symptom                                                       | cause, in the order it is actually likely                                                                                                                       |
-| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| deep link 404s / a stale asset returns HTML                   | the Pages contract files did not ship: `dist/web` must contain `functions/[[catchall]].js`, `_routes.json`, `_headers` — `npm run verify` checks this pre-build |
-| app boots against the wrong data                              | the `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` pair in that environment belongs to the other project — the boot guard says so in the console                  |
-| `relation "public.profiles" does not exist` while pasting SQL | you pasted an old copy: tables must be created before the `LANGUAGE sql` helpers read them. `npm run sql:bundle:check` and re-paste                             |
-| `SKIP` from `check-sql`                                       | `npm i --no-save pg` missing, a literal `<placeholder>` DSN, or no `--allow-any-database` for Supabase                                                          |
-| queue depth climbs, nothing errors                            | queue name in `[vars]` and in the binding blocks disagree — rename in **both**                                                                                  |
-| every authenticated route 401                                 | `SUPABASE_JWT_SECRET` absent or from the other project                                                                                                          |
-| `wrangler` says a binding does not exist                      | step 2 resources were created in a different account than `whoami` shows                                                                                        |
+| symptom                                                             | cause, in the order it is actually likely                                                                                                                                                                                                                                                             |
+| ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| deep link 404s / a stale asset returns HTML                         | the Pages contract files did not ship: `dist/web` must contain `functions/[[catchall]].js`, `_routes.json`, `_headers` — `npm run verify` checks this pre-build                                                                                                                                       |
+| app boots against the wrong data                                    | the `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` pair in that environment belongs to the other project — the boot guard says so in the console                                                                                                                                                        |
+| `relation "public.profiles" does not exist` while pasting SQL       | you pasted an old copy: tables must be created before the `LANGUAGE sql` helpers read them. `npm run sql:bundle:check` and re-paste                                                                                                                                                                   |
+| `hardening failed: …` from a section that looks like it did the job | the bundle was current? Before 2026-09-13 these assertions read `has_column_privilege()`, which answers "true" for the superuser the SQL editor is — so they fired on a **correctly** hardened database. `npm run sql:bundle:check`, then re-paste `SETUP.sql`: re-running is the fix, not a rollback |
+| `SKIP` from `check-sql`                                             | `npm i --no-save pg` missing, a literal `<placeholder>` DSN, or no `--allow-any-database` for Supabase                                                                                                                                                                                                |
+| queue depth climbs, nothing errors                                  | queue name in `[vars]` and in the binding blocks disagree — rename in **both**                                                                                                                                                                                                                        |
+| every authenticated route 401                                       | `SUPABASE_JWT_SECRET` absent or from the other project                                                                                                                                                                                                                                                |
+| `wrangler` says a binding does not exist                            | step 2 resources were created in a different account than `whoami` shows                                                                                                                                                                                                                              |
 
 ## 9 · Roll back (each half rolls back on its own; the database never needs a rollback)
 

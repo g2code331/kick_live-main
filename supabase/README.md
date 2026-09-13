@@ -18,6 +18,18 @@ project's SQL editor (staging, then production) — step 3 of [`../docs/SETUP_WA
 | `../SUPABASE_COMPLETE_SCHEMA.sql`, `../SUPABASE_NEW_PROJECT_SETUP.sql`, `../supabase_migrations.sql` | **deleted 2026-09-12 — do not resurrect or run**        | The three superseded root files. They predate Phase 1, each with a weaker policy set, and every new-project incident started with someone pasting one. They now exist only in git history; anything reading this README should run `SETUP.sql` instead.                                                                                                                                                                                           |
 | `../CREATE_ADMIN_PROFILE.sql`                                                                        | bootstrap-only, review before running                   | Grants the _first_ admin from a SQL editor as a superuser: you edit one line, `p_email` (or `p_user_id`), and the script refuses placeholders, markdown-linked addresses and unknown accounts rather than guessing. Deliberately **not** in `SETUP.sql`: a generated bundle must not be able to mint an admin, and a paste-and-grant file has no name in it to begin with. Nothing in the app calls it; delete it once the instance has an admin. |
 
+## How a grant is verified in this directory
+
+Every privilege assertion in the base schema and the migrations reads `pg_class.relacl` / `pg_proc.proacl`
+through `public.kicklive_has_grant(role, object, privilege[, column])` — never `has_table_privilege()`,
+`has_column_privilege()` or `has_function_privilege()`. Those three answer **"true" for a superuser and for
+the owner of the object**, and the Supabase SQL editor is one of those, so a negative assertion fires on a
+correctly hardened database while a positive one passes having checked nothing. For the same reason no
+`revoke … from public` stands alone where a client role is granted something in the same file: with the
+default privileges Supabase creates, `anon`/`authenticated` hold their own ACL entries, and revoking from
+PUBLIC does not touch them. `tests/unit/sql-shape.test.ts` fails if either rule is broken, and
+`kicklive_has_grant` itself is granted to PUBLIC on purpose — a verifier nobody may execute reports nothing.
+
 ## What `authenticated` may project (Phase 10)
 
 A row policy can only answer _which rows_; `20260916120000_phase10_privilege_tightening.sql` is the first
