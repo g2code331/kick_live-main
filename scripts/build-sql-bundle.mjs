@@ -54,10 +54,13 @@ function generate() {
 --
 -- If you are pasting this into the Supabase SQL editor, you are running as a superuser, and
 -- that has one consequence worth knowing: the privilege assertions in here deliberately read
--- relacl/proacl (via public.kicklive_has_grant) rather than has_table/column/function_privilege,
+-- relacl/proacl/attacl (via public.kicklive_has_grant) rather than has_table/column/function_privilege,
 -- because those three functions answer "yes" for a superuser whatever was actually revoked. A
 -- revoke that lands and a revoke that never ran are indistinguishable to them — which is exactly
--- how a half-hardened project once passed every self-check in this bundle.
+-- how a half-hardened project once passed every self-check in this bundle. The helper reads the ACL with
+-- aclexplode(), whose output columns are only grantor/grantee/privilege_type/is_grantable, and it takes the
+-- ACL letter as an argument (table r a w d D x t, sequence r w U, function X) — asking about a column with a
+-- code that object kind cannot hold is a check that passes without looking, so it is lint-tested too.
 -- ============================================================================
 `);
   const all = sources();

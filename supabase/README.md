@@ -20,15 +20,21 @@ project's SQL editor (staging, then production) — step 3 of [`../docs/SETUP_WA
 
 ## How a grant is verified in this directory
 
-Every privilege assertion in the base schema and the migrations reads `pg_class.relacl` / `pg_proc.proacl`
-through `public.kicklive_has_grant(role, object, privilege[, column])` — never `has_table_privilege()`,
+Every privilege assertion in the base schema and the migrations reads `pg_class.relacl` (tables), `pg_proc.proacl`
+(functions) and `pg_attribute.attacl` (one column) through `public.kicklive_has_grant(role, object, privilege[,
+column])` — never `has_table_privilege()`,
 `has_column_privilege()` or `has_function_privilege()`. Those three answer **"true" for a superuser and for
 the owner of the object**, and the Supabase SQL editor is one of those, so a negative assertion fires on a
 correctly hardened database while a positive one passes having checked nothing. For the same reason no
 `revoke … from public` stands alone where a client role is granted something in the same file: with the
 default privileges Supabase creates, `anon`/`authenticated` hold their own ACL entries, and revoking from
 PUBLIC does not touch them. `tests/unit/sql-shape.test.ts` fails if either rule is broken, and
-`kicklive_has_grant` itself is granted to PUBLIC on purpose — a verifier nobody may execute reports nothing.
+`kicklive_has_grant` itself is granted to PUBLIC on purpose — a verifier nobody may execute reports nothing, and
+an unresolvable `object` name **raises** rather than answering `false`, because a verifier that certifies a typo is
+worse than no verifier. Two more shapes are pinned there because this repository has no Postgres between writing SQL
+and applying it in a dashboard: `aclexplode()` exposes exactly `grantor`, `grantee`, `privilege_type`,
+`is_grantable` (nothing named `objid`, and per-column grants are not in `relacl` at all), and a privilege code must
+belong to the object kind it is asked about — `U` is USAGE on a sequence or function, UPDATE on a table column is `w`.
 
 ## What `authenticated` may project (Phase 10)
 

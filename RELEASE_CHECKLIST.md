@@ -36,9 +36,11 @@ so it answers `true` for every role, every negative check fires on a hardened da
 passes unchecked — in seven files across four phases (1, 3, 5, 7, 8, 9, 10). Two changes, both asserted by
 `tests/unit/sql-shape.test.ts`:
 
-- every privilege check now reads the ACL (`pg_class.relacl` / `pg_proc.proacl` via the new
-  `public.kicklive_has_grant`), which reports what was granted regardless of who is asking. A NULL ACL is
-  answered `false` for non-owners — the answer a real client role would get.
+- every privilege check now reads the ACL (`pg_class.relacl` / `pg_proc.proacl` / `pg_attribute.attacl` via the
+  new `public.kicklive_has_grant`), which reports what was granted regardless of who is asking. A NULL ACL is
+  answered `false` for non-owners — the answer a real client role would get — and an object name that resolves
+  to nothing raises, so a misspelled assertion cannot pass. Column grants come from `attacl`, **not** from
+  `relacl`, which is what the first draft of that helper got wrong.
 - `revoke … from public` no longer stands alone where a file grants a client role execute: with the default
   privileges Supabase creates, `anon`/`authenticated` hold their own entries, so phases 1, 3, 4, 6 and 7 were
   revoking from a pseudo-role that never had the grant. The ads block that claims "everything else is

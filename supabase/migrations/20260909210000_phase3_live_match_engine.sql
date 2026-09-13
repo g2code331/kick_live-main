@@ -1777,7 +1777,7 @@ begin
   if public.kicklive_has_grant('authenticated','public.match_assignments','a') then
     raise exception 'hardening failed: assignments are granted INSERT outside kicklive_assign_match()';
   end if;
-  if public.kicklive_has_grant('authenticated','public.match_events','U','event_type') then
+  if public.kicklive_has_grant('authenticated','public.match_events','w','event_type') then
     raise exception 'hardening failed: match_events is granted UPDATE to a client role';
   end if;
 
