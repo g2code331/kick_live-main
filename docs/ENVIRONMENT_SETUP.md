@@ -25,9 +25,11 @@ git checkout main
 git merge --ff-only origin/arena/01a08671-kick-live-main || git merge origin/arena/01a08671-kick-live-main
 npm ci
 npm run typecheck && npm run test:unit && npm run test:integration && npm run format:check
-npm run ci:check            # must be silent: the four workflows ride on main since 2026-09-12; if it
-                            # reports drift, repair with `npm run ci:install` (plus `git add -f` — the dir
-                            # stays gitignored so automation tokens cannot touch it)
+npm run ci:install          # refresh .github/workflows from ci/workflows (the installed copy is what Actions runs)
+git add -f .github/workflows && git commit -m "ci: install workflows"   # a human must do this: pushing that path is refused
+npm run ci:check            # silent once re-installed and committed. Drift is a warning in the unit tests, not a failure,
+                            # because a branch cannot carry the repair for a path GitHub protects (see
+                            # tests/unit/cloudflare-pages-hosting.test.ts)
 ```
 
 ### If the checks die with `ERR_UNKNOWN_FILE_EXTENSION: Unknown file extension ".ts"`

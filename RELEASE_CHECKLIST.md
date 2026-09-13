@@ -31,14 +31,17 @@ and no root in this environment, so `initdb` is impossible.** That single fact i
 
 Still no Postgres, no Cloudflare credentials and no browser here, so `npm run check:sql` remains a loud `SKIP` and the five
 `REQUIRES TESTING` rows below stay where they are. What was re-run, on this exact tree, with exit codes preserved (not piped):
-`npm run test:unit` **604 pass / 0 fail** · `npm run test:integration` **99 pass / 0 fail** · `npm run typecheck` **0 errors**
+`npm run test:unit` **605 pass / 0 fail** · `npm run test:integration` **99 pass / 0 fail** · `npm run typecheck` **0 errors**
 · `npm run format:check` **clean** · `npm run verify` **17/17** · `npm run worker:routes -- --check` **101/101** ·
 `npm run sql:bundle:check` **SETUP.sql is current (10 sections)** · `npm run gates` **22 pass / 0 fail / 4 skip** ·
 `npm run build:web` ships `dist/web/{functions/[[catchall]].js,_routes.json,_headers}` · `npx wrangler deploy --dry-run` **exit 0
-for both `staging` and `production`**, bindings resolve, correct `SUPABASE_PROJECT_REF` per environment. `ci/workflows/*` (the four workflows,
-Vercel-free) is what a pushed branch ships: `.github/workflows/*` is the install target, deliberately
-unpushable by an automation token, so `npm run ci:install` + `git add -f .github/workflows` is step 1 of
-the walkthrough and the unit test fails with exactly that sentence if the two ever drift.
+for both `staging` and `production`**, bindings resolve, correct `SUPABASE_PROJECT_REF` per environment.
+
+One structural note the tests now encode: `ci/workflows/` (four files, Vercel-free) is the source of truth and
+`.github/workflows/` is the tracked install target Actions actually executes, but GitHub refuses any push that touches that path
+from a token without the `workflows` permission. So a branch cannot carry the Pages-era rewrite of the installed copies, and the
+unit test reports the mismatch as **a warning naming `npm run ci:install`** rather than a red test; step 1 of
+`docs/SETUP_WALKTHROUGH.md` is where a human runs it and commits it. Absence of an installed copy is still a hard failure.
 
 ---
 

@@ -30,11 +30,19 @@ git clone https://github.com/g2code331/kick_live-main.git && cd kick_live-main  
 git rev-parse --abbrev-ref HEAD          # want: main
 npm ci
 npm run test:unit && npm run test:integration && npm run typecheck && npm run format:check
-npm run ci:install                       # copies ci/workflows/ into .github/workflows/ (the install target is gitignored on purpose)
-git add -f .github/workflows && git commit -m "ci: install workflows"   # only if it printed a file name; skip it if your main already has them
+npm run ci:install                       # copies ci/workflows/ -> .github/workflows/ (the install target is gitignored by choice)
+# It prints a name for every workflow it rewrote; from a main that predates the Pages migration it rewrites two, because the
+# installed *Deploy web* still contains the retired Vercel step. The installed copies ARE tracked on main (my branch cannot push
+# changes to that path - GitHub refuses a token without the `workflows` permission), so commit the repair and push it yourself:
+git add -f .github/workflows && git commit -m "ci: install workflows (Pages deploy, no Vercel step)"
 npm run gates                            # everything green, or you are not holding the code you think you are
 node scripts/install-ts-loader.mjs       # exit 0 = package.json already carries the TS loader flag (it does on main)
 ```
+
+`npm run ci:install` above is not decoration: the workflow GitHub actually executes is the copy under `.github/workflows/`, so
+until it is refreshed your pushes still deploy through the old Vercel job (the _Deploy web_ run will fail on `VERCEL_TOKEN` being
+unset — that is the drift, not a broken workflow). The test suite reports the mismatch as a warning naming this command rather than
+as a failure, precisely because the repair cannot ride on a pushed branch.
 
 Node ≥ 22.22.2 from Nodejs.org (`nvm install --lts` if your distro ships a repackaged one) removes the only environment-specific
 foot-gun this repo has: PNG byte-comparison in `npm run brand:assets:check` and `.ts` entry points both depend on a stock build.
