@@ -23,8 +23,9 @@ The project's SQL editor gets **one paste**: `supabase/SETUP.sql` (generated fro
 
 - [ ] `supabase/SETUP.sql` run on **staging** (stops at the first error; every section self-verifies)
 - [ ] same file run on **production**
-- [ ] `CREATE_ADMIN_PROFILE.sql` once per environment, after creating the admin's auth user (it is not
-      part of the bundle — it names a real user)
+- [ ] `CREATE_ADMIN_PROFILE.sql` once per environment, after creating the admin's auth user: edit `p_email`
+      (or `p_user_id`), **typing** the address rather than pasting it, since a markdown-wrapped address is refused
+      by design (it is not part of the bundle — nothing generated may mint an admin)
 - [ ] Optional belt-and-braces: `node scripts/check-sql.mjs --dsn "<pooler string>" --allow-any-database`
       on staging (needs `npm i --no-save pg`). **Never `--fresh` against a Supabase project** — that flag
       recreates a scratch database.

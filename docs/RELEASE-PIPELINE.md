@@ -411,8 +411,8 @@ node scripts/gates.mjs --only=6           # clean-clone rehearsal (needs a commi
   inferring it from size, and the two remaining facts it reports are that 5.5 MB of master artwork still
   ships inside `public/` (moving it out is a packaging decision, recorded in `docs/PHASE4_DATA_ARCHITECTURE.md`
   §7.3) and that WebP/AVIF were unavailable in a pure-JS sandbox.
-- The repo root contains a stale `repomix-output.xml` and duplicated Supabase values in
-  `DEPLOYMENT*.md` / `.replit`; nothing in this pipeline reads them.
+- The stale root `repomix-output.xml` and the `.replit` duplicate of the Supabase pair were deleted and
+  gitignored on 2026-09-13; nothing in this pipeline ever read them, which is exactly why they drifted.
 
 ## 13. Run summary as measured locally (2026-09-09, node v22.22.3, linux/x64)
 

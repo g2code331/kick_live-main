@@ -446,12 +446,15 @@ the environment may address, and `assertSupabaseUrl()` fails the request (500, l
 `SUPABASE_URL` disagrees — the failure mode the SPA had in Phase 1 (a silent fallback to another
 project) is not repeated server-side.
 
-**Secrets already in history.** The anon key + project URL appear in `repomix-output.xml` (a stale
-1.9 MB dump of the whole tree) and in git history of the deployment guides; both were public-by-design
-values, so no rotation is forced, but `repomix-output.xml` should be deleted or gitignored — it is a
-source-of-truth imposter. `git log -p` still contains the removed `rolePasswords` map, which is
-irrelevant only because that "secret" never protected anything; if a real credential is ever committed
-here, rotate it first and treat history rewriting as the second step.
+**Secrets already in history.** The anon key + project URL appeared in `repomix-output.xml` (a stale
+1.9 MB dump of the whole tree), in `.replit`, and in git history of the deployment guides; all three
+were public-by-design values, so no rotation is forced. **Closed 2026-09-13:** `repomix-output.xml`,
+`output.md`, `.replit`, `replit.md` and `replit.nix` are deleted and gitignored — the dump was a
+source-of-truth imposter and it also carried a real personal address copied out of the old admin
+bootstrap script, which is the kind of thing a `git grep` turns up for anyone who looks. Deleting a
+file does not delete a blob from history, so a committed _private_ value still has to be rotated first;
+`git log -p` still contains the removed `rolePasswords` map, which is irrelevant only because that
+"secret" never protected anything.
 
 **Deploy topology.** Web/PWA: `dist/web` → Cloudflare Pages (or Vercel today, per
 `ci/workflows/deploy-web.yml`), immutable hashed assets + `sw.js` at `max-age=0`. API:
@@ -846,10 +849,11 @@ Recorded here because "we could not get to it" is only honest when it names the 
 6. **No root `README.md` existed.** `DEPLOYMENT*.md`, five root SQL files and `docs/` were all reachable only by
    knowing the names. Written now, pointing at `docs/PRODUCTION_ARCHITECTURE.md` and `RELEASE_CHECKLIST.md`,
    because a new contributor's first question should not be answered by `replit.md`.
-7. **Stray generated files remain at the root** (`output.md`, `repomix-output.xml`, `replit.md`, `replit.nix`,
-   `.replit`). They are not referenced by the build; `supabase/README.md` already says the repomix dump is stale.
-   Deleting them is safe and was not done because this phase's mandate was "without deleting anything that may be
-   useful", and a stale-but-searchable tree dump is somebody's offline copy.
+7. **Stray generated files at the root — CLOSED 2026-09-13.** `output.md`, `repomix-output.xml`, `replit.md`,
+   `replit.nix` and `.replit` were left alone for as long as the mandate was "without deleting anything that may be
+   useful"; they are now deleted and gitignored. The one that mattered was `repomix-output.xml`: a whole-tree dump is
+   a snapshot of every mistake the tree ever made, and this one still contained the pre-hardening admin script with
+   its personal address in it.
 8. **The last three phases have never been applied to a database.** `node scripts/check-sql.mjs` needs
    `initdb`/`psql`, and this sandbox has neither, no container runtime, and no root. The paren linter, the
    catalog-level `do $verify$` blocks and the flows in `scripts/sql-flow.mjs` are what a real install will run
