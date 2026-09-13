@@ -134,7 +134,7 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || "eyJ…InJlZiI
 ```
 
 The fallback URL is project `xvksxqrmdbbinlrjctri`; the fallback key's `ref` claim is
-`fnefpcjeebawsebxjhcf` (the real project, the one `.replit` and the deployment guides use). So a build
+`opvkvbabryuipzwcanrv` (the real project, the one `.replit` and the deployment guides use). So a build
 that lost its env vars did not fail: it talked to **another** Supabase project with a key from a third.
 Which project got the writes depends on which fallback fired.
 

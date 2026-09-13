@@ -15,7 +15,7 @@ Two environments, always: **staging first, production second**. Everything below
 
 | thing                                                                  | status                                                                                             |
 | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| Supabase projects                                                      | both exist — staging `fnefpcjeebawsebxjhcf`, production `xvksxqrmdbbinlrjctri`                     |
+| Supabase projects                                                      | both exist — staging `opvkvbabryuipzwcanrv`, production `xvksxqrmdbbinlrjctri`                     |
 | Cloudflare KV `RATE_LIMIT_KV` (both envs)                              | created 2026-09-10, ids already wired in `workers/wrangler.toml`                                   |
 | Worker names (`kicklive-api`, `kicklive-api-staging`) and all `[vars]` | already in `workers/wrangler.toml`, per environment, with the right `SUPABASE_PROJECT_REF` per env |
 | Queues, R2 buckets, Worker secrets, Pages projects, GitHub env vars    | **not done** — that is steps 2, 4 and 5                                                            |

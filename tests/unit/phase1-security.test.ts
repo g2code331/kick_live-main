@@ -48,7 +48,7 @@ describe("supabase config resolution", () => {
   });
 
   it("reads the ref claim out of a key without verifying anything", () => {
-    assert.equal(refFromAnonKey(keyForRef("fnefpcjeebawsebxjhcf")), "fnefpcjeebawsebxjhcf");
+    assert.equal(refFromAnonKey(keyForRef("opvkvbabryuipzwcanrv")), "opvkvbabryuipzwcanrv");
     assert.equal(refFromAnonKey("garbage"), "");
   });
 
@@ -63,7 +63,7 @@ describe("supabase config resolution", () => {
     // that, loudly. It is a production bundle built from the staging pair: both values real, both matching
     // each other, every existing check green, and the deployed site quietly reads and writes another project.
     // `VITE_EXPECTED_PROJECT_REF` is what makes the bundle itself carry the answer to "which project am I?".
-    const staging = "fnefpcjeebawsebxjhcf";
+    const staging = "opvkvbabryuipzwcanrv";
     const prod = "xvksxqrmdbbinlrjctri";
     const ok = (ref: string) => ({ url: `https://${ref}.supabase.co`, anonKey: keyForRef(ref), expectedRef: ref });
     assert.doesNotThrow(() => assertSupabaseEnv(ok(prod)), "the right pair must build");
@@ -88,7 +88,7 @@ describe("supabase config resolution", () => {
     // are derived from workers/wrangler.toml — the same file the Worker is deployed from — so there is one
     // place a project's identity is written, and `web:env:check` fails CI if a mode file has gone stale.
     for (const [mode, ref] of [
-      ["staging", "fnefpcjeebawsebxjhcf"],
+      ["staging", "opvkvbabryuipzwcanrv"],
       ["production", "xvksxqrmdbbinlrjctri"],
     ] as const) {
       const text = fs.readFileSync(path.join(REPO, `.env.${mode}`), "utf8");

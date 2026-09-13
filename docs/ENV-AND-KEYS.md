@@ -35,11 +35,11 @@ cp .env.example .env.local
 ```
 
 Then fill two values. Both come from **one** Supabase project — project → Project Settings → API → _Project URL_ and
-_Project anon key_ (`sb_publishable_…` works too). The staging project for this repo is `fnefpcjeebawsebxjhcf`, production is
+_Project anon key_ (`sb_publishable_…` works too). The staging project for this repo is `opvkvbabryuipzwcanrv`, production is
 `xvksxqrmdbbinlrjctri`.
 
 ```bash
-VITE_SUPABASE_URL=https://fnefpcjeebawsebxjhcf.supabase.co
+VITE_SUPABASE_URL=https://opvkvbabryuipzwcanrv.supabase.co
 VITE_SUPABASE_ANON_KEY=eyJ…
 VITE_API_BASE_URL=
 ```
@@ -64,8 +64,8 @@ cp workers/.dev.vars.example workers/.dev.vars
 The values you need for a laptop that talks to **staging**:
 
 ```bash
-SUPABASE_URL=https://fnefpcjeebawsebxjhcf.supabase.co
-SUPABASE_PROJECT_REF=fnefpcjeebawsebxjhcf
+SUPABASE_URL=https://opvkvbabryuipzwcanrv.supabase.co
+SUPABASE_PROJECT_REF=opvkvbabryuipzwcanrv
 SUPABASE_ANON_KEY=<the same anon key as above>
 SUPABASE_SERVICE_ROLE_KEY=<Project Settings → API → service_role>
 SUPABASE_JWT_SECRET=<Project Settings → API → JWT Secret>
