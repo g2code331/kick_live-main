@@ -169,6 +169,13 @@ npx wrangler secret list --config workers/wrangler.toml --env production       #
 
 ## 5 · Pages: create the two projects, give CI the keys, deploy
 
+> **If the site already deployed and shows "KickLive is not configured"**, nothing is wrong with Pages: the bundle
+> was built without a Supabase pair. Two commands clear it —
+> `npm run build:web:staging && npx wrangler pages deploy dist/web --project-name kicklive-web-staging --branch main`
+> — and `npm run web:env:check` proves the repo is in step with `workers/wrangler.toml`. A bare `npm run
+build:web` can no longer emit a silently unconfigured bundle for a _staged_ project: a missing `.env.<mode>`
+> is now a build error, on purpose, because an artefact that boots into an error screen still deploys green.
+
 ```bash
 npx wrangler pages project create kicklive-web --production-branch main
 npx wrangler pages project create kicklive-web-staging --production-branch main
