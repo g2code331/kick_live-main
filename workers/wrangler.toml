@@ -187,11 +187,7 @@ AD_EVENTS_QUEUE_NAME = "kicklive-ad-events-staging"
 APP_ENV = "staging"
 SUPABASE_URL = "https://opvkvbabryuipzwcanrv.supabase.co"
 SUPABASE_PROJECT_REF = "opvkvbabryuipzwcanrv"
-<<<<<<< HEAD
-SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9wdmt2YmFicnl1aXB6d2NhbnJ2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkwNjIxNTAsImV4cCI6MjEwNDYzODE1MH0.BOudV9QzttItuN-Srb1jQmJAiO0MLhLKSsEuHh2BEKs"
-=======
-SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZuZWZwY2plZWJhd3NlYnhqaGNmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQwNDAyMTQsImV4cCI6MjA5OTYxNjIxNH0.YkPu5IxtEPZHK9i0oiMTRROrwCT3ZdF1RgCEhaqDhwo"
->>>>>>> origin/arena/01a08671-kick-live-main
+SUPABASE_ANON_KEY = "sb_publishable_PywK8NqUvS4KfLv0TktpVg_LUaXXBm6"
 # The staging SPA origin, plus the Arena/preview hosts used during review, each spelled exactly.
 ALLOWED_ORIGINS = "https://staging.kicklive.football"
 # Named environments do not inherit [vars], and MEDIA_MAX_BYTES lives here only so the ceiling is

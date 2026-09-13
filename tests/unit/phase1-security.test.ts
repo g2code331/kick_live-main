@@ -85,15 +85,6 @@ describe("supabase config resolution", () => {
   });
 
   it("the per-mode build config exists, is generated, and matches the Worker's own config", () => {
-<<<<<<< HEAD
-    // A build must not depend on an operator remembering to export a pair on the *build* line. The mode files
-    // are derived from workers/wrangler.toml — the same file the Worker is deployed from — so there is one
-    // place a project's identity is written, and `web:env:check` fails CI if a mode file has gone stale.
-    for (const [mode, ref] of [
-      ["staging", "opvkvbabryuipzwcanrv"],
-      ["production", "xvksxqrmdbbinlrjctri"],
-    ] as const) {
-=======
     // A build must not depend on an operator remembering to export a pair on the *build* line: that is how a
     // Pages deploy "succeeded" and served an unconfigured app. The mode files are derived from
     // workers/wrangler.toml, so there is one place a project's identity is written, and `web:env:check` fails CI
@@ -104,7 +95,6 @@ describe("supabase config resolution", () => {
     // red suite that tempts somebody to edit the assertion. What must never be true is a mode file whose three
     // values (URL, baked-in expected ref, key's `ref` claim) disagree — that is the 401.
     for (const mode of ["staging", "production"] as const) {
->>>>>>> origin/arena/01a08671-kick-live-main
       const text = fs.readFileSync(path.join(REPO, `.env.${mode}`), "utf8");
       const url = /^VITE_SUPABASE_URL=https:\/\/([a-z0-9]+)\.supabase\.co$/m.exec(text)?.[1];
       const expected = /^VITE_EXPECTED_PROJECT_REF=([a-z0-9]+)$/m.exec(text)?.[1];
