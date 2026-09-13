@@ -18,6 +18,19 @@ project's SQL editor (staging, then production) — step 3 of [`../docs/SETUP_WA
 | `../SUPABASE_COMPLETE_SCHEMA.sql`, `../SUPABASE_NEW_PROJECT_SETUP.sql`, `../supabase_migrations.sql` | **deleted 2026-09-12 — do not resurrect or run**        | The three superseded root files. They predate Phase 1, each with a weaker policy set, and every new-project incident started with someone pasting one. They now exist only in git history; anything reading this README should run `SETUP.sql` instead.                                                                                                                                                                                           |
 | `../CREATE_ADMIN_PROFILE.sql`                                                                        | bootstrap-only, review before running                   | Grants the _first_ admin from a SQL editor as a superuser: you edit one line, `p_email` (or `p_user_id`), and the script refuses placeholders, markdown-linked addresses and unknown accounts rather than guessing. Deliberately **not** in `SETUP.sql`: a generated bundle must not be able to mint an admin, and a paste-and-grant file has no name in it to begin with. Nothing in the app calls it; delete it once the instance has an admin. |
 
+## How this directory is tested, since reading SQL is not enough
+
+`npm run sql:run` applies the whole generated bundle to a real PostgreSQL (PGlite, WebAssembly — no server,
+no credentials) on a database that carries Supabase's client roles _and their default ALL privileges_, and it
+reports every statement that fails plus every verification block that raises. `npm run check:sql` uses the same
+engine when no DSN is configured, so a machine without a database still executes the SQL instead of only
+linting it. `tests/unit/sql-executes.test.mjs` asserts what the bundle must leave behind: profiles.role not
+writable by any client role, the ordinary profile edit still writable, no engine RPC reachable by `anon`, and
+`CREATE_ADMIN_PROFILE.sql` raising for each way it can be mis-edited. Three privilege defects in this directory
+were invisible to every static check and only appeared when a human pasted the bundle into the Supabase editor,
+which is the entire reason this exists. It is not a Supabase project — no PostgREST, so RLS is not enforced for
+the owner — and the behavioural flow still needs `check-sql.mjs --dsn`.
+
 ## How a grant is verified in this directory
 
 Every privilege assertion in the base schema and the migrations reads `pg_class.relacl` (tables), `pg_proc.proacl`

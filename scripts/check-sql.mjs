@@ -169,9 +169,24 @@ async function main() {
         "",
         "      It is deliberately not a hard dependency: the runtime is a Cloudflare Worker, which has",
         "      no database driver at all. Do not treat this SKIP as a pass — see docs/PRODUCTION_MIGRATION_PLAN.md.",
+        "",
+        "      Falling back to PGlite: the chain is executed on a real PostgreSQL (WebAssembly build, PG 18) on a",
+        "      database carrying Supabase's client roles *and their default ALL privileges*. That proves the SQL",
+        "      parses, applies, and that every verification block at the end of a migration tells the truth — the",
+        "      exact class of defect three privilege bugs hid from a text review and from 600 unit tests. It does",
+        "      not run RLS through PostgREST, so the behavioural flow still needs a DSN.",
       ].join("\n"),
     );
-    return 0;
+    // The PGlite half passes or fails for real, so its exit code is the report. It is not the whole check:
+    // the flow (save/refuse/serve) still needs a DSN, and a fallback that quietly became a "full pass" would
+    // be worse than the SKIP it replaced.
+    const { runOnPglite } = await import("./sql-pglite.mjs");
+    const local = await runOnPglite({ files: ["supabase/SETUP.sql"] });
+    if (local.skipped) {
+      console.log(`      PGlite unavailable (${local.note}) — nothing was executed, so this remains a SKIP.`);
+      return 0;
+    }
+    return local.ok ? 0 : 1;
   }
 
   if (!flag("allow-any-database") && !/(scratch|test|ci|local)/i.test(DSN)) {

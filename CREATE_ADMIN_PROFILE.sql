@@ -88,7 +88,35 @@ begin
    where u.id = v_user_id
   on conflict (id) do nothing;
 
-  update public.profiles set role = 'admin', updated_at = now() where id = v_user_id;
+  -- Grant it, through the supported path, then *verify the grant* rather than trusting that an UPDATE
+  -- affected a row. The two failure modes this closes are the ones that would otherwise come back as
+  -- "I ran it and nothing happened":
+  --   * the RPC is admin-only, so on a project with no admin yet the raw write is the bootstrap route — and if
+  --     the session is not a superuser, that raw write is refused by the guard trigger, which is the correct
+  --     answer but must be *said* rather than raised as a bare 42501;
+  --   * a profile row that does not exist (auth user created before the on-signup trigger, or a project where
+  --     the insert above was skipped) makes any UPDATE a silent no-op — `updated 0 rows` is not visible here.
+  if exists (select 1 from public.profiles where role = 'admin') then
+    begin
+      perform public.kicklive_set_user_role(v_user_id, 'admin');
+    exception when insufficient_privilege then
+      raise exception 'kicklive_set_user_role refused: the session running this script is not an admin. Run it as '
+        'postgres from the Supabase SQL editor, or promote an existing admin first.' using errcode = '42501';
+    end;
+  else
+    if not exists (select 1 from pg_roles where rolname = current_user and rolsuper) then
+      raise exception 'this is the first admin and the only supported writer (kicklive_set_user_role) needs one: '
+        'run this file as postgres in the SQL editor. Refusing to write public.profiles.role directly, because '
+        'that column is revoked from client roles on purpose.' using errcode = '42501';
+    end if;
+    update public.profiles set role = 'admin', updated_at = now() where id = v_user_id;
+  end if;
+
+  if not exists (select 1 from public.profiles where id = v_user_id and role = 'admin') then
+    raise exception 'the account % (id %) exists and the script ran, but profiles.role is still not admin — the row '
+      'was not written. Check that public.profiles has a row for this id and that the guard trigger has not refused '
+      'the write for a reason printed above.', v_email, v_user_id using errcode = 'P0002';
+  end if;
 
   raise notice 'admin granted to % (id %). Further role changes go through the admin UI (kicklive_set_user_role)',
     v_email, v_user_id;

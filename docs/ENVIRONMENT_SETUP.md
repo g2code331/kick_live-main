@@ -170,8 +170,8 @@ If you rename a queue, rename it in **both** places — `[vars].NOTIFICATION_QUE
 2. The JSON file never enters the repository or `wrangler.toml`:
 
    ```bash
-   npx wrangler secret put FCM_SERVICE_ACCOUNT --env production   # paste the file verbatim, one line
-   npx wrangler secret put FCM_PROJECT_ID --env production        # not a secret; a var is fine too
+   npx wrangler secret put FCM_SERVICE_ACCOUNT --config workers/wrangler.toml --env production   # paste the file verbatim, one line
+   npx wrangler secret put FCM_PROJECT_ID --config workers/wrangler.toml --env production        # not a secret; a var is fine too
    ```
 
    `check-secrets.mjs` fails the build if a `"type": "service_account"` document, a PEM header, or a

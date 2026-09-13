@@ -699,7 +699,7 @@ Required before any push leaves this code, in order, each one verifiable:
    `FCM_WEB_PUSH_CERTIFICATES` = the `publicVapidKey` Firebase shows you.
 2. For Android: `google-services.json` is a _client_ artifact (not this repo's). For iOS: upload the APNs
    key in Firebase — none of that is a Kick Live secret.
-3. Service account JSON → `npx wrangler secret put FCM_SERVICE_ACCOUNT_JSON --env production` (and staging).
+3. Service account JSON → `npx wrangler secret put FCM_SERVICE_ACCOUNT_JSON --config workers/wrangler.toml --env production` (and staging).
    The JSON must never be committed, uploaded to a gist, or put in `workers/.dev.vars` on a branch.
 4. `npx wrangler queues create kicklive-notifications` and `… kicklive-notifications-dlq`, per environment;
    paste the ids the command prints into the `[[queues.producers]]`/`[[queues.consumers]]` blocks (they are
@@ -733,7 +733,7 @@ node scripts/run-tests.mjs unit                      # incl. the five notificati
 node scripts/worker-local.mjs                        # :8787 with mock FCM (no credentials needed)
 curl -s localhost:8787/api/notifications/config       # public web config or {"configured":false}
 supabase/migrations/…phase5_notifications.sql        # run in the SQL editor; it self-verifies
-npx wrangler secret put FCM_SERVICE_ACCOUNT_JSON --env staging
+npx wrangler secret put FCM_SERVICE_ACCOUNT_JSON --config workers/wrangler.toml --env staging
 ```
 
 `scripts/worker-local.mjs` needs the `NOTIFICATION_QUEUE` binding to exist as an in-memory stand-in, which is

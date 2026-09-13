@@ -37,6 +37,12 @@
 -- ─────────────────────────────────────────────────────────────────────────────
 
 -- Order matters: revoke first so the column list is the whole grant, not an addition to an older one.
+-- anon first, and named: phase 1 §7 dropped the *policy* that let a browser read profiles, but a policy is not
+-- a grant, and the table-wide SELECT that Supabase's default privileges handed `anon` was still in relacl — which
+-- is exactly what this file's own verification caught when the bundle was executed against a real Postgres. The
+-- public surface is profiles_public; the base table has no reason to be readable by an anonymous role at any layer.
+revoke select on public.profiles from anon;
+revoke select on public.profiles from public;
 revoke select on public.profiles from authenticated;
 
 grant select (id, username, role, avatar_url, team_id, created_at, updated_at)

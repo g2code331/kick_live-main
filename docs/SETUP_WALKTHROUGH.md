@@ -115,7 +115,7 @@ The variables are already in `workers/wrangler.toml`; only the five secrets are 
 
 ```bash
 for s in SUPABASE_SERVICE_ROLE_KEY SUPABASE_JWT_SECRET TURNSTILE_SECRET_KEY FCM_SERVICE_ACCOUNT AD_VIEWER_KEY_SECRET; do
-  npx wrangler secret put "$s" --env staging
+  npx wrangler secret put "$s" --config workers/wrangler.toml --env staging
 done
 # repeat with --env production, using the PRODUCTION project's keys. Copy-paste of the wrong pair is the #1 incident in this repo's history.
 
@@ -131,13 +131,35 @@ that project or every send returns 403. Leave both unset and delivery silently u
 reason a green local run is not proof a push arrived. `TURNSTILE_SECRET_KEY` unset means the bot check is skipped: fine locally,
 not in production.
 
+### If a deploy warns that the remote config has `FCM_SERVICE_ACCOUNT` under `vars`
+
+That is not a formatting difference to click through. It means the service-account JSON was set as a **plain variable**, so the file's
+`private_key` was readable by anyone who could read the Worker's config, and it is in your terminal scrollback and in Cloudflare's
+deploy history. A deploy from a correct `wrangler.toml` **deletes it from vars and does not put it in secrets** — which is fine for
+the app (push silently falls back to the mock transport) and bad for the key, which stays exposed. So, in order:
+
+```bash
+npx wrangler secret list --config workers/wrangler.toml --env production | grep -c service_account   # want 0: a secret is a STRING
+# rotate: Firebase console → Project settings → Service accounts → Keys → add a new key, then delete the exposed one
+for s in FCM_SERVICE_ACCOUNT FCM_PROJECT_ID; do   # then set the replacement correctly —
+  npx wrangler secret list --config workers/wrangler.toml --env production | grep -q "$s" && echo "$s present"
+done
+npx wrangler deployments list --config workers/wrangler.toml --env production                          # the old version still holds the old vars
+```
+
+Delete any deploy/rollback version that carried it (dashboard → Workers → `kicklive-api` → Version history), because rotation only
+bounds the future. `check-secrets.mjs` already refuses to let a `"type": "service_account"` document into the repository; it cannot
+see what was set on an account, which is why this step is manual and named here.
+
 The literal file-by-file version — which of `.env.local`, `workers/.dev.vars`, `wrangler.toml`, `wrangler secret put` and the GitHub environments
 gets what, and how Firebase's two halves are split — is [`docs/ENV-AND-KEYS.md`](ENV-AND-KEYS.md).
 
 Then prove it answers:
 
 ```bash
-curl -s https://kicklive-api.<your-subdomain>.workers.dev/api/health          # {"ok":true,"env":"staging",…} for the staging worker
+# the deploy above prints the URL (`https://kicklive-api-<account>.workers.dev`) — copy that line, do not guess a subdomain:
+STAGING_URL=https://kicklive-api-staging.g2code332.workers.dev   # ← yours, from the deploy output
+curl -s "$STAGING_URL/api/health"   # want {"success":true,"data":{"status":"healthy","environment":"staging",…}}
 npx wrangler secret list --config workers/wrangler.toml --env production       # all five names present
 ```
 
@@ -148,13 +170,20 @@ npx wrangler pages project create kicklive-web --production-branch main
 npx wrangler pages project create kicklive-web-staging --production-branch main
 ```
 
-Deploy from your laptop now (one command, and you get a URL immediately). Staging is a separate **project**, not a separate branch —
-same as the CI workflow does it:
+Deploy from your laptop now (one command each, and you get a URL immediately). Staging is a separate **project**, not a separate
+branch — same as the CI workflow does it. Both `deploy` lines fail with `ENOENT … scandir '…/dist/web'` if the `build:web` above
+it has not run in the same shell — that is the usual reason a Pages project sits there created but with no URL, and the
+`probe-deploy.sh` check right below then reports FAIL for a project that is simply empty:
 
 ```bash
+# staging: build with the staging pair, then push the artefact
 VITE_SUPABASE_URL=https://fnefpcjeebawsebxjhcf.supabase.co VITE_SUPABASE_ANON_KEY=<staging anon key> npm run build:web
 npx wrangler pages deploy dist/web --project-name kicklive-web-staging --branch main
-npm run build:web        # plain, reads .env.local: must hold the PRODUCTION pair
+
+# production: the same two lines, with the production pair. Explicit, never "plain": a production bundle built from
+# a `.env.local` that still holds the staging pair is a failure this repo has already had once, and the boot guard
+# cannot catch it because both values are individually valid.
+VITE_SUPABASE_URL=https://xvksxqrmdbbinlrjctri.supabase.co VITE_SUPABASE_ANON_KEY=<production anon key> npm run build:web
 npx wrangler pages deploy dist/web --project-name kicklive-web --branch main
 ```
 

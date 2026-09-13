@@ -42,7 +42,7 @@ The project's SQL editor gets **one paste**: `supabase/SETUP.sql` (generated fro
       Supabase URL + ref + anon key (staging↔production cross-check: `docs/DEPLOYMENT_VERIFICATION.md` #14/#15)
 - [ ] Secrets, per environment: `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET`,
       `TURNSTILE_SECRET_KEY`, `FCM_SERVICE_ACCOUNT` (+ `FCM_PROJECT_ID` as a var once Firebase exists)
-- [ ] `npx wrangler secret list --env production` shows every one of them
+- [ ] `npx wrangler secret list --config workers/wrangler.toml --env production` shows every one of them
 - [ ] `npm run typecheck && npm run test:unit && npm run test:integration && npm run format:check` green
 - [ ] `(cd workers && npx wrangler deploy --dry-run --outdir /tmp/wd --env staging)` exit 0, no warnings
 

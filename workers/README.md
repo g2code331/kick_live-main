@@ -230,8 +230,8 @@ Then, in another terminal, `npm run dev` and open the admin "User Control" scree
 check_ panel calls `/api/health` and `/api/me` through the frontend client.
 
 ```bash
-npx wrangler secret put SUPABASE_JWT_SECRET     --env staging
-npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY --env staging
+npx wrangler secret put SUPABASE_JWT_SECRET --config workers/wrangler.toml --env staging
+npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY --config workers/wrangler.toml --env staging
 npm run worker:deploy:staging
 npm run worker:deploy:production
 ```

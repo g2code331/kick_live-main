@@ -146,7 +146,19 @@ describe("the browser cannot mint a role", () => {
       .filter((line) => !line.trim().startsWith("--"))
       .join("\n");
     assert.match(sql, /create or replace function public\.kicklive_guard_profile_privileges\(\)/);
-    assert.match(sql, /revoke update \(role\)\s+on public\.profiles from authenticated;/);
+    // This assertion used to pin `revoke update (role) on public.profiles from authenticated`, which looked
+    // right and did nothing: a column revoke cannot remove the table-wide `=arwdDxt` entry Supabase's default
+    // privileges create, and a table-wide UPDATE already covers every column. Executed on a real Postgres, the
+    // old statement left profiles.role writable; the narrowing call below is what actually closes it, so that is
+    // what is pinned now — the *mechanism*, not a spelling that was wrong.
+    assert.match(statements, /select public\.kicklive_narrow_column_grant\('update', 'public\.profiles', 'authenticated', array\['role', 'email'\]\)/);
+    assert.match(statements, /select public\.kicklive_narrow_column_grant\('update', 'public\.profiles', 'anon', array\['role', 'email'\]\)/);
+    assert.match(statements, /revoke update on public\.profiles from public;/);
+    assert.doesNotMatch(
+      statements,
+      /revoke update \(role\)\s+on public\.profiles from authenticated;/,
+      "a bare column revoke on a table Supabase granted ALL to is a statement that looks like a control and is not one",
+    );
     assert.match(sql, /profiles: authenticated read/);
     assert.doesNotMatch(statements, /drop\s+table|drop\s+column|\bdelete\s+from\b/i, "Phase 1 SQL must stay additive");
     assert.match(statements, /create table if not exists public\.access_requests/);
