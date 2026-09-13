@@ -1181,6 +1181,12 @@ revoke update (role), update (email) on public.profiles from public;
 -- has no Postgres between writing this SQL and applying it in a dashboard, so that sentence is the only layer
 -- that can catch an invented column name, and tests/unit/sql-shape.test.ts enforces it.
 --
+-- And `privilege_type` carries the LONG name, never the ACL letter: comparing 'X' or 'r' to it matches no row
+-- for any role, which reads as "not granted" — it silently vacuated every negative assertion in nine migrations
+-- and only the bundle's one positive assertion caught it ("the record function is not granted EXECUTE to
+-- authenticated", on a database where the grant had landed). The helper therefore takes the letter, translates
+-- it in one place where the legal set is knowable, and raises on anything that is neither.
+--
 -- Deliberately granted to PUBLIC: this is a catalog reader with no data in it, and it has to be callable
 -- from the least privileged session that exists. A verifier nobody may execute is a verifier that silently
 -- reports nothing — which is the bug this section replaces.
@@ -1197,7 +1203,37 @@ declare
   v_pro     oid;
   v_rel_acl aclitem[];
   v_col_acl aclitem[];
+  v_names   text[];
 begin
+  -- ACL letters, as they appear in the GRANT/REVOKE above each call site, translated to the long names
+  -- aclexplode() actually reports: SELECT / INSERT / UPDATE / DELETE / TRUNCATE / REFERENCES / TRIGGER /
+  -- USAGE / EXECUTE. The one-letter codes belong to acldefault() and to GRANT text, not to an exploded ACL;
+  -- comparing a letter there matches no row for anyone, which reads as 'not granted' — it vacuums
+  -- every negative assertion while dooming every positive one, and it did exactly that in this bundle. Call
+  -- sites keep the letters so a check still reads like the statement it verifies.
+  v_names := case lower(p_privilege)
+    when 'r' then array['SELECT']
+    when 'a' then array['INSERT']
+    when 'w' then array['UPDATE']
+    when 'd' then array['DELETE']
+    when 'D' then array['TRUNCATE']
+    when 'x' then array['REFERENCES']
+    when 't' then array['TRIGGER']
+    when 'U' then array['USAGE']
+    when 'X' then array['EXECUTE']
+    else
+      -- the long name itself is accepted, so a caller may be explicit instead
+      case when p_privilege = any (array['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER',
+                                        'USAGE','EXECUTE'])
+           then array[p_privilege]
+           else null end
+    end;
+  if v_names is null then
+    raise exception
+      'kicklive_has_grant: % is neither an ACL letter (r a w d D x t U X) nor a privilege name aclexplode can report',
+      coalesce(p_privilege, '''<null>''')
+      using errcode = '22023';
+  end if;
   v_rel := to_regclass(p_object);
   if v_rel is null then
     -- Not a relation this session can see, so it is a function signature: `public.f(integer)`. The same
@@ -1215,7 +1251,7 @@ begin
       select 1
         from pg_proc p
         join pg_roles r on r.rolname = p_role
-        join aclexplode(p.proacl) g on g.privilege_type = p_privilege
+        join aclexplode(p.proacl) g on g.privilege_type = any (v_names)
        where p.oid = v_pro
          and (g.grantee = r.oid or g.grantee = 0)   -- 0 is PUBLIC, which every role inherits
     );
@@ -1230,7 +1266,7 @@ begin
     return exists (
       select 1
         from pg_roles r
-        join aclexplode(v_rel_acl) g on g.privilege_type = p_privilege
+        join aclexplode(v_rel_acl) g on g.privilege_type = any (v_names)
        where r.rolname = p_role
          and (g.grantee = r.oid or g.grantee = 0)
     );
@@ -1241,7 +1277,7 @@ begin
   if v_rel_acl is not null and exists (
     select 1
       from pg_roles r
-      join aclexplode(v_rel_acl) g on g.privilege_type = p_privilege
+      join aclexplode(v_rel_acl) g on g.privilege_type = any (v_names)
      where r.rolname = p_role
        and (g.grantee = r.oid or g.grantee = 0)
   ) then
@@ -1260,7 +1296,7 @@ begin
   return exists (
     select 1
       from pg_roles r
-      join aclexplode(v_col_acl) g on g.privilege_type = p_privilege
+      join aclexplode(v_col_acl) g on g.privilege_type = any (v_names)
      where r.rolname = p_role
        and (g.grantee = r.oid or g.grantee = 0)
   );
@@ -1273,8 +1309,9 @@ comment on function public.kicklive_has_grant(text, text, text, text) is
   'Is there a real GRANT of this privilege to this role, ignoring the superuser and owner shortcuts? The only '
   'privilege question a migration can answer correctly from the SQL editor. p_object is a table/view '
   '(''public.profiles'') or a function identity signature (''public.f(integer)''), told apart by to_regclass; '
-  'p_privilege is an ACL letter (table/view r a w d D x t, sequence r w U, function X); p_column narrows a '
-  'table check to one column and reads pg_attribute.attacl as well as relacl.';
+  'p_privilege is an ACL letter (table/view r a w d D x t, sequence r w U, function X) or its long name: the letter '
+  'is translated because aclexplode() reports the long name. p_column narrows a table check to one column, read '
+  'from pg_attribute.attacl as well as relacl.';
 
 -- ============================================================================
 -- 3 · ANONYMOUS READS AND WRITES
@@ -3980,9 +4017,12 @@ begin
        and p.proname in ('kicklive_is_final_status','kicklive_competition_standings','kicklive_squad_sizes')
        -- read the ACL rather than has_function_privilege(): the latter is true for the superuser the SQL
        -- editor runs as, which would make this count 3 on a database where the grant never landed.
+       -- 'EXECUTE', not the 'X' of an ACL letter: aclexplode reports the long name, and a letter here would
+       -- make this count 0 and raise on a *correctly granted* database. That asymmetry is how the letter bug
+       -- was found at all — it is the one assertion in the bundle whose truth had to be a real yes.
        and exists (
          select 1 from pg_roles r, aclexplode(p.proacl) g
-          where r.rolname = 'anon' and g.privilege_type = 'X' and (g.grantee = r.oid or g.grantee = 0))
+          where r.rolname = 'anon' and g.privilege_type = 'EXECUTE' and (g.grantee = r.oid or g.grantee = 0))
   ) <> 3 then
     raise exception 'phase4 verification failed: anon cannot execute one of the read aggregates';
   end if;

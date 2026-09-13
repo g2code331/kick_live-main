@@ -51,6 +51,23 @@ The hole is real but narrow (a signed-in caller could EXECUTE an admin-only `kic
 which each still gates on `is_admin()` internally, so it was a second line of defence rather than a bypass),
 and it is the reason this class of assertion is now unreadable in any other shape.
 
+## Third fix on the same paste path: the ACL letter was compared to a privilege name
+
+`aclexplode()` reports `privilege_type` as a **long name** — `EXECUTE`, `SELECT`, `UPDATE` — while `r a w d D x t
+U X` are the codes used by `acldefault()` and GRANT/REVOKE text. The helper was asking `g.privilege_type =
+'EXECUTE'`-shaped questions with letters, so **no branch ever matched**: every negative assertion in the bundle
+("is it _still_ granted? raise if so") passed for free, and the one positive assertion in phase 3 ("is the record
+function _really_ granted to `authenticated`?") failed and aborted the apply. That failure is the good news: it
+is the first privilege assertion in this repository that could tell a grant from a missing one. `P0001` from
+`line 38` of a verify block was therefore never a hardening gap — the grant was in `proacl` the whole time.
+
+Fixed in one place: `public.kicklive_has_grant` translates the letter to the name and **raises** on an argument
+that is neither, so a wrong code is now an error rather than a silent false; call sites keep reading like the
+GRANT above them. Phase 4's one hand-written `aclexplode` read had the same defect and now compares `'EXECUTE'`.
+Two new `sql-shape` lints pin the shape (no comparison of `privilege_type` to anything but a real name; every
+`aclexplode` branch must filter through the translated set) and one pins that the migrations keep at least two
+positive assertions, since a suite of only negatives cannot detect a comparison that never matches.
+
 ## Re-verified again at `4d4fc7b` + the editor/gate follow-up
 
 Two SQL corrections landed after the paragraph above, both on the `SETUP.sql` apply path, both proven by paste:
@@ -67,7 +84,7 @@ fixes: `workers/tsconfig.json` (project detection, mirroring `tsconfig.workers.j
 (pin `typescript.tsdk` to the installed 5.9.3), `"baseUrl": "."` deleted from `tsconfig.base.json` rather than
 papered over with `ignoreDeprecations`, and a `gates.mjs` label that still called the Worker a skeleton.
 
-On that tree, re-run: unit **613/613** · integration **99/99** · `typecheck` clean for all four configs
+On that tree, re-run: unit **615/615** · integration **99/99** · `typecheck` clean for all four configs
 (`tsconfig.json`, `tsconfig.node.json`, `tsconfig.workers.json`, `workers/tsconfig.json`) · `format:check` clean ·
 `verify` **18/18** · `worker:routes -- --check` **101/101** · `gates --skip=6` **22 pass / 0 fail / 4 skip** ·
 `sql:bundle:check` current · `build:web` OK (77 files, 7.28 MiB) · `wrangler deploy --dry-run` **exit 0 for both
@@ -78,7 +95,7 @@ a push actually reaching a device — neither is possible in the sandbox that pr
 
 Still no Postgres, no Cloudflare credentials and no browser here, so `npm run check:sql` remains a loud `SKIP` and the five
 `REQUIRES TESTING` rows below stay where they are. What was re-run, on this exact tree, with exit codes preserved (not piped):
-`npm run test:unit` **613 pass / 0 fail** · `npm run test:integration` **99 pass / 0 fail** · `npm run typecheck` **0 errors**
+`npm run test:unit` **615 pass / 0 fail** · `npm run test:integration` **99 pass / 0 fail** · `npm run typecheck` **0 errors**
 · `npm run format:check` **clean** · `npm run verify` **18/18** (it typechecks the Worker now) · `npm run worker:routes -- --check` **101/101** ·
 `npm run sql:bundle:check` **SETUP.sql is current (10 sections)** · `npm run gates` **22 pass / 0 fail / 4 skip** ·
 `npm run build:web` ships `dist/web/{functions/[[catchall]].js,_routes.json,_headers}` · `npx wrangler deploy --dry-run` **exit 0
