@@ -223,6 +223,33 @@ function checkSqlExecutes() {
   return (parsed.failures || []).slice(0, 8).map((f) => `[${f.code}] ${f.file}: ${f.message}`);
 }
 
+/**
+ * A GitHub Actions file whose `${…}` expressions were mangled while writing it still *parses* as YAML — the
+ * damage looks like a plausible string value, and the failure only appears on the runner as "Unrecognized named-value"
+ * or an empty secret. This happened for real while authoring full-stack.yml, so it is now a check: any three
+ * consecutive asterisks inside a workflow is treated as exactly what it is, a redaction artefact that landed in
+ * a committed file.
+ */
+function checkWorkflowExpressions() {
+  const problems = [];
+  for (const rel of ["ci/workflows", ".github/workflows"]) {
+    const dir = path.join(REPO_ROOT, rel);
+    if (!fs.existsSync(dir)) continue;
+    for (const file of fs.readdirSync(dir).filter((f) => /\.ya?ml$/.test(f))) {
+      const text = fs.readFileSync(path.join(dir, file), "utf8");
+      const masked = (text.match(/\*{3}/g) || []).length;
+      if (masked) problems.push(`${rel}/${file}: ${String(masked)} run(s) of "***" — an expression was mangled in transit; rewrite the file and re-run npm run ci:install`);
+      // Every action expression must be closed on the same line it opens.
+      text.split("\n").forEach((line, i) => {
+        const opens = (line.match(/\$\{/g) || []).length;
+        const closes = (line.match(/\}/g) || []).length;
+        if (opens && closes < opens) problems.push(`${rel}/${file}:${String(i + 1)}: \${ opened ${String(opens)}x but only ${String(closes)} closing brace(s)`);
+      });
+    }
+  }
+  return problems;
+}
+
 export async function main() {
   const results = [];
   if (mode === "write") {
@@ -269,6 +296,11 @@ export async function main() {
     ["CI workflows (yaml + installed copy)", checkWorkflows()],
   ]) {
     results.push({ label, ok: problems.length === 0, code: problems.length === 0 ? 0 : 1, out: problems.join("\n") });
+  }
+
+  {
+    const probs = checkWorkflowExpressions();
+    results.push({ label: "workflow expressions intact (no masked $-braces)", ok: probs.length === 0, code: probs.length ? 1 : 0, out: probs.join("\n") });
   }
 
   const failed = results.filter((r) => !r.ok);

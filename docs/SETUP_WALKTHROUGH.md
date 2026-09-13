@@ -15,7 +15,7 @@ Two environments, always: **staging first, production second**. Everything below
 
 | thing                                                                  | status                                                                                             |
 | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| Supabase projects                                                      | both exist — staging `fnefpcjeebawsebxjhcf`, production `xvksxqrmdbbinlrjctri`                     |
+| Supabase projects                                                      | both exist — staging `opvkvbabryuipzwcanrv`, production `xvksxqrmdbbinlrjctri`                     |
 | Cloudflare KV `RATE_LIMIT_KV` (both envs)                              | created 2026-09-10, ids already wired in `workers/wrangler.toml`                                   |
 | Worker names (`kicklive-api`, `kicklive-api-staging`) and all `[vars]` | already in `workers/wrangler.toml`, per environment, with the right `SUPABASE_PROJECT_REF` per env |
 | Queues, R2 buckets, Worker secrets, Pages projects, GitHub env vars    | **not done** — that is steps 2, 4 and 5                                                            |
@@ -207,6 +207,31 @@ mode file is missing the build **refuses to run** rather than producing an empty
 **`https://kicklive-web.pages.dev` (and `-staging`) exists only after this first deploy** — before it the domain 404s and that is
 correct. Then `bash scripts/ci/probe-deploy.sh https://kicklive-web.pages.dev` must print PASS (routes served, missing hashed asset
 still a real 404, JS MIME type, no path traversal).
+
+## 5b · The pipeline: what a push to `main` now does by itself
+
+`ci/workflows/full-stack.yml` runs on every push to `main`, in this order, and it is the answer to "the repo was
+green and staging was still broken":
+
+1. **config** — `npm run pair:check` (one Supabase project per environment, across `workers/wrangler.toml` _and_
+   `.env.staging`/`.env.production`), `web:env:check`, `sql:bundle:check`, and both `wrangler deploy --dry-run`s.
+2. **test** — `npm run gates`, then `npm run sql:run`: the migration bundle is executed against a real Postgres before
+   anything is allowed to apply it for real.
+3. **provision** — `npm run cf:check` proves every queue, R2 bucket and KV namespace named by the config exists on the
+   account. `workflow_dispatch` with _apply_ creates the queues and buckets; a new KV is never auto-wired, because its
+   id has to land in `wrangler.toml` in a commit a human reviewed.
+4. **migrate** — applies `supabase/SETUP.sql` to staging with `psql --single-transaction -v ON_ERROR_STOP=1`, then
+   re-asserts the hardening _inside_ the database. Needs `SUPABASE_DB_PASSWORD` + `SUPABASE_STAGING_PROJECT_REF` on the
+   `staging` environment; without them the job **fails with the reason** rather than reporting a green "skipped".
+5. **deploy-staging** — `npm run worker:deploy:staging`, then `/api/health` is read back over HTTPS and must say
+   `"environment":"staging"`.
+6. **verify** — `scripts/ci/probe-deploy.sh` against `STAGING_WEB_URL` (set it as an environment _variable_, not a
+   secret, or the job says it skipped and why).
+7. **deploy-production** — only with `deploy_production=true` from a manual run, and only after `verify` is green.
+
+A push to `main` therefore deploys **staging** (both the SPA, by `deploy-web.yml`, and the Worker) and never touches
+production. Add a required reviewer on the `production` environment if you want an approval gate; the workflow already
+targets that environment name, so the rule applies without a code change.
 
 To make every future push deploy itself, create **GitHub → repository → Settings → Environments → `production` and `staging`**, and in
 each one add all four (production values in production, staging values in staging — the _Deploy web_ workflow reads its `VITE_*`

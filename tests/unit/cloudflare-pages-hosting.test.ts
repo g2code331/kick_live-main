@@ -62,11 +62,18 @@ describe("the web host is Cloudflare Pages, not Vercel", () => {
       assert.match(yml, /kicklive-web-staging/, "staging is its own Pages project (its own domains, its own VITE pair)");
       assert.match(yml, /CLOUDFLARE_API_TOKEN/, "auth is the API token, with a named ::error:: when missing");
       assert.match(yml, /probe-deploy\.sh/, "every deploy ends by probing the live URL — 404s stay 404s on the real host");
-      assert.match(
-        yml,
-        /environment: \$\{\{ github\.event\.inputs\.environment \|\| 'production' \}\}/,
-        "the VITE pair is scoped per GitHub environment so staging can never ship with prod keys by copy-paste",
+      // A push to `main` now targets STAGING by default; production is reached only by an explicit run (or the
+      // release workflow on a tag). Asserted on both jobs: a build job and a deploy job that disagreed about the
+      // default would deploy one environment and verify the other, which is worse than no automation at all.
+      assert.equal(
+        (yml.match(/environment: \$\{\{ github\.event\.inputs\.environment \|\| 'staging' \}\}/g) || []).length,
+        2,
+        "build and deploy must share one default target, and it must be staging",
       );
+      assert.ok(!/environment: \$\{\{ github\.event\.inputs\.environment \|\| 'production' \}\}/.test(yml), "no job may default to production any more");
+      assert.match(yml, /npm run "build:web:\$mode"/, "the pair comes from the mode file, so an unset secret cannot inline an empty value into the bundle");
+      assert.match(yml, /VITE_SUPABASE_URL: \$\{\{ secrets\.VITE_SUPABASE_URL \}\}/, "the VITE pair may still be scoped per GitHub environment, which is what separates staging from production");
+      assert.match(yml, /paths-ignore:/, "a docs-only push must not rebuild and redeploy the SPA");
     }
   });
 

@@ -22,8 +22,8 @@ this file is the proof-of-success.
 | 12 | Admin surface protected | `curl -s -o /dev/null -w '%{http_code}' $W/api/admin/users` (anon) and with a **fan** token | `401` anon; `403` fan; `200` admin — role comes from the profile row, never the request |
 | 13 | Authenticated API calls | with an admin token, one privileged write (e.g. a role change to yourself is refused, a team edit applies) | envelope `{ok:true,…}`; Monitoring panel shows a new audit row |
 | 14 | CORS rejects strangers | `curl -sI -H 'Origin: https://evil.example' $W/api/health \| grep -i access-control` | **no** `access-control-allow-origin` line for strangers; the configured origin sees itself back **[CI-adjacent]**: `phase2` tests pin this at unit level |
-| 15 | Production does not point at staging | `curl -s $W/ \| grep -c fnefpcjeebawsebxjhcf` (plus: Cloudflare dashboard → `kicklive-api` → production variables → `SUPABASE_URL`) | **0** in the bundle; variables name the `xvksxqrmdbbinlrjctri` project |
-| 16 | Staging does not point at production | same two greps against `staging.kicklive.football`, reversed | **0** hits for `xvksxqrmdbbinlrjctri` there; staging shows `fnefpcjeebawsebxjhcf` |
+| 15 | Production does not point at staging | `curl -s $W/ \| grep -c opvkvbabryuipzwcanrv` (plus: Cloudflare dashboard → `kicklive-api` → production variables → `SUPABASE_URL`) | **0** in the bundle; variables name the `xvksxqrmdbbinlrjctri` project |
+| 16 | Staging does not point at production | same two greps against `staging.kicklive.football`, reversed | **0** hits for `xvksxqrmdbbinlrjctri` there; staging shows `opvkvbabryuipzwcanrv` |
 
 ## Why #15/#16 are numbered last but feared most
 

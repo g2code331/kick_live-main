@@ -41,8 +41,14 @@ AD_EVENTS_QUEUE_NAME = "kicklive-ad-events-dev"
 #  into the notification fan-out. `tests/unit/phase2-api-boundary.test.ts` parses both sides of that
 #  sentence, so the pair cannot drift apart quietly.
 APP_ENV = "development"
-SUPABASE_URL = "https://fnefpcjeebawsebxjhcf.supabase.co"
-SUPABASE_PROJECT_REF = "fnefpcjeebawsebxjhcf"
+SUPABASE_URL = "https://opvkvbabryuipzwcanrv.supabase.co"
+SUPABASE_PROJECT_REF = "opvkvbabryuipzwcanrv"
+# Staging project moved on 2026-09-13 to the ref below (was fnefpcjeebawsebxjhcf). The anon key here is
+# still the OLD project's, and that is precisely what made every sign-in 401 — `npm run pair:check`
+# (scripts/check-project-pair.mjs) decodes this key's `ref` claim and refuses while they disagree, so it
+# cannot be left half-moved again. Paste the new project's key from Settings → API keys and re-run
+# `npm run web:env`; if the project has legacy API keys switched off, the value is the `sb_publishable_…`
+# string, not a JWT, and that is also accepted here.
 # Publishable/anon key: public by design (the browser ships it), safe in this file.
 SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZuZWZwY2plZWJhd3NlYnhqaGNmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQwNDAyMTQsImV4cCI6MjA5OTYxNjIxNH0.YkPu5IxtEPZHK9i0oiMTRROrwCT3ZdF1RgCEhaqDhwo"
 # Exact origins only; `*` is rejected by env.ts. These are the local SPA ports this repo uses.
@@ -176,8 +182,8 @@ AD_EVENTS_QUEUE_NAME = "kicklive-ad-events-staging"
 #  into the notification fan-out. `tests/unit/phase2-api-boundary.test.ts` parses both sides of that
 #  sentence, so the pair cannot drift apart quietly.
 APP_ENV = "staging"
-SUPABASE_URL = "https://fnefpcjeebawsebxjhcf.supabase.co"
-SUPABASE_PROJECT_REF = "fnefpcjeebawsebxjhcf"
+SUPABASE_URL = "https://opvkvbabryuipzwcanrv.supabase.co"
+SUPABASE_PROJECT_REF = "opvkvbabryuipzwcanrv"
 SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZuZWZwY2plZWJhd3NlYnhqaGNmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQwNDAyMTQsImV4cCI6MjA5OTYxNjIxNH0.YkPu5IxtEPZHK9i0oiMTRROrwCT3ZdF1RgCEhaqDhwo"
 # The staging SPA origin, plus the Arena/preview hosts used during review, each spelled exactly.
 ALLOWED_ORIGINS = "https://staging.kicklive.football"
