@@ -8,7 +8,8 @@ wildcard CORS exists anywhere.
 
 ## Step 1 — The cloud pieces once per environment
 
-Work through `docs/ENVIRONMENT_SETUP.md` §1–§4. It is one page per provider and lists every var, every
+If you are setting the account up from zero, `docs/SETUP_WALKTHROUGH.md` is the numbered version of these steps; read that, then
+come back here for the detail. Work through `docs/ENVIRONMENT_SETUP.md` §1–§4. It is one page per provider and lists every var, every
 secret, the six queue names, both buckets, and the (already-done) KV wiring. Short form: queues → R2
 (enable in dashboard, then create) → `supabase/SETUP.sql` into the project's SQL editor → Worker vars and
 secrets with `wrangler secret put`, per `--env`.

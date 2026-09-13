@@ -15,6 +15,9 @@ the rewrite/cache contract the old `vercel.json` encoded).
 
 ## One-time per environment
 
+For a fresh setup, follow [`docs/SETUP_WALKTHROUGH.md`](docs/SETUP_WALKTHROUGH.md) instead: same content, numbered so the order of
+operations is unambiguous. This page is the reference for each part.
+
 1. Cloudflare resources for the Worker — queues, R2 buckets, the `RATE_LIMIT_KV` namespaces — per
    `docs/ENVIRONMENT_SETUP.md` §1. The KV ids are already in `workers/wrangler.toml`.
 2. The database: paste `supabase/SETUP.sql` into the **staging** project's SQL editor, then the same file

@@ -43,8 +43,21 @@ describe("the web host is Cloudflare Pages, not Vercel", () => {
   });
 
   it("deploy-web.yml deploys Pages through wrangler, per GitHub environment, and probes afterwards", () => {
+    // `ci/workflows/` is the source of truth and is always asserted. `.github/workflows/` is a
+    // gitignored-by-choice install target that automation tokens are not allowed to push, so the
+    // rule there is "identical to its source" — which carries the Vercel-free guarantee without
+    // letting a stale installed copy read as a second, contradictory workflow.
     for (const rel of ["ci/workflows/deploy-web.yml", ".github/workflows/deploy-web.yml"]) {
-      const yml = read(rel);
+      const src = read("ci/workflows/deploy-web.yml");
+      if (rel.startsWith(".github/")) {
+        const installed = exists(rel) ? read(rel) : "";
+        assert.equal(
+          installed,
+          src,
+          `${rel} is out of sync with its source: run \`npm run ci:install\` and commit with \`git add -f .github/workflows\` (the deploy GitHub actually runs is the installed copy, so a drift here is a deploy of old code)`,
+        );
+      }
+      const yml = src;
       assert.ok(!/vercel/i.test(yml), `${rel}: no Vercel step survives in the web deploy`);
       assert.match(yml, /pages deploy dist\/web --project-name/, "deploy is `wrangler pages deploy` against a named project");
       assert.match(yml, /kicklive-web-staging/, "staging is its own Pages project (its own domains, its own VITE pair)");
@@ -62,8 +75,33 @@ describe("the web host is Cloudflare Pages, not Vercel", () => {
     const secrets = read("scripts/check-secrets.mjs");
     assert.ok(!/VERCEL_/.test(secrets), "the secrets registry must not list a host we do not deploy to");
     assert.match(secrets, /CLOUDFLARE_API_TOKEN/);
-    for (const rel of ["DEPLOYMENT.md", "docs/ENVIRONMENT_SETUP.md", "docs/DEPLOYMENT_VERIFICATION.md"]) {
+    for (const rel of ["DEPLOYMENT.md", "docs/ENVIRONMENT_SETUP.md", "docs/DEPLOYMENT_VERIFICATION.md", "docs/SETUP_WALKTHROUGH.md"]) {
       assert.match(read(rel), /Cloudflare Pages|pages deploy/, `${rel} documents the Pages path`);
+    }
+  });
+
+  it("the setup walkthrough is the one ordered path, and it cannot rot into the old file list", () => {
+    const walk = read("docs/SETUP_WALKTHROUGH.md");
+    // Every doc that lists next steps must offer the walkthrough first, or the reader is back to choosing between four files.
+    for (const rel of ["README.md", "DEPLOYMENT.md", "DEPLOYMENT_GUIDE.md", "DEPLOYMENT_CHECKLIST.md", "docs/ENVIRONMENT_SETUP.md"]) {
+      assert.match(read(rel), /SETUP_WALKTHROUGH\.md/, `${rel} must point at the numbered walkthrough`);
+    }
+    assert.match(walk, /^## 0 · /m, "step 0 exists so nobody recreates the resources that are already done");
+    for (const n of [1, 2, 3, 4, 5, 6, 7, 8, 9]) {
+      assert.ok(walk.includes(`## ${n} · `), `walkthrough lost step ${n}`);
+    }
+    assert.match(walk, /supabase\/SETUP\.sql/, "the database step is one paste");
+    assert.match(walk, /wrangler queues create kicklive-notifications-staging/);
+    assert.match(walk, /wrangler queues create kicklive-notifications-failed\b/, "all six queue names, spelled out");
+    assert.match(walk, /enable R2 through the Cloudflare Dashboard/, "the 10042 prerequisite is in the path, not in a footnote");
+    assert.match(walk, /kicklive-web-staging/, "staging is its own Pages project");
+    assert.match(walk, /pages\.dev[\s\S]{0,400}only after this first deploy/, "the pages.dev domain is expected only after a deploy");
+    assert.match(walk, /docs\/DEPLOYMENT_VERIFICATION\.md/, "step 7 hands off to the 16 checks");
+    assert.match(walk, /pages rollback/, "and the rollback answer lives in the same file as the deploy");
+    // The three deletions and the retirement are stated in the same voice everywhere, so a stale doc cannot re-ask for them.
+    assert.ok(!/vercel\.json[\s\S]{0,80}(deploy to|set up)/i.test(walk), "the walkthrough must not ask for a Vercel step");
+    for (const gone of ["SUPABASE_COMPLETE_SCHEMA.sql", "SUPABASE_NEW_PROJECT_SETUP.sql", "supabase_migrations.sql"]) {
+      assert.ok(!walk.includes(gone), `the walkthrough must not name ${gone}: it is deleted, and naming it re-creates the paste-the-wrong-file bug`);
     }
   });
 

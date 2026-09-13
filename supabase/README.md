@@ -7,7 +7,8 @@ review: fixing one file left four others that recreate it.
 
 ## Which file is authoritative
 
-One answer, generated from the others: **`SETUP.sql` is the only file a new project needs to run.**
+One answer, generated from the others: **`SETUP.sql` is the only file a new project needs to run.** You paste it whole into the
+project's SQL editor (staging, then production) — step 3 of [`../docs/SETUP_WALKTHROUGH.md`](../docs/SETUP_WALKTHROUGH.md).
 
 | File                                                                                                 | Status                                                  | What it is                                                                                                                                                                                                                                                                                                                  |
 | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

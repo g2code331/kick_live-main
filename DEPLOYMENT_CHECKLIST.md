@@ -2,7 +2,8 @@
 
 The production architecture is **Cloudflare Pages (frontend host) + a Cloudflare Worker (API) + Supabase
 (database and auth)**. There is no Vercel step; there has not been since 2026-09-12. `DEPLOYMENT.md` is the
-prose version of this list, and `docs/ENVIRONMENT_SETUP.md` is the full per-resource runbook.
+prose version of this list, `docs/ENVIRONMENT_SETUP.md` is the full per-resource runbook, and
+[`docs/SETUP_WALKTHROUGH.md`](docs/SETUP_WALKTHROUGH.md) is the numbered order of operations for a fresh setup.
 
 ## 🗄️ STEP 0: THE DATABASE — ONE FILE, PER ENVIRONMENT
 

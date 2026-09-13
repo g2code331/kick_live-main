@@ -27,6 +27,21 @@ and no root in this environment, so `initdb` is impossible.** That single fact i
 
 ---
 
+## Re-verified 2026-09-13 on the Pages + one-SQL-file tree
+
+Still no Postgres, no Cloudflare credentials and no browser here, so `npm run check:sql` remains a loud `SKIP` and the five
+`REQUIRES TESTING` rows below stay where they are. What was re-run, on this exact tree, with exit codes preserved (not piped):
+`npm run test:unit` **604 pass / 0 fail** · `npm run test:integration` **99 pass / 0 fail** · `npm run typecheck` **0 errors**
+· `npm run format:check` **clean** · `npm run verify` **17/17** · `npm run worker:routes -- --check` **101/101** ·
+`npm run sql:bundle:check` **SETUP.sql is current (10 sections)** · `npm run gates` **22 pass / 0 fail / 4 skip** ·
+`npm run build:web` ships `dist/web/{functions/[[catchall]].js,_routes.json,_headers}` · `npx wrangler deploy --dry-run` **exit 0
+for both `staging` and `production`**, bindings resolve, correct `SUPABASE_PROJECT_REF` per environment. `ci/workflows/*` (the four workflows,
+Vercel-free) is what a pushed branch ships: `.github/workflows/*` is the install target, deliberately
+unpushable by an automation token, so `npm run ci:install` + `git add -f .github/workflows` is step 1 of
+the walkthrough and the unit test fails with exactly that sentence if the two ever drift.
+
+---
+
 ## 1. SECURITY
 
 - `READY` — RLS enabled on every app table, and a repo-wide scan for `with check (true)` returns **0 hits**
@@ -75,15 +90,17 @@ and no root in this environment, so `initdb` is impossible.** That single fact i
 - `READY` — every phase migration ends with a `do $verify$` block that raises rather than installing quietly;
   phase 9's checks both new constraints and the grant loop's coverage, because that loop is `like`-pattern
   scoped and a function outside the pattern is invisible to it.
-- `READY` — `KICKLIVE_FINAL_SCHEMA.sql` is the labelled base; `SUPABASE_COMPLETE_SCHEMA.sql`,
-  `SUPABASE_NEW_PROJECT_SETUP.sql` and `supabase_migrations.sql` carry "SUPERSEDED — DO NOT RUN" banners, and
-  `supabase/README.md` is the index. **The deployment documents contradicted this until Phase 10**; both
-  `DEPLOYMENT_CHECKLIST.md` and `DEPLOYMENT_GUIDE.md` told an operator to paste a superseded file (which
-  re-opens privilege escalation). Fixed, and a test now fails if any deployment doc mentions those files without
-  a `do not / never / superseded` context.
-- `REQUIRES TESTING` — apply order on staging: base schema, then the nine files, then
-  `node scripts/check-sql.mjs --dsn … --fresh` and require `runFlow`, `runSponsorshipFlow`,
-  `runObservabilityFlow` to print `ALL PASS`. The last two have never been executed by anyone.
+- `READY` (2026-09-13) — **one file to run**: `supabase/SETUP.sql` is generated from `KICKLIVE_FINAL_SCHEMA.sql` + the nine
+  migrations in apply order (`npm run sql:bundle`, and `sql:bundle:check` — wired into `verify` — fails on drift). The three
+  superseded root files (`SUPABASE_COMPLETE_SCHEMA.sql`, `SUPABASE_NEW_PROJECT_SETUP.sql`, `supabase_migrations.sql`) are now
+  **deleted**, not banner-ed: an earlier pass left them in the tree with a warning and operators kept pasting them, which is how a
+  weaker policy set nearly re-landed. `supabase/README.md` is the index and says so.
+- `READY` (2026-09-13) — the bundle creates the tables **before** the `LANGUAGE sql` helpers that read `public.profiles`; that
+  ordering was a real paste failure on staging (`42P01`), Postgres validates `sql` bodies at `CREATE FUNCTION` time, and
+  `tests/unit/sql-shape.test.ts` now fails if a section ever reads a table created later.
+- `REQUIRES TESTING` — apply order on staging: paste `supabase/SETUP.sql`, then
+  `node scripts/check-sql.mjs --dsn … --allow-any-database` (never `--fresh` against a live project) and require `runFlow`,
+  `runSponsorshipFlow`, `runObservabilityFlow` to print `ALL PASS`. The last two have never been executed by anyone.
 - `REQUIRES TESTING` — phase 8/9/10 seed data: rate-card prices in `sponsorship_packages` must be reviewed
   against the real contracts, and `observability_config`'s buckets/thresholds (`p95_alert 1500 ms`,
   `error_rate_alert 0.05`, `rollup 14 d`, `daily 400 d`, `audit_retention 0`) are engineering defaults, not a
@@ -285,12 +302,21 @@ kicklive-media-staging`, `kicklive-media`) — but R2 must be enabled on the acc
 - `READY` — every resource, variable and secret is listed with its command in
   [`docs/ENVIRONMENT_SETUP.md`](docs/ENVIRONMENT_SETUP.md), including the names that must match each other across
   files (`NOTIFICATION_QUEUE_NAME` vs the `[[env.*.queues]]` blocks, and the KV id after you create it).
-- `READY` — documented order: migrations (base + nine, filename order) → Worker (`wrangler deploy`, then
-  `--env staging|production` per `workers/README.md`) → web (`npm run build:web` → Cloudflare Pages,
-  `public/functions` + `_routes.json` for the SPA fallback, same zone so `/api` is same-origin) → smoke
-  (`GET /api/health`, the Monitoring panel, one upload, one
-  push). `DEPLOYMENT.md`, `DEPLOYMENT_GUIDE.md` and `DEPLOYMENT_CHECKLIST.md` describe this repository, and
-  their schema steps were corrected in Phase 10 to stop naming a superseded file.
+- `READY` — documented order: one SQL paste (`supabase/SETUP.sql`) → Worker (`wrangler deploy --env staging|production`) → web
+  (`npm run build:web` → Cloudflare Pages, `public/functions/[[catchall]].js` + `_routes.json` + `_headers` for the SPA fallback and
+  cache contract, same zone so `/api` is same-origin) → smoke (`GET /api/health`, the Monitoring panel, one upload, one push).
+  `DEPLOYMENT.md`, `DEPLOYMENT_GUIDE.md` and `DEPLOYMENT_CHECKLIST.md` describe this repository, and
+  [`docs/SETUP_WALKTHROUGH.md`](docs/SETUP_WALKTHROUGH.md) is the numbered order of operations for a fresh account (a test pins that
+  the walkthrough, and every doc that offers next steps, point at Pages and at `SETUP.sql` only).
+- `READY` (2026-09-13) — **the web host is Cloudflare Pages; Vercel is not in the architecture.** `vercel.json`/`.vercel/` are
+  deleted, `check-secrets.mjs` asks for `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID` instead of `VERCEL_*`, the _Deploy web_
+  workflow runs `wrangler pages deploy dist/web --project-name kicklive-web[-staging]` and ends with `probe-deploy.sh` against the
+  live URL, and `npm run verify` fails the build if a blanket `public/_redirects` ever comes back (that is how a stale asset hash
+  turns into an HTML-200 and pins a dead PWA shell).
+- `READY` (2026-09-13) — a post-deploy proof sheet exists: `docs/DEPLOYMENT_VERIFICATION.md`, 16 numbered checks with one command
+  each (routes, assets-and-404s, `/api/health` + `x-ratelimit-store: kv`, auth, public data, websocket, offline replay, PWA,
+  service worker, admin surface, CORS rejection, and both staging↔production cross-reference greps), plus the one-command Pages
+  rollback. Nothing in it has been run against a live host from this workspace — there are no Cloudflare credentials here.
 - `REQUIRES CONFIGURATION` — every var and secret listed in `.env.example` and `workers/.dev.vars.example`
   (which is now complete through phase 9, including `AD_VIEWER_KEY_SECRET` and `LOG_MODE`); the Vite build
   refuses a mismatched ref/key pair, so a half-configured deploy fails loudly.

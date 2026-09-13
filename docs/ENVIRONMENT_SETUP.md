@@ -2,7 +2,8 @@
 
 This is the whole configuration surface, in the order that works, for a fresh install or for taking this
 repository onto `main`. Nothing here is optional-by-taste: each row is either needed to boot, needed to make a
-feature real, or explicitly marked "leave unset" with what happens if you do.
+feature real, or explicitly marked "leave unset" with what happens if you do. If you just want to get a fresh account live, follow
+[`SETUP_WALKTHROUGH.md`](SETUP_WALKTHROUGH.md) and treat this file as the explanation of each row.
 
 Sources of truth, in case this file and the code disagree (the code wins):
 
@@ -21,7 +22,7 @@ Sources of truth, in case this file and the code disagree (the code wins):
 ```bash
 git fetch origin
 git checkout main
-git merge --ff-only origin/arena/01a095cb-kick-live-main || git merge origin/arena/01a095cb-kick-live-main
+git merge --ff-only origin/arena/01a08671-kick-live-main || git merge origin/arena/01a08671-kick-live-main
 npm ci
 npm run typecheck && npm run test:unit && npm run test:integration && npm run format:check
 npm run ci:check            # must be silent: the four workflows ride on main since 2026-09-12; if it
