@@ -231,10 +231,18 @@ revoke update (role), update (email) on public.profiles from public;
 -- anything. An assertion that cannot fail is worse than no assertion: it is the reason the privilege work in
 -- three phases of this repository was never actually proven.
 --
--- The catalog does not care what role the editor runs as. `relacl`/`proacl` record what was granted, to whom,
--- which is exactly the property these verify blocks claim, so that is what they read now. A NULL ACL means
--- "owner only, no explicit grants to anyone", which is answered false for every non-owner: the same answer a
--- real non-superuser client would get.
+-- The catalog does not care what role the editor runs as. `pg_class.relacl` records what was granted on a
+-- table, `pg_proc.proacl` what was granted on a function, `pg_attribute.attacl` what was granted on one column,
+-- which is exactly the property these verify blocks claim. A NULL ACL means "owner only, no explicit grants to
+-- anyone", answered false for every non-owner: the same answer a real non-superuser client would get.
+--
+-- Column grants are the part that cannot be guessed, and the reason this helper has now been wrong twice. They
+-- are NOT entries inside `relacl` marked with a column number: a per-column `grant update (role) on profiles`
+-- lives in `pg_attribute.attacl` for that column, and a table-wide grant covers every column of it. So a
+-- column check consults both, in that order. `aclexplode()` yields exactly four columns — grantor, grantee,
+-- privilege_type, is_grantable — and nothing that names a fifth is a valid reading of an ACL. This repository
+-- has no Postgres between writing this SQL and applying it in a dashboard, so that sentence is the only layer
+-- that can catch an invented column name, and tests/unit/sql-shape.test.ts enforces it.
 --
 -- Deliberately granted to PUBLIC: this is a catalog reader with no data in it, and it has to be callable
 -- from the least privileged session that exists. A verifier nobody may execute is a verifier that silently
@@ -245,47 +253,79 @@ create or replace function public.kicklive_has_grant(
 )
 returns boolean
 language plpgsql stable
+set search_path = pg_catalog
 as $hg$
 declare
-  v_acl  aclitem[];
-  v_rel  oid;
+  v_rel     oid;
+  v_pro     oid;
+  v_rel_acl aclitem[];
+  v_col_acl aclitem[];
 begin
-  v_rel := pg_catalog.to_regclass(p_object);
+  v_rel := to_regclass(p_object);
   if v_rel is null then
     -- Not a relation this session can see, so it is a function signature: `public.f(integer)`. The same
     -- shape `has_function_privilege()` took, which is what lets a call site be converted by renaming the
     -- function and nothing else — a mechanical diff is an auditable diff.
-    select proacl into v_acl
-      from pg_catalog.pg_proc
-     where oid = pg_catalog.to_regprocedure(p_object);
-  else
-    select relacl into v_acl
-      from pg_catalog.pg_class
-     where oid = v_rel;
+    v_pro := to_regprocedure(p_object);
+    if v_pro is null then
+      -- Loud on purpose. Both lookups answering NULL means the name is wrong, and a helper that returned
+      -- false here would make every negative assertion about that object pass for free — the exact failure
+      -- mode this whole section replaced. A verifier must be unable to certify a typo.
+      raise exception 'kicklive_has_grant: % matches neither a relation nor a function identity', p_object
+        using errcode = '42704';
+    end if;
+    return exists (
+      select 1
+        from pg_proc p
+        join pg_roles r on r.rolname = p_role
+        join aclexplode(p.proacl) g on g.privilege_type = p_privilege
+       where p.oid = v_pro
+         and (g.grantee = r.oid or g.grantee = 0)   -- 0 is PUBLIC, which every role inherits
+    );
   end if;
 
-  if v_acl is null then
-    return false;                      -- owner-only: nothing is granted to anybody explicitly
+  select c.relacl into v_rel_acl from pg_class c where c.oid = v_rel;
+
+  if p_column is null then
+    if v_rel_acl is null then
+      return false;                  -- owner-only: nothing is granted to anybody explicitly
+    end if;
+    return exists (
+      select 1
+        from pg_roles r
+        join aclexplode(v_rel_acl) g on g.privilege_type = p_privilege
+       where r.rolname = p_role
+         and (g.grantee = r.oid or g.grantee = 0)
+    );
   end if;
 
-  if p_column is not null and not exists (
-    select 1 from pg_catalog.pg_attribute
-     where attrelid = v_rel and attname = p_column
+  -- A table-wide grant covers every column, so it is asked first; a column-specific grant is the only thing
+  -- that can override it in the other direction, and it is read from that column's attacl.
+  if v_rel_acl is not null and exists (
+    select 1
+      from pg_roles r
+      join aclexplode(v_rel_acl) g on g.privilege_type = p_privilege
+     where r.rolname = p_role
+       and (g.grantee = r.oid or g.grantee = 0)
   ) then
+    return true;
+  end if;
+
+  select a.attacl into v_col_acl
+    from pg_attribute a
+   where a.attrelid = v_rel and a.attname = p_column and not a.attisdropped;
+  if not found then
+    return false;                    -- not a column of this relation: no grant on it can exist
+  end if;
+  if v_col_acl is null then
     return false;
   end if;
-
   return exists (
     select 1
-      from pg_catalog.pg_roles r
-      join pg_catalog.aclexplode(v_acl) g on g.privilege_type = p_privilege
+      from pg_roles r
+      join aclexplode(v_col_acl) g on g.privilege_type = p_privilege
      where r.rolname = p_role
-       and (g.grantee = r.oid or g.grantee = 0)     -- 0 is PUBLIC, which every role inherits
-       -- A grant on the whole table (objid = 0) covers the column; a grant on some other column does not.
-       and (g.objid = 0
-            or (p_column is not null and g.objid = (
-                  select c.attnum from pg_catalog.pg_attribute c
-                   where c.attrelid = v_rel and c.attname = p_column)))
+       and (g.grantee = r.oid or g.grantee = 0)
   );
 end;
 $hg$;
@@ -296,7 +336,8 @@ comment on function public.kicklive_has_grant(text, text, text, text) is
   'Is there a real GRANT of this privilege to this role, ignoring the superuser and owner shortcuts? The only '
   'privilege question a migration can answer correctly from the SQL editor. p_object is a table/view '
   '(''public.profiles'') or a function identity signature (''public.f(integer)''), told apart by to_regclass; '
-  'p_privilege is an ACL letter (r a w d D x t X); p_column narrows a table check to one column.';
+  'p_privilege is an ACL letter (table/view r a w d D x t, sequence r w U, function X); p_column narrows a '
+  'table check to one column and reads pg_attribute.attacl as well as relacl.';
 
 -- ============================================================================
 -- 3 · ANONYMOUS READS AND WRITES
@@ -759,13 +800,13 @@ begin
     raise notice 'phase 1 verify: applying as the superuser %; privilege checks here read relacl/proacl, not has_*_privilege()', current_user;
   end if;
 
-  if public.kicklive_has_grant('authenticated', 'public.profiles', 'U', 'role') then
+  if public.kicklive_has_grant('authenticated', 'public.profiles', 'w', 'role') then
     raise exception 'hardening failed: profiles.role is still granted UPDATE to authenticated — revoke did not land';
   end if;
-  if public.kicklive_has_grant('anon', 'public.profiles', 'U', 'role') then
+  if public.kicklive_has_grant('anon', 'public.profiles', 'w', 'role') then
     raise exception 'hardening failed: profiles.role is still granted UPDATE to anon';
   end if;
-  if public.kicklive_has_grant('authenticated', 'public.profiles', 'U', 'email') then
+  if public.kicklive_has_grant('authenticated', 'public.profiles', 'w', 'email') then
     raise exception 'hardening failed: profiles.email is still granted UPDATE to authenticated';
   end if;
 end;

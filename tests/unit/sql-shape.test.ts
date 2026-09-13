@@ -325,9 +325,66 @@ describe("privilege assertions in the migrations read the catalog, not the super
     const p1 = fs.readFileSync(path.join(MIGRATIONS_DIR, "20260909120000_phase1_security_hardening.sql"), "utf8");
     assert.match(p1, /create or replace function public\.kicklive_has_grant\(/, "the helper is defined in the first migration, before anything uses it");
     assert.match(p1, /grant execute on function public\.kicklive_has_grant\(text, text, text, text\) to public;/, "a verifier an operator cannot call is a verifier that reports nothing");
-    assert.match(p1, /select relacl into v_acl|from pg_catalog\.pg_class/, "it reads pg_class.relacl");
-    assert.match(p1, /aclexplode\(v_acl\)/, "and pg_proc.proacl, through aclexplode — no has_*_privilege anywhere");
-    assert.match(p1, /if v_acl is null then\s*\n\s*return false;/, "a NULL ACL (owner-only) must answer false for non-owners, not error");
+    // The needles name the helper's own shapes rather than `pg_catalog.`-qualified spellings: the helper pins
+    // `set search_path = pg_catalog`, so every catalog reference inside it is deliberately unqualified.
+    assert.match(p1, /select c\.relacl into v_rel_acl\s+from pg_class/, "it reads pg_class.relacl");
+    assert.match(p1, /join aclexplode\(/, "and pg_proc.proacl / pg_attribute.attacl through aclexplode — no has_*_privilege anywhere");
+    assert.ok((p1.match(/aclexplode\(/g) ?? []).length >= 4, "each of the four ACL paths (function, table, table-wide-covers-column, column) explodes its own ACL");
+    assert.match(p1, /if v_rel_acl is null then\s*\n\s*return false;/, "a NULL ACL (owner-only) must answer false for non-owners, not error");
+  });
+
+  it("the helper reads real catalog columns, in the place the privileges actually live", () => {
+    // Written after two failed attempts, both of them invisible to every check this repository has: first the
+    // superuser shortcut, then a join on `g.objid`, a column `aclexplode()` does not expose. Neither could be
+    // found without a Postgres, and there is no Postgres between writing this SQL and applying it in a
+    // dashboard — so the shape rules below are that missing database, and they are deliberately strict about
+    // names rather than about behaviour.
+    const p1 = fs.readFileSync(path.join(MIGRATIONS_DIR, "20260909120000_phase1_security_hardening.sql"), "utf8");
+    const body = p1.slice(p1.indexOf("create or replace function public.kicklive_has_grant("), p1.indexOf("$hg$;\n"));
+    assert.ok(body.length > 200, "the helper body must be findable — if the dollar-quote tag changed, update this test and the comment explaining why");
+
+    for (const bad of ["objid", "privtype", "is_grantable", "aclvisible", "grantor_oid", "colid"]) {
+      assert.ok(!new RegExp(`g\\.${bad}\\b`).test(body), `aclexplode() has no \${bad} column — its output is grantor, grantee, privilege_type, is_grantable, and nothing else`);
+    }
+    for (const good of ["g.grantee", "g.privilege_type"]) {
+      assert.ok(body.includes(good), `the helper must read ${good} from aclexplode, not re-derive it`);
+    }
+
+    // A per-column GRANT is stored on the column, not as a marked-up entry on the table: asking relacl alone
+    // about a column answers "not granted" whatever the truth is.
+    assert.match(body, /from pg_attribute/i, "column privileges live in pg_attribute.attacl; the helper must consult it");
+    assert.match(body, /attacl/i, "and it must name the column it reads");
+    assert.ok(/not found/.test(body) && /attisdropped/.test(body), "a column that is not there answers false, and a dropped one is not a column");
+
+    // A helper that returns false for an unresolvable name certifies a typo'd revoke as hardened.
+    assert.match(body, /raise exception[^;]*matches neither a relation nor a function identity/, "an unknown p_object must raise, not answer false");
+
+    // `set search_path = pg_catalog` is not decoration here: the helper runs inside every verify block, and a
+    // role able to create a `pg_roles` in an earlier path schema would otherwise decide what every assertion sees.
+    assert.match(body, /set search_path = pg_catalog/, "catalog readers pin their own search_path");
+  });
+
+  it("every call site asks with a code the object kind can hold", () => {
+    // 'U' on a table column was the second bug: USAGE is a sequence/function letter, so the join matched no
+    // aclitem and the assertion could not fire for any reason at all. A code that cannot exist is not a false
+    // check, it is no check.
+    const CODES = { rel: "arwdDxt", seq: "rwU", func: "X" };
+    const offenders: string[] = [];
+    for (const f of fs
+      .readdirSync(MIGRATIONS_DIR)
+      .filter((x) => x.endsWith(".sql"))
+      .sort()) {
+      const raw = fs.readFileSync(path.join(MIGRATIONS_DIR, f), "utf8");
+      const executable = raw
+        .split("\n")
+        .map((line) => line.replace(/--.*$/, ""))
+        .join("\n");
+      for (const m of executable.matchAll(/kicklive_has_grant\(\s*'[^']+'\s*,\s*'([^']+)'\s*,\s*'([^']*)'/g)) {
+        const kind = m[1].includes("(") ? "func" : /_(?:seq|sequences)$/.test(m[1]) ? "seq" : "rel";
+        if (!CODES[kind].includes(m[2])) offenders.push(`${f}: ${m[1]} asked with '${m[2]}' — a ${kind} holds [${CODES[kind].split("").join(" ")}]`);
+      }
+    }
+    assert.deepEqual(offenders, [], "privilege codes must match the object kind, or the check passes without looking");
   });
 
   it("a `from public` revoke never stands alone where the same file grants a client role", () => {
