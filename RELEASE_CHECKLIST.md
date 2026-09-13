@@ -27,6 +27,45 @@ and no root in this environment, so `initdb` is impossible.** That single fact i
 
 ---
 
+## A push to `main` now builds, provisions, migrates and deploys — to staging
+
+`ci/workflows/full-stack.yml` (installed to `.github/workflows/`, `npm run ci:check` keeps the copies identical)
+runs the whole chain a human was previously doing by hand, in the order that makes each step's absence visible:
+pair check → gates + `sql:run` (the migrations _executed_) → Cloudflare provisioning → staging migrations via
+`psql --single-transaction` → the staging Worker → a probe of the live URL → **only then**, and only with an
+explicit `deploy_production=true`, the production Worker. `deploy-web.yml` still owns Pages; its default target
+moved from `production` to `staging`, so a push cannot deploy production by default while a build job and a
+deploy job could not disagree about which environment they were serving. Production remains a deliberate act, the
+same way the stable update channel is.
+
+**Why the config job exists first.** Staging's Supabase project was moved to `opvkvbabryuipzwcanrv`, the URL was
+updated, the anon key was not — and every check in the repository called that valid, because each value is
+individually well-formed. The user-visible symptom was `POST /auth/v1/signup → 401 (Unauthorized)`. So:
+
+- `scripts/check-project-pair.mjs` (`npm run pair:check`) reads **all three** values in every environment of
+  `workers/wrangler.toml` and every generated `.env.<mode>`, decodes the key's `ref` claim, and refuses any triple
+  that does not name one project. This is the only check that fails on the exact state above.
+- `npm run web:env` _refuses to write_ a mismatched pair rather than propagating it into the browser bundle, and
+  `web:env:check` now distinguishes the two states honestly: a mode file that is **wholly** one revision behind is
+  a documented lag with a note (a working app pointed at the old database), while a **half-moved** file is fatal.
+  The difference between those is precisely the difference between "annoying" and "401 on the login page".
+- `src/lib/env.ts` gained a fourth boot rule: a JWT-shaped key whose payload has no usable `ref` is called out as
+  the legacy-key/`sb_publishable_…` confusion rather than being sent to GoTrue to fail opaquely.
+- `scripts/provision-cloudflare.mjs` (`npm run cf:check` / `cf:provision`) derives queues, R2 buckets and KV
+  namespaces **from the config** rather than restating them, so a binding added to `wrangler.toml` without a
+  `queues create` is a red check instead of a queue that silently never exists. It never deletes, and it will not
+  paste a new KV id into the config for you — that is a commit a human reviews.
+- `verify` is **21 checks** (was 20): the workflow-expression check exists because writing a workflow through a
+  tool that redacts `${…}` produced exactly the file that parses as YAML and fails on the runner. `ci:check`
+  cannot see that; now something does.
+
+**Still an operator action, and only an operator can do it:** paste the new staging project's anon key into
+`[env.staging.vars].SUPABASE_ANON_KEY`, run `npm run web:env`, commit both files; then in GitHub → Settings →
+Environments create **`staging`** (it does not exist yet) with `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`,
+`SUPABASE_DB_PASSWORD`, `SUPABASE_STAGING_PROJECT_REF=opvkvbabryuipzwcanrv` and the variable `STAGING_WEB_URL`,
+and optionally a required reviewer on `production`. This session's GitHub token is read-only for
+environments/secrets (`401` on create), so those four things cannot be done from here.
+
 ## Fixed 2026-09-13: the privilege self-checks could not see what they were checking
 
 Caught by an operator, not by the suite: pasting `supabase/SETUP.sql` into the Supabase SQL editor raised

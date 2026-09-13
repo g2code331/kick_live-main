@@ -5,12 +5,18 @@
 name: Deploy web
 
 on:
+  # A push to main deploys STAGING automatically. Production is not auto-deployed by a push: it is reached by an
+  # explicit run (workflow_dispatch, or the release workflow on a tag) and, if you configure Environment
+  # protection rules on the `production` environment, by a required approval. The reason is the same one the
+  # repo already applies to the stable update channel — an artefact that a build produced is not automatically
+  # an artefact somebody agreed to ship.
   push:
     branches: [main]
     paths-ignore:
       - "docs/**"
       - "packaging/**"
       - "*.md"
+      - "supabase/**"
   workflow_dispatch:
     inputs:
       environment:
@@ -33,11 +39,15 @@ jobs:
     name: Build dist/web (${{ github.event.inputs.environment || 'production' }})
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    # The GitHub environment also scopes the two VITE_ secrets: the staging bundle must be built against
-    # the staging Supabase project and the production bundle against production, from the same commit.
-    # A mix-up here is not caught later (the SPA happily boots against the wrong project), which is why
-    # VITE_SUPABASE_URL's ref and SUPABASE_PROJECT_REF are checked by src/lib/env.ts at boot too.
-    environment: ${{ github.event.inputs.environment || 'production' }}
+    # On a push (no `environment` input) the target is STAGING — see the trigger note above.
+    #
+    # The build is mode-scoped (`.env.staging` / `.env.production`, generated from workers/wrangler.toml) and the
+    # GitHub environment may still override the same two names. Overriding is what makes a staging bundle and a
+    # production bundle from ONE commit possible; the mode file is what makes "the operator forgot to export a
+    # pair" impossible. Both are checked, and src/lib/env.ts then refuses at boot on any disagreement between
+    # the URL, the key's `ref` claim and the VITE_EXPECTED_PROJECT_REF the mode file bakes in — a 401 from
+    # GoTrue on the login page is the symptom of that disagreement, which is what this comment is for.
+    environment: ${{ github.event.inputs.environment || 'staging' }}
     outputs:
       version: ${{ steps.ver.outputs.version }}
     steps:
@@ -49,9 +59,19 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - name: "Secrets audit (optional here: a missing key still builds, it just ships the fallback backend)"
         run: node scripts/check-secrets.mjs --job=web || echo "::warning::continuing the web deploy with unset optional secrets"
-      - name: Build
-        run: npm run build:web
+      - name: "Build — mode-scoped, the pair comes from .env.<target> generated from the Worker's own config"
+        run: |
+          set -euo pipefail
+          target="${{ github.event.inputs.environment || 'staging' }}"
+          case "$target" in
+            production) mode=production ;;
+            *)          mode=staging ;;
+          esac
+          npm run "web:env:check"          # the committed .env.<mode> must still match workers/wrangler.toml
+          npm run "build:web:$mode"
         env:
+          # Optional overrides, per GitHub environment. Left unset, the mode file is the source of truth — which
+          # is the point: an empty `${{ secrets.X }}` used to be *inlined into the bundle* by Vite.
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
       - name: Assert the built bundle is servable (404s stay 404s, JS stays JS)
@@ -68,11 +88,11 @@ jobs:
           if-no-files-found: error
 
   deploy:
-    name: Pages deploy (${{ github.event.inputs.environment || 'production' }})
+    name: Pages deploy (${{ github.event.inputs.environment || 'staging' }})
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    environment: ${{ github.event.inputs.environment || 'production' }}
+    environment: ${{ github.event.inputs.environment || 'staging' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -87,7 +107,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          target="${{ github.event.inputs.environment || 'production' }}"
+          target="${{ github.event.inputs.environment || 'staging' }}"
           # One Pages project per deployed environment; a preview is a branch of the production project,
           # which is what gives it an isolated *.pages.dev URL without a third project to maintain.
           case "$target" in
@@ -101,7 +121,15 @@ jobs:
           done
           [ "$missing" = "0" ] || exit 1
           npm ci --no-audit --no-fund
-          npm run build:web
+          # Rebuild here rather than shipping the artifact from the build job: Pages wants a directory, the
+          # artifact round-trip would lose the hashed-asset names in index.html's preload hints, and a second
+          # mode-scoped build costs 30s and is provably the same bytes (web:env:check ran on both jobs).
+          case "$target" in
+            production) mode=production ;;
+            *)          mode=staging ;;
+          esac
+          npm run "web:env:check"
+          npm run "build:web:$mode"
           out=$(npx --yes wrangler@4 pages deploy dist/web --project-name "$project" --branch "$branch" 2>&1)
           echo "$out"
           # Pages prints one or two *.pages.dev URLs; the last is this deployment's own.

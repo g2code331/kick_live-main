@@ -35,7 +35,12 @@ cp .env.example .env.local
 ```
 
 Then fill two values. Both come from **one** Supabase project — project → Project Settings → API → _Project URL_ and
+<<<<<<< HEAD
 _Project anon key_ (`sb_publishable_…` works too). The staging project for this repo is `opvkvbabryuipzwcanrv`, production is
+=======
+_Project anon key_ (`sb_publishable_…` works too). The staging project for this repo is `opvkvbabryuipzwcanrv` (it moved on 2026-09-13, off the retired `fnefpc…`
+project — if that older ref turns up in any build input, `npm run pair:check` says whether the key moved with it), production is
+>>>>>>> origin/arena/01a08671-kick-live-main
 `xvksxqrmdbbinlrjctri`.
 
 ```bash
@@ -108,6 +113,25 @@ And the three rules that make this safe:
   is not proof a notification reached a device. On staging/production both must be set or nothing leaves the account.
 
 `FCM_TIMEOUT_MS` bounds one HTTP send so a hung Google endpoint cannot eat the queue's visibility window; leave it unset.
+
+## 3b · If the app boots and every sign-in returns 401, the _key_ is the suspect, not the app
+
+`POST /auth/v1/token?grant_type=password` and `POST /auth/v1/signup` both answering **401 (Unauthorized)** is one
+cause: the bundle's `VITE_SUPABASE_ANON_KEY` was issued for a different project than `VITE_SUPABASE_URL`. That is
+what happened when the staging project moved — the URL was repointed, the key was not, and every existing check
+still passed because each value is individually valid and the boot guard's URL↔key comparison only fires on a
+_JWT-shaped_ key whose `ref` claim it can read. So the whole chain was green up to the moment a human clicked
+"sign up".
+
+```bash
+npm run pair:check      # decodes every URL / SUPABASE_PROJECT_REF / anon-key triple in the repo and refuses a mismatch
+npm run web:env         # regenerates .env.staging / .env.production — and REFUSES to write a mismatched pair
+```
+
+Fix it in one place: `workers/wrangler.toml` → `[env.staging.vars]` → `SUPABASE_ANON_KEY`, from Supabase →
+Settings → API keys, for **that** project (the `sb_publishable_…` string if legacy API keys are switched off).
+Then `npm run web:env`, commit both files together, and rebuild. Do not hand-edit `.env.staging`: the generator
+will not reproduce a mismatch, which is the point of it.
 
 ## 4 · The rest of the Cloudflare secret list (one command each, per environment)
 

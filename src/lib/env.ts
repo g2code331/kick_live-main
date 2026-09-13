@@ -93,6 +93,16 @@ export function assertSupabaseEnv(values: SupabaseEnvValues): { url: string; pro
   if (values.anonKey.length < 32) {
     throw new ConfigError("VITE_SUPABASE_ANON_KEY looks truncated — paste the full publishable key from the dashboard.");
   }
+
+  // A JWT-shaped key presented to a project that has "Legacy API keys" switched OFF is refused by GoTrue with a
+  // bare 401 on /auth/v1/signup and /auth/v1/token — no mention of keys in the response, so the app looks like it
+  // is pointed at a dead project. The bundle can see the shape, so it should say so rather than let a human guess.
+  if (/^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(values.anonKey) && !refFromAnonKey(values.anonKey)) {
+    throw new ConfigError(
+      "VITE_SUPABASE_ANON_KEY is a JWT with no `ref` claim, which is not a Supabase anon key. Copy Settings → API keys → " +
+        "`anon` — or the `sb_publishable_…` value, if this project has legacy API keys disabled — and rebuild.",
+    );
+  }
   if (urlRef && keyRef && urlRef !== keyRef) {
     throw new ConfigError(`Config mismatch: VITE_SUPABASE_URL points at project "${urlRef}" but VITE_SUPABASE_ANON_KEY was ` + `issued for project "${keyRef}". Both must come from the same project.`);
   }
