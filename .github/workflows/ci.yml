@@ -36,7 +36,7 @@ jobs:
         run: npm run typecheck
       - name: Format
         run: npm run format:check
-      - name: Aggregate verify (branding, version, hooks, vercel.json, manifest templates)
+      - name: Aggregate verify (branding, version, hooks, Pages contract, manifest templates)
         run: npm run verify
       - name: Unit + integration tests
         run: npm test
