@@ -7,6 +7,12 @@ env/
 # local env overrides and Worker secrets — only the *.example templates are tracked
 .env.*
 !.env.example
+# Per-mode build config, generated from workers/wrangler.toml by scripts/build-web-env.mjs. Tracked on
+# purpose: VITE_SUPABASE_URL and the anon key are public by Supabase's threat model (the whole bundle is
+# readable, and RLS is the enforcement layer), and the alternative — telling an operator to export them
+# inline — is how a Pages deploy ends up shipping an unconfigured app.
+!.env.staging
+!.env.production
 workers/.dev.vars
 .DS_Store
 *.zip

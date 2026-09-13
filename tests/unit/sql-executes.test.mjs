@@ -125,10 +125,16 @@ test("the admin bootstrap grants, verifies, and refuses every way of getting it 
     "jsonb_build_object('username','chief'));" +
     String.fromCharCode(10);
 
+  // Each variant edits the two declaration lines only, because that is all an operator edits. The first is the
+  // whole file pasted untouched; the last is the case a sentinel-string placeholder could not express — an
+  // address that *is* the operator's, in a project where they have not signed up yet.
+  const set = (email, id = "null") => base.replace("p_email    text := null;", "p_email    text := " + email + ";").replace("p_user_id  uuid := null;", "p_user_id  uuid := " + id + ";");
   const variants = [
-    { name: "unedited placeholder", admin: base, want: "nothing to do on purpose" },
-    { name: "markdown-autolinked address", admin: base.replace("'REPLACE-WITH-AN-EXISTING-ACCOUNT-EMAIL'", "'[someone@gmail.com](mailto:someone@gmail.com)'"), want: "not a bare address" },
-    { name: "address with no account behind it", admin: base.replace("'REPLACE-WITH-AN-EXISTING-ACCOUNT-EMAIL'", "'nobody@nowhere.test'"), want: "no auth.users row" },
+    { name: "unedited", admin: base, want: "nothing supplied: set exactly one of p_email" },
+    { name: "markdown-autolinked address", admin: set("'[someone@gmail.com](mailto:someone@gmail.com)'"), want: "not a bare address" },
+    { name: "address with no account behind it", admin: set("'nobody@nowhere.test'"), want: "no auth.users row for nobody@nowhere.test" },
+    { name: "the operator's own address, nobody signed up yet", admin: set("'g2code33@gmail.com'"), want: "this project has 0 auth user" },
+    { name: "both inputs set", admin: set("'someone@example.com'", "'22222222-2222-2222-2222-222222222222'"), want: "point at one account, not two" },
   ];
   for (const v of variants) {
     fs.writeFileSync(path.join(REPO, ".tmp-admin-variant.sql"), v.admin);
@@ -139,7 +145,7 @@ test("the admin bootstrap grants, verifies, and refuses every way of getting it 
   }
 
   // the success path, plus the state check the script is supposed to guarantee
-  fs.writeFileSync(path.join(REPO, ".tmp-admin-variant.sql"), seed + base.replace("'REPLACE-WITH-AN-EXISTING-ACCOUNT-EMAIL'", "'admin@kicklive.football'"));
+  fs.writeFileSync(path.join(REPO, ".tmp-admin-variant.sql"), seed + set("'admin@kicklive.football'"));
   const ok = await runOnPglite({
     files: ["supabase/SETUP.sql", ".tmp-admin-variant.sql"],
     log: () => {},

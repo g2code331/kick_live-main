@@ -192,6 +192,37 @@ function checkNoStaleLockfileVersion() {
   return problems;
 }
 
+/**
+ * `.env.staging` / `.env.production` are tracked, generated files: if one goes stale the next Pages build ships
+ * a bundle pointed at the wrong project, and that is invisible until somebody signs in and sees nothing. Cheaper
+ * to prove here than to discover in a deploy log.
+ */
+function checkWebEnvSync() {
+  const res = run("", process.execPath, ["scripts/build-web-env.mjs", "--check"], { echo: false });
+  return res.code === 0 ? [] : [(res.stdout + res.stderr).trim().split("\n").slice(-2).join(" ") || "web:env:check failed"];
+}
+
+/**
+ * The migrations are *executed* on a real Postgres (PGlite) as part of `verify`, because three privilege defects
+ * in this repository were invisible to every static check and only surfaced when a human pasted SETUP.sql into
+ * the Supabase editor. It skips — naming the reason — when the dev dependency is absent, since that is a
+ * half-installed tree rather than a broken migration.
+ */
+function checkSqlExecutes() {
+  if (!fs.existsSync(path.join(REPO_ROOT, "node_modules/@electric-sql/pglite/package.json"))) {
+    return ["SKIP (not a failure): @electric-sql/pglite is not installed — run `npm ci`"];
+  }
+  const res = run("", process.execPath, ["scripts/sql-pglite.mjs", "--json"], { echo: false });
+  if (res.code === 0) return [];
+  let parsed;
+  try {
+    parsed = JSON.parse(res.stdout);
+  } catch {
+    return [`sql-pglite exited ${String(res.code)} without JSON output`, (res.stderr || "").trim().split("\n")[0]];
+  }
+  return (parsed.failures || []).slice(0, 8).map((f) => `[${f.code}] ${f.file}: ${f.message}`);
+}
+
 export async function main() {
   const results = [];
   if (mode === "write") {
@@ -206,6 +237,19 @@ export async function main() {
   // `workers/src` could pass `npm run verify`, which is the command the checklists tell people to run.
   results.push(step("typecheck:workers", process.execPath, ["node_modules/typescript/bin/tsc", "-p", "tsconfig.workers.json"]));
   results.push(step("format:check", process.execPath, ["node_modules/prettier/bin/prettier.cjs", "--check", "."]));
+
+  // Two checks a machine with no database and no Cloudflare account can still run, each of which has already
+  // caught something real: a stale mode file that would have shipped a misconfigured bundle, and a privilege
+  // assertion that was certifying nothing. Both are cheap; neither is decorative.
+  {
+    const probs = checkWebEnvSync();
+    results.push({ label: "web env files (build:web:staging / :production)", ok: probs.length === 0, code: probs.length ? 1 : 0, out: probs.join("\n") });
+  }
+  {
+    const probs = checkSqlExecutes();
+    const skipped = probs.length === 1 && probs[0].startsWith("SKIP");
+    results.push({ label: "migrations execute (PGlite, supabase/SETUP.sql)", ok: probs.length === 0 || skipped, code: probs.length && !skipped ? 1 : 0, out: probs.join("\n") });
+  }
 
   const hooks = checkHooks();
   const hookResults = [];

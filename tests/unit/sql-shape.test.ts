@@ -525,8 +525,16 @@ describe("the admin bootstrap refuses to guess who the admin is", () => {
   const sql = code(fs.readFileSync(path.join(REPO, "CREATE_ADMIN_PROFILE.sql"), "utf8"));
 
   it("it is a reviewed bootstrap, not a bundle member, and it never upserts a role blindly", () => {
-    assert.match(sql, /p_email\s+text\s*:=\s*'REPLACE-WITH-AN-EXISTING-ACCOUNT-EMAIL'/, "one named placeholder, filled in by a human");
-    assert.match(sql, /raise exception\s*\n?\s*'nothing to do on purpose/, "an unedited file must raise, not run");
+    // Both inputs default to NULL, and no comparison against a sentinel string exists any more. That was a
+    // real failure, not a stylistic one: the previous version used the literal
+    // 'REPLACE-WITH-AN-EXISTING-ACCOUNT-EMAIL' as both the placeholder *and* the sentinel to compare against,
+    // so an operator whose real address happened to be that string was refused as "unedited". A sentinel can
+    // collide with the value it is standing in for; null cannot, and "does this account exist" is a question
+    // auth.users answers exactly — so existence is the only test, and the file has nothing to overwrite.
+    assert.match(sql, /p_email\s+text\s*:=\s*null/, "no placeholder string to overwrite, and none to collide with");
+    assert.match(sql, /p_user_id\s+uuid\s*:=\s*null/, "and the same for the uuid form");
+    assert.match(sql, /raise exception\s*\n?\s*'nothing supplied/, "an unedited file must still raise, not run");
+    assert.ok(!/REPLACE-WITH-AN-EXISTING-ACCOUNT-EMAIL/.test(sql), "a sentinel string that doubles as a possible real value is the bug, not the guard");
     assert.match(sql, /on conflict \(id\) do nothing/, "the profile insert must not write over a real account's row");
     assert.ok(!/on conflict[^;\n]*do update[^;\n]*role/i.test(sql), "an ON CONFLICT … DO UPDATE that touches role is how a paste grants admin to whatever the address typo'd into");
     assert.match(sql, /lower\(u\.email\) = lower\(v_input\)/, "the lookup is by the operator's typed input, once, into a variable");

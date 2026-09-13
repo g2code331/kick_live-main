@@ -35,8 +35,30 @@ export function emitBuildManifest(outDir, target) {
 export async function main() {
   const { build } = await import("vite");
   const outDir = outDirFor("web");
-  console.log(`build:web → vite build (config vite.config.ts) → ${path.relative(REPO_ROOT, outDir)}`);
-  await build({ root: REPO_ROOT, configFile: path.join(REPO_ROOT, "vite.config.ts"), logLevel: "info" });
+  // `--mode=<name>` selects Vite's per-mode env file (`.env.<name>`) for the build. It is threaded through here
+  // rather than told to operators as an inline `VITE_…=… npm run build:web` because a value that has to be typed
+  // correctly on the *build* line is a value that will one day be omitted on the second of two copy-pasted
+  // commands, and the result is a complete-looking bundle pointed at no backend at all (the boot guard says so,
+  // but by then the artefact has been deployed). A named mode cannot be forgotten silently: the file is there
+  // or the build refuses.
+  const modeArg = process.argv.find((a) => a.startsWith("--mode="));
+  const mode = modeArg?.slice("--mode=".length);
+  if (mode && !/^[a-z][a-z0-9_-]*$/.test(mode)) {
+    console.error(`build:web: --mode=${mode} is not a valid mode name (lowercase, starts with a letter)`);
+    process.exitCode = 1;
+    return;
+  }
+  if (mode && !fs.existsSync(path.join(REPO_ROOT, `.env.${mode}`))) {
+    console.error(
+      `build:web: --mode=${mode} needs .env.${mode}, which does not exist. Generate it with \`npm run web:env\` ` +
+        `(it is derived from workers/wrangler.toml, so there is no key to copy by hand). Building without it would\n` +
+        `produce a bundle whose boot screen says "KickLive is not configured" — which is what the last Pages deploy did.`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+  console.log(`build:web → vite build (config vite.config.ts${mode ? `, mode ${mode} → .env.${mode}` : ""}) → ${path.relative(REPO_ROOT, outDir)}`);
+  await build({ root: REPO_ROOT, configFile: path.join(REPO_ROOT, "vite.config.ts"), logLevel: "info", ...(mode ? { mode } : {}) });
   const pwa = await buildPwa({ outDir, target: "web", log: (line) => console.log(line) });
   const manifest = emitBuildManifest(outDir, "web");
   const jsBytes = manifest.files.filter((f) => /\.(js)$/.test(f.path)).reduce((n, f) => n + f.bytes, 0);

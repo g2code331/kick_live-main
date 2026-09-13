@@ -25,6 +25,7 @@
  * against a scratch database, which adds the behavioural flow.
  */
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -166,8 +167,13 @@ export async function runOnPglite({ files, log = console.log, probe = null } = {
   } catch {
     return { available: false, ok: false, skipped: true, failures: [], note: "no @electric-sql/pglite (dev dependency) — run `npm ci`" };
   }
+  // A fresh directory per run, not the default in-memory mode: PGlite's in-memory instances in one process
+  // share a cluster, so `create role` on the second run died with "role anon already exists" — which is a
+  // confusing failure for a test suite that runs three of these back to back. os.tmpdir(), never the repo,
+  // so a crashed run cannot leave a directory inside a working tree.
   instanceCount++;
-  const db = new PGlite({ dataDir: `${instanceCount}`, inMemory: true });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `kicklive-pglite-${process.pid}-`));
+  const db = new PGlite({ dataDir: dir });
   const failures = [];
   let executed = 0;
   let stubbed = [];
@@ -232,6 +238,7 @@ export async function runOnPglite({ files, log = console.log, probe = null } = {
     await db.query("rollback").catch(() => {}); // nothing is kept; the point is the verdict
   } finally {
     await db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
   }
   const result = { available: true, ok: failures.length === 0, skipped: false, executed, failures, stubbed };
   if (!has("json")) {

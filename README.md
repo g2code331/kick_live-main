@@ -44,6 +44,7 @@ Everything in that diagram is described as-built — including what is _not_ wir
 ```bash
 npm ci                                  # web + worker toolchain
 cp .env.example .env.local              # VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY
+npm run web:env                       # .env.staging / .env.production, derived from workers/wrangler.toml
 cp workers/.dev.vars.example workers/.dev.vars   # local-only, git-ignored, never committed
 npm run dev                             # SPA on :5173, /api proxied to wrangler dev on 127.0.0.1:8787
 ```
