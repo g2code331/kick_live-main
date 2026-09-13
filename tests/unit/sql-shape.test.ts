@@ -357,6 +357,49 @@ describe("privilege assertions in the migrations read the catalog, not the super
   });
 });
 
+describe("the admin bootstrap refuses to guess who the admin is", () => {
+  // Every rule here is a guard that exists because a one-paste admin grant is the most expensive file in the
+  // repository. The first version hardcoded a real address and a UUID and blindly upserted `role = 'admin'`;
+  // the second version asked the operator to paste an address into an editor whose markdown autolinking turns
+  // `a@b.com` into `[a@b.com](mailto:a@b.com)`, which used to fail as "no such user" (or, worse, match nothing
+  // and be re-run against a different row). So: the placeholder must be unfilled-able-to-something-real, the
+  // markdown shape must be caught by name, and no identity may ever be committed.
+  // `code()` on purpose: this file explains in its own header what it no longer does, and a rule about
+  // executable SQL must not be answered by prose (the header mentions the deleted ON CONFLICT … DO UPDATE).
+  const sql = code(fs.readFileSync(path.join(REPO, "CREATE_ADMIN_PROFILE.sql"), "utf8"));
+
+  it("it is a reviewed bootstrap, not a bundle member, and it never upserts a role blindly", () => {
+    assert.match(sql, /p_email\s+text\s*:=\s*'REPLACE-WITH-AN-EXISTING-ACCOUNT-EMAIL'/, "one named placeholder, filled in by a human");
+    assert.match(sql, /raise exception\s*\n?\s*'nothing to do on purpose/, "an unedited file must raise, not run");
+    assert.match(sql, /on conflict \(id\) do nothing/, "the profile insert must not write over a real account's row");
+    assert.ok(!/on conflict[^;\n]*do update[^;\n]*role/i.test(sql), "an ON CONFLICT … DO UPDATE that touches role is how a paste grants admin to whatever the address typo'd into");
+    assert.match(sql, /lower\(u\.email\) = lower\(v_input\)/, "the lookup is by the operator's typed input, once, into a variable");
+  });
+
+  it("a markdown-linked address is named as the mistake it is", () => {
+    assert.match(sql, /mailto/, "the guard must know what an autolinked address looks like");
+    assert.match(sql, /\[\[:space:\]\<\>\(\)\\\[\\\]/, "brackets, parens and quotes in p_email are refused before the lookup");
+    assert.match(sql, /does not look like an address \(one @, no spaces, a dot in the domain\)/, "and a malformed one too, rather than matching nothing");
+    assert.match(sql, /no auth\.users row for %/, "the miss says what to do (sign up first) and how many users exist");
+  });
+
+  it("nothing in the tree names a person", () => {
+    // `\b` is deliberate: the point is that the file cannot be copy-pasted into a repo again with an identity in it.
+    const raw = fs.readFileSync(path.join(REPO, "CREATE_ADMIN_PROFILE.sql"), "utf8");
+    assert.ok(!/[A-Za-z0-9._%+-]+@(?:gmail|googlemail|outlook|hotmail|yahoo|icloud|proton)[A-Za-z0-9.-]*/i.test(raw), "CREATE_ADMIN_PROFILE.sql must not contain a real address, in code or in prose");
+    for (const f of ["CREATE_ADMIN_PROFILE.sql", "supabase/SETUP.sql", "KICKLIVE_FINAL_SCHEMA.sql"]) {
+      const body = fs.readFileSync(path.join(REPO, f), "utf8");
+      assert.ok(!/[A-Za-z0-9._%+-]+@(?:gmail|googlemail|outlook|hotmail|yahoo|icloud|proton)[A-Za-z0-9.-]*/i.test(body), `${f} carries a personal address`);
+    }
+    for (const stray of ["repomix-output.xml", "output.md", ".replit"]) {
+      assert.ok(
+        !fs.existsSync(path.join(REPO, stray)),
+        `${stray} came back: a whole-tree dump (or a provider config with a duplicated key) is how deleted values reappear in docs, in CI scans and in the next audit`,
+      );
+    }
+  });
+});
+
 describe("a LANGUAGE sql function is never created before the table its body reads", () => {
   // The bug this file exists for: KICKLIVE_FINAL_SCHEMA.sql created `is_admin()` (`LANGUAGE sql`, body
   // `SELECT 1 FROM public.profiles`) in SECTION 2, while `profiles` was not created until SECTION 3. Postgres
