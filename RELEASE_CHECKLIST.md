@@ -51,12 +51,35 @@ The hole is real but narrow (a signed-in caller could EXECUTE an admin-only `kic
 which each still gates on `is_admin()` internally, so it was a second line of defence rather than a bypass),
 and it is the reason this class of assertion is now unreadable in any other shape.
 
+## Re-verified again at `4d4fc7b` + the editor/gate follow-up
+
+Two SQL corrections landed after the paragraph above, both on the `SETUP.sql` apply path, both proven by paste:
+`public.kicklive_has_grant` had been reading a column `aclexplode()` does not expose (`g.objid`), and four call
+sites asked about a _table column_ with `U` — USAGE, a sequence/function letter; UPDATE on a column is `w`. The
+helper now reads `pg_class.relacl`, `pg_proc.proacl` and `pg_attribute.attacl` in that order, pins
+`set search_path = pg_catalog`, and **raises** on an object name that resolves to nothing, because silent `false`
+would let a typo'd assertion certify a table as hardened. `tests/unit/sql-shape.test.ts` now lints both shapes
+(mutation-checked: re-insert `g.objid` or flip a code back to `U` and the two new tests go red).
+
+The `verify` count moved to 18 because the Worker is now typechecked there too — only `npm run gates` covered
+`tsconfig.workers.json` before, so `npm run verify` could pass on a broken `workers/src`. Related editor-only
+fixes: `workers/tsconfig.json` (project detection, mirroring `tsconfig.workers.json`), `.vscode/settings.json`
+(pin `typescript.tsdk` to the installed 5.9.3), `"baseUrl": "."` deleted from `tsconfig.base.json` rather than
+papered over with `ignoreDeprecations`, and a `gates.mjs` label that still called the Worker a skeleton.
+
+On that tree, re-run: unit **613/613** · integration **99/99** · `typecheck` clean for all four configs
+(`tsconfig.json`, `tsconfig.node.json`, `tsconfig.workers.json`, `workers/tsconfig.json`) · `format:check` clean ·
+`verify` **18/18** · `worker:routes -- --check` **101/101** · `gates --skip=6` **22 pass / 0 fail / 4 skip** ·
+`sql:bundle:check` current · `build:web` OK (77 files, 7.28 MiB) · `wrangler deploy --dry-run` **exit 0 for both
+environments**. Still unverified, and unchanged by any of the above: **executing this SQL on a live Postgres**, and
+a push actually reaching a device — neither is possible in the sandbox that produced them.
+
 ## Re-verified 2026-09-13 on the Pages + one-SQL-file tree
 
 Still no Postgres, no Cloudflare credentials and no browser here, so `npm run check:sql` remains a loud `SKIP` and the five
 `REQUIRES TESTING` rows below stay where they are. What was re-run, on this exact tree, with exit codes preserved (not piped):
-`npm run test:unit` **605 pass / 0 fail** · `npm run test:integration` **99 pass / 0 fail** · `npm run typecheck` **0 errors**
-· `npm run format:check` **clean** · `npm run verify` **17/17** · `npm run worker:routes -- --check` **101/101** ·
+`npm run test:unit` **613 pass / 0 fail** · `npm run test:integration` **99 pass / 0 fail** · `npm run typecheck` **0 errors**
+· `npm run format:check` **clean** · `npm run verify` **18/18** (it typechecks the Worker now) · `npm run worker:routes -- --check` **101/101** ·
 `npm run sql:bundle:check` **SETUP.sql is current (10 sections)** · `npm run gates` **22 pass / 0 fail / 4 skip** ·
 `npm run build:web` ships `dist/web/{functions/[[catchall]].js,_routes.json,_headers}` · `npx wrangler deploy --dry-run` **exit 0
 for both `staging` and `production`**, bindings resolve, correct `SUPABASE_PROJECT_REF` per environment.

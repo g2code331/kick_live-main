@@ -1,0 +1,16 @@
+{
+  "_comment": "Every value here exists because the editor and `npm run typecheck` disagreed about the same file. See workers/README.md, 'The editor's red squiggles'.",
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "javascript.tsdk": "node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true,
+  "editor.tabSize": 2,
+  "editor.insertSpaces": true,
+  "editor.detectIndentation": false,
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/.wrangler": true,
+    "**/.env.local": true,
+    "**/workers/.dev.vars": true
+  }
+}

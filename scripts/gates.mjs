@@ -69,7 +69,7 @@ const wanted = (n) => (!only || only.includes(n)) && !skip.has(n);
 async function gate1() {
   step(1, "typecheck (web+shared)", process.execPath, ["node_modules/typescript/bin/tsc", "-p", "tsconfig.json"]);
   step(1, "typecheck (scripts+server+desktop)", process.execPath, ["node_modules/typescript/bin/tsc", "-p", "tsconfig.node.json"]);
-  step(1, "typecheck (workers skeleton)", process.execPath, ["node_modules/typescript/bin/tsc", "-p", "tsconfig.workers.json"]);
+  step(1, "typecheck (worker)", process.execPath, ["node_modules/typescript/bin/tsc", "-p", "tsconfig.workers.json"]);
   step(1, "no hardcoded backend config in shipped source", process.execPath, ["scripts/check-secrets.mjs", "--scan-only"]);
   step(1, "unit tests", process.execPath, ["scripts/run-tests.mjs", "unit"]);
   step(1, "integration tests", process.execPath, ["scripts/run-tests.mjs", "integration"]);

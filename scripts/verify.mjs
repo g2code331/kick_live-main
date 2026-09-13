@@ -202,6 +202,9 @@ export async function main() {
   results.push(step("version:check", process.execPath, ["scripts/version.mjs", "check"]));
   results.push(step("typecheck", process.execPath, ["node_modules/typescript/bin/tsc", "-p", "tsconfig.json"]));
   results.push(step("typecheck:node", process.execPath, ["node_modules/typescript/bin/tsc", "-p", "tsconfig.node.json"]));
+  // The Worker is a third program, and until now only `npm run gates` typechecked it: a broken
+  // `workers/src` could pass `npm run verify`, which is the command the checklists tell people to run.
+  results.push(step("typecheck:workers", process.execPath, ["node_modules/typescript/bin/tsc", "-p", "tsconfig.workers.json"]));
   results.push(step("format:check", process.execPath, ["node_modules/prettier/bin/prettier.cjs", "--check", "."]));
 
   const hooks = checkHooks();

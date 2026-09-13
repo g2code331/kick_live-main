@@ -378,7 +378,7 @@ Properties that make this safe, and their limits:
 npm run typecheck          # both tsconfigs
 npm test                   # 152 unit + 54 integration (real sockets, real files)
 npm run format:check
-npm run verify             # 17 checks: branding, version, hooks, yaml, Pages contract, lockfile, manifest templates
+npm run verify             # 18 checks: branding, version, 3× typecheck, hooks, yaml, Pages contract, lockfile
 npm run build              # web + renderer + desktop bundles
 npm run verify:packaging   # tier A (45 checks incl. a real asar pack/list/extract)
 node scripts/gates.mjs     # the §7 gate run with the table below
@@ -440,7 +440,7 @@ measure (see `§0`: the token cannot write `.github/workflows`, and the Actions 
 
 | gate | check                                         | why it exists                                                                                                                                |
 | ---- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1    | typecheck (workers skeleton)                  | `tsc -p tsconfig.workers.json` — `workers/` is code, so it typechecks or the gate fails                                                      |
+| 1    | typecheck (worker)                            | `tsc -p tsconfig.workers.json` — `workers/` is code, so it typechecks or the gate fails                                                      |
 | 1    | no hardcoded backend config in shipped source | `node scripts/check-secrets.mjs --scan-only`; planted-probe covered by `tests/unit/phase1-security.test.ts`                                  |
 | 1    | unit tests                                    | 179 now: the Phase 1 file pins the security invariants (config resolution, capability matrix, no client role writes, additive migration SQL) |
 

@@ -1,16 +1,17 @@
 # `workers/` — the API boundary
 
-**Status: Phase 2 is live.** Three routes are implemented and tested (`GET /health`, `GET /me`,
-`GET /teams/mine`); the rest of the surface is _declared_ in `src/router.ts` and answers
-`501 NOT_IMPLEMENTED` after authentication and authorization have already been enforced. The app
-still reads and writes Supabase directly for every existing feature — that is the migration this
-layer exists to serve, route by route, and it is deliberately not done in one pass.
+**Status: the boundary is live and most of it is implemented.** `src/router.ts` declares 101 routes; 87 have
+handlers, and the remainder answer `501 NOT_IMPLEMENTED` _after_ authentication and authorization have already
+been enforced — an unwritten route is never an unguarded one. `npm run worker:routes` prints the table route by
+route, and `/api/health` reports `{total, declared, implemented}`, so the sentence above can be checked against a
+running Worker instead of trusted. The app still reads and writes Supabase directly for some features; that
+migration is deliberately not done in one pass.
 
-What "live" means here, precisely: the code compiles under the repo's strict `tsconfig.workers.json`,
-44 unit/integration assertions in `tests/unit/phase2-api-boundary.test.ts` run against the real
-`fetch` handler, and the frontend client in `src/lib/api/` calls it. It does **not** mean deployed —
-no `wrangler` binary was installed and no Cloudflare account was touched in this working session (see
-_Running it_ below).
+What "live" means here, precisely: the code compiles under the repo's strict `tsconfig.workers.json` (also a step
+in `npm run verify` and `npm run gates`), the boundary tests in `tests/unit/phase2-api-boundary.test.ts` run
+against the real `fetch` handler, and the frontend client in `src/lib/api/` calls it. It does **not** mean
+deployed: a locally running `wrangler dev` with simulated queue/KV/R2 bindings is evidence about this code, not
+about an account (see _Running it_ below).
 
 ## Layout — one concern per directory
 
@@ -149,6 +150,38 @@ which means same-origin `/api`. `src/lib/env.ts` refuses a dev build that names 
 `VITE_API_ALLOW_REMOTE=1`) and refuses a production build that names `localhost`; the Vite dev server
 proxies `/api` to `127.0.0.1:8787`. Local development therefore cannot reach production data by
 accident, in either direction.
+
+### The editor's red squiggles here are a project-detection problem, not a Worker problem
+
+`workers/src` gets its Cloudflare types (`KVNamespace`, `DurableObjectNamespace`, `Queue`, a generic
+`Response<T>`) only from `tsconfig.workers.json`, because that is the config that asks for
+`@cloudflare/workers-types`. Files the editor cannot assign to a project are typed by whatever the _closest_
+config provides, and the closest one used to be the repo root — so `workers/src/**` was checked as browser code:
+no Workers globals, and `types: ["vite/client", "node"]` demanding `@types/node` for a program that does not run
+on Node. That is the whole error list, and `npm run typecheck` never had it.
+
+Two things make the editor agree with the build, and neither is a code change:
+
+- **`workers/tsconfig.json`** now exists and mirrors `tsconfig.workers.json`. The build still uses the root file;
+  this one exists so a language service opened anywhere under `workers/` resolves the same compiler options. They
+  are two spellings of one intent, so if you change `lib`/`types` there, change it here too.
+- **`.vscode/settings.json`** pins `typescript.tsdk` to `node_modules/typescript/lib`, i.e. the pinned 5.9.3,
+  so the language service is the same compiler `npm run typecheck` runs. It is strict JSON with no comments — a
+  `//` there makes `prettier --check .` fail, and ignoring `.vscode` instead would let this file drift silently.
+  The reasoning lives here, in prose, where reformatting cannot break it. It also sets `editor.detectIndentation:
+false` with `tabSize: 2`, because detection wins over `tabSize` per file and is how a two-space repo acquires a
+  four-space commit, and it excludes `.env.local` / `workers/.dev.vars` from search so a value cannot reach a
+  screenshot or a ticket by way of the search box.
+
+The one diagnostic that was **not** detection: `Option 'baseUrl' is deprecated and will stop functioning in
+TypeScript 7.0`, answered about a compiler that is 5.9.3, by a language service running something newer. It was
+fixed by deleting `"baseUrl": "."` from `tsconfig.base.json` rather than by adding `ignoreDeprecations` — `paths`
+has resolved relative to the config file since TS 4.4, nothing in this repo imports a bare specifier that only
+`baseUrl` could find, and all three programs (`tsconfig.json`, `tsconfig.node.json`, `tsconfig.workers.json`)
+typecheck clean without it. A flag that silences a future-version warning is a debt; a dead option is not needed.
+
+After pulling, run "Developer: Reload Window" once: the language service caches project boundaries, and a stale
+cache reproduces the same errors against a fixed config.
 
 ## Adding a route (the checklist)
 
