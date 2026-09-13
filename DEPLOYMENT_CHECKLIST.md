@@ -1,149 +1,77 @@
-#  KICKLIVE - QUICK DEPLOYMENT CHECKLIST
+# 🚀 KICKLIVE - DEPLOYMENT CHECKLIST (Cloudflare)
 
-## ✅ PRE-DEPLOYMENT (Already Done!)
-- [x] Code is ready
-- [x] .env file configured
-- [x] vercel.json created
-- [x] Build successful
+The production architecture is **Cloudflare Pages (frontend host) + a Cloudflare Worker (API) + Supabase
+(database and auth)**. There is no Vercel step; there has not been since 2026-09-12. `DEPLOYMENT.md` is the
+prose version of this list, `docs/ENVIRONMENT_SETUP.md` is the full per-resource runbook, and
+[`docs/SETUP_WALKTHROUGH.md`](docs/SETUP_WALKTHROUGH.md) is the numbered order of operations for a fresh setup.
 
----
+## 🗄️ STEP 0: THE DATABASE — ONE FILE, PER ENVIRONMENT
 
-##  STEP 1: GITHUB (2 minutes)
+The project's SQL editor gets **one paste**: `supabase/SETUP.sql` (generated from the sources; see
+`supabase/README.md`). Equivalent CLI reading, for anyone verifying by hand: the base schema
+`KICKLIVE_FINAL_SCHEMA.sql`, then `supabase/migrations/` in filename order —
 
-- [ ] Go to GitHub.com
-- [ ] Login with your account
-- [ ] Click "+" → "New repository"
-- [ ] Name: **kicklive**
-- [ ] Click "Create repository"
-- [ ] Click "uploading an existing file"
-- [ ] Upload ALL project files
-- [ ] Click "Commit changes"
+1. `20260909120000_phase1_security_hardening.sql`
+2. `20260909210000_phase3_live_match_engine.sql`
+3. `20260910120000_phase4_read_aggregates.sql`
+4. `20260911120000_phase5_notifications.sql`
+5. `20260912120000_phase6_r2_media.sql`
+6. `20260913120000_phase7_advertising.sql`
+7. `20260914120000_phase8_sponsorship.sql`
+8. `20260915120000_phase9_observability.sql`
+9. `20260916120000_phase10_privilege_tightening.sql`
 
-**✅ DONE when you see your code on GitHub**
+- [ ] `supabase/SETUP.sql` run on **staging** (stops at the first error; every section self-verifies)
+- [ ] same file run on **production**
+- [ ] `CREATE_ADMIN_PROFILE.sql` once per environment, after creating the admin's auth user (it is not
+      part of the bundle — it names a real user)
+- [ ] Optional belt-and-braces: `node scripts/check-sql.mjs --dsn "<pooler string>" --allow-any-database`
+      on staging (needs `npm i --no-save pg`). **Never `--fresh` against a Supabase project** — that flag
+      recreates a scratch database.
+- [ ] **Never** paste `SUPABASE_NEW_PROJECT_SETUP.sql` / `SUPABASE_COMPLETE_SCHEMA.sql` /
+      `supabase_migrations.sql` — superseded, weaker than Phase 1, and deleted from the tree anyway.
 
----
+## ☁️ STEP 1: CLOUDFLARE (both halves are one account)
 
-## 🚀 STEP 2: VERCEL (2 minutes)
+- [ ] Queues created per environment (`docs/ENVIRONMENT_SETUP.md` §1 has the six names)
+- [ ] R2 enabled in the dashboard, then `kicklive-media` + `kicklive-media-staging` created
+- [ ] `RATE_LIMIT_KV` namespaces — already created (2026-09-10) and already wired into
+      `workers/wrangler.toml`; the phase-2 test fails if the ids drift
+- [ ] Worker vars per `[env.staging.vars]` / `[env.production.vars]` filled with **that project's**
+      Supabase URL + ref + anon key (staging↔production cross-check: `docs/DEPLOYMENT_VERIFICATION.md` #14/#15)
+- [ ] Secrets, per environment: `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET`,
+      `TURNSTILE_SECRET_KEY`, `FCM_SERVICE_ACCOUNT` (+ `FCM_PROJECT_ID` as a var once Firebase exists)
+- [ ] `npx wrangler secret list --env production` shows every one of them
+- [ ] `npm run typecheck && npm run test:unit && npm run test:integration && npm run format:check` green
+- [ ] `(cd workers && npx wrangler deploy --dry-run --outdir /tmp/wd --env staging)` exit 0, no warnings
 
-- [ ] Go to Vercel.com
-- [ ] Login with GitHub
-- [ ] Click "Add New..." → "Project"
-- [ ] Find "kicklive" repository
-- [ ] Click "Import"
-- [ ] Click "Environment Variables"
-- [ ] Add VITE_SUPABASE_URL (see below)
-- [ ] Add VITE_SUPABASE_ANON_KEY (see below)
-- [ ] Click "Deploy"
-- [ ] Wait for build to complete
+## 🌐 STEP 2: PAGES (the frontend host)
 
-**Environment Variables:**
+- [ ] Projects exist: `kicklive-web`, `kicklive-web-staging` (`npx wrangler pages project create …`)
+- [ ] Custom domains attached: `kicklive.football` (+`www`) and `staging.kicklive.football`; `/api/*`
+      routed to the `kicklive-api` Worker on the same zones — the app uses same-origin `/api`, so no
+      wildcard CORS and no `VITE_API_BASE_URL`
+- [ ] GitHub environments `production` / `staging` hold `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`,
+      `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`
+- [ ] Deploy: push `main` (or Actions → *Deploy web* → target) — it builds with the environment's vars,
+      uploads, and `scripts/ci/probe-deploy.sh` proves the live host (routes→shell, missing hashed
+      asset→404, JS MIME, no traversal). A green deploy means all four.
 
-```
-VITE_SUPABASE_URL = https://fnefpcjeebawsebxjhcf.supabase.co
+## ✅ STEP 3: SMOKE — THE SHORT LIST
 
-VITE_SUPABASE_ANON_KEY = <paste the publishable/anon key from Supabase → Settings → API>
-# The key is public by design (RLS enforces access), but it is still project-specific: pasting
-# one from a guide instead of your project was how this repo ended up with a URL and a key for
-# two different projects. Neither value is committed to git any more — see .env.example.
-```
+`docs/DEPLOYMENT_VERIFICATION.md` is the full 16-check version with the exact command per check. The core:
 
-**✅ DONE when you see "🎉 Congratulations!"**
+- [ ] `GET /api/health` ok, correct `"env"`; `x-ratelimit-store: kv` on any rate-limited response
+- [ ] sign in as fan (RLS-shaped reads) and as admin; `/api/admin/users` with a fan token → 403
+- [ ] one upload lands in R2; one live match streams (websocket, and kill it to watch the fallback)
+- [ ] after a `:17` cron, `metric_daily` grew while `metric_rollups` did not
+- [ ] rollback rehearsal: `npx wrangler pages deployment list --project-name kicklive-web` →
+      `npx wrangler pages rollback <id> --project-name kicklive-web` — one command, old app served
 
----
+## If something looks wrong
 
-## 🗄️ STEP 3: SUPABASE SQL (1 minute)
-
-- [ ] Go to supabase.com/dashboard
-- [ ] Open project: fnefpcjeebawsebxjhcf
-- [ ] Click "SQL Editor" → "New Query"
-- [ ] Run `KICKLIVE_FINAL_SCHEMA.sql` (the authoritative base schema; idempotent)
-- [ ] Then run the files in `supabase/migrations/` **in filename order** — the timestamps are the apply order:
-      `20260909120000_phase1_security_hardening`,
-      `20260909210000_phase3_live_match_engine`,
-      `20260910120000_phase4_read_aggregates`,
-      `20260911120000_phase5_notifications`,
-      `20260912120000_phase6_r2_media`,
-      `20260913120000_phase7_advertising`,
-      `20260914120000_phase8_sponsorship`,
-      `20260915120000_phase9_observability`,
-      `20260916120000_phase10_privilege_tightening`
-- [ ] Click "Run" after each one, and stop at the first error
-
-**Do not paste `SUPABASE_NEW_PROJECT_SETUP.sql`, `SUPABASE_COMPLETE_SCHEMA.sql` or `supabase_migrations.sql`.**
-They are kept for reference, each carries a "SUPERSEDED — DO NOT RUN" banner, and running one on a hardened
-project *re-opens* the privilege-escalation hole Phase 1 closed: an `UPDATE` policy with a `USING` clause and
-no `WITH CHECK` lets any signed-in account rewrite its own `profiles.role`. If a step in a document says
-otherwise, the step is the bug — `supabase/README.md` is the index of what is authoritative. With the CLI the
-same nine steps are `supabase db push`.
-
-**✅ DONE when the last file answers "Success. No rows returned" and this lists the public read policies:**
-
-```sql
-select tablename, policyname from pg_policies
- where schemaname = 'public' and policyname like '%public read%' order by 1;
-```
-
----
-
-## 🧪 STEP 4: TEST (2 minutes)
-
-- [ ] Copy your Vercel URL (e.g., kicklive-xxx.vercel.app)
-- [ ] Open in **Incognito mode** (Ctrl+Shift+N)
-- [ ] Open Console (F12)
-- [ ] Look for: `[DataLoader] ✓ Data refreshed:`
-- [ ] Should show: `{teams: 0, players: 0, competitions: 0, matches: 0}`
-- [ ] Click "Sign Up"
-- [ ] Use a NEW email (not used before)
-- [ ] Complete signup
-- [ ] Login with new account
-- [ ] Go to Match Control
-- [ ] Click CONTROL MATCH
-- [ ] Click KICK OFF
-- [ ] Watch timer run
-- [ ] **Refresh page** - Timer should continue!
-
-**✅ DONE when timer persists after refresh!**
-
----
-
-## 🎉 SUCCESS CRITERIA
-
-Your deployment is successful when:
-
-1. ✅ Vercel shows green checkmark
-2. ✅ App loads without errors
-3. ✅ Can sign up with new account
-4. ✅ Console shows empty database (0 teams, 0 matches)
-5. ✅ Timer runs and persists on refresh
-6. ✅ Supabase usage shows ~0 MB egress
-
----
-
-## ❌ TROUBLESHOOTING
-
-**Problem:** Old data still shows
-- **Solution:** Redeploy on Vercel (Settings → Deployments → Redeploy)
-
-**Problem:** Build fails
-- **Solution:** Check build logs, usually missing env variables
-
-**Problem:** Timer resets on refresh
-- **Solution:** Verify SQL was run in NEW Supabase project
-
-**Problem:** Cannot login
-- **Solution:** Clear browser cache, try incognito mode
-
----
-
-## 📞 NEED HELP?
-
-Tell me:
-1. Which step are you on?
-2. What do you see on screen?
-3. Any error messages?
-
-I'll guide you through!
-
----
-
-**Estimated Total Time: 7 minutes** ⏱️
+- [ ] Deep link 404s on Pages → the SPA fallback files must ship in `dist/web` (`public/functions/`,
+      `public/_routes.json`); `npm run verify` checks the contract pre-build
+- [ ] App boots against the wrong data → the `VITE_SUPABASE_URL`/`SUPABASE_ANON_KEY` pair in that GitHub
+      environment belongs to the other project; the boot guard says so in the console
+- [ ] Queue/cron paths throw "missing secret" → STEP 1's secret list, per environment

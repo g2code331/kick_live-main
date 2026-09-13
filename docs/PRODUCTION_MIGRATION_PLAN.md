@@ -40,7 +40,8 @@ artifact check can prove it).
    live project, then `supabase db push --dry-run` and apply on **staging first**.
 2. Run the six runtime checks listed at the end of the audit doc (the fan-token escalation probe, the
    anon `profiles` read, media view increments, ProfilePage save, approve/reject, last-admin refusal).
-3. Rotate nothing yet; decide separately whether to delete `repomix-output.xml` and untrack `.vercel/`.
+3. Rotate nothing yet. `repomix-output.xml` deletion is still open; `.vercel/` and `vercel.json` were
+   removed on 2026-09-12 when the web host moved to Cloudflare Pages.
 4. Then apply to production, in the same window as a deploy of this code (the app no longer needs the
    old behaviour, and the migration does not depend on the new app — either order is survivable, but
    the hole stays open until the SQL runs).
