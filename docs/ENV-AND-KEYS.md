@@ -6,12 +6,14 @@ boot that refuses to happen.
 
 ## The four files, and who reads them
 
-| file                    | in git?           | who creates it                            | read by                                      | holds                                                              |
-| ----------------------- | ----------------- | ----------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------ |
-| `.env.example`          | **yes** (source)  | nobody — it is the template               | nobody at runtime                            | the list of what the browser build may know                        |
-| `.env.local`            | no (`.gitignore`) | **you**, by copying the template          | Vite (`npm run dev`) and `npm run build:web` | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`                      |
-| `workers/.dev.vars`     | no (`.gitignore`) | **you**, from `workers/.dev.vars.example` | `wrangler dev` only (local Worker)           | the staging keys of the Worker, for local testing                  |
-| `workers/wrangler.toml` | **yes**           | already written                           | `wrangler deploy`                            | non-secret variables (`[vars]`), per environment — **never a key** |
+| file                    | in git?           | who creates it                                  | read by                                      | holds                                                                     |
+| ----------------------- | ----------------- | ----------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------- |
+| `.env.example`          | **yes** (source)  | nobody — it is the template                     | nobody at runtime                            | the list of what the browser build may know                               |
+| `.env.local`            | no (`.gitignore`) | **you**, by copying the template                | Vite (`npm run dev`) and `npm run build:web` | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`                             |
+| `.env.staging`          | **yes**           | `npm run web:env`, from `workers/wrangler.toml` | `npm run build:web:staging`                  | same two names, plus `VITE_EXPECTED_PROJECT_REF`                          |
+| `.env.production`       | **yes**           | as above                                        | `npm run build:web:production`, CI fallback  | as above; a shell-exported `VITE_*` still wins, which is how CI overrides |
+| `workers/.dev.vars`     | no (`.gitignore`) | **you**, from `workers/.dev.vars.example`       | `wrangler dev` only (local Worker)           | the staging keys of the Worker, for local testing                         |
+| `workers/wrangler.toml` | **yes**           | already written                                 | `wrangler deploy`                            | non-secret variables (`[vars]`), per environment — **never a key**        |
 
 Cloudflare secrets and GitHub secrets are not files: they live on those platforms (steps below).
 

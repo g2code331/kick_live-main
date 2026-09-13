@@ -51,6 +51,34 @@ The hole is real but narrow (a signed-in caller could EXECUTE an admin-only `kic
 which each still gates on `is_admin()` internally, so it was a second line of defence rather than a bypass),
 and it is the reason this class of assertion is now unreadable in any other shape.
 
+## The admin paste that refused a _correct_ file, and a Pages deploy that "succeeded" with nothing in it
+
+Both came from the same operator round, and both were bugs in what this repository tells you to do.
+
+**`CREATE_ADMIN_PROFILE.sql` refused `g2code33@gmail.com`** — "nothing to do on purpose". The file used a placeholder
+_string_ as both the thing to overwrite and the sentinel to compare against, so an operator whose real address
+happened to equal it was refused as unedited. A sentinel that can collide with the value it stands in for is not a
+guard. Both inputs now default to `null` (nothing to overwrite), the "nothing supplied" refusal fires only when both
+are null, and **existence in `auth.users` is the only real test** — its message now states the user count, because
+"0 auth users" means _sign up first_ and "N auth users" means _your address is what is wrong_. Six executed cases
+cover it, including the exact one that failed here, plus the `p_user_id` path end to end.
+
+**The Pages deploy uploaded 75 files and served "KickLive is not configured."** Not a Pages failure: `npm run
+build:web` ran without the `VITE_SUPABASE_*` pair, and wrangler ships whatever `dist/web` holds. The previous advice
+— export the pair inline on the build line — is the kind of step that gets omitted on the _second_ of two copy-pasted
+commands. There are now tracked, generated mode files (`.env.staging`, `.env.production`, written by `npm run
+web:env` from `workers/wrangler.toml`, drift-checked by `web:env:check` and by `verify`) and `npm run
+build:web:staging` / `:production`. A missing mode file makes the **build refuse to run** instead of producing an
+unconfigured artefact. The bundle also carries `VITE_EXPECTED_PROJECT_REF`, which closes the case the old URL↔key
+cross-check could not see: a _consistent_ pair belonging to the other environment (staging's URL and staging's key,
+in a production bundle) now refuses at boot and names the mode to rebuild with. `check-secrets` counts the mode files
+as a source and prints where each value came from, so a fresh clone no longer reports two "missing required secrets"
+for values that are deliberately public and committed.
+
+`npm run verify` is **20 checks** now (was 18): mode-file sync, and the migrations executed on PGlite — both cheap,
+both run on a machine with no database and no Cloudflare account, and both would have caught a real defect from this
+week.
+
 ## The SQL now runs in CI-adjacent tooling, and four more real defects came out of it
 
 `supabase/SETUP.sql` is executed, not read: `npm run sql:run` (and the fallback inside `npm run check:sql`) applies all
@@ -88,7 +116,7 @@ account, happy path — are asserted in `tests/unit/sql-executes.test.mjs`, incl
 one admin.
 
 Current state on this tree: unit **629/629** · integration **99/99** · typecheck clean (four configs) · `format:check`
-clean · `verify` **18/18** · `ci:check` in sync · `sql:bundle:check` current · `sql:run` **846 statements, 0 failures** ·
+clean · `verify` **20/20** · `ci:check` in sync · `sql:bundle:check` current · `sql:run` **846 statements, 0 failures** ·
 `worker:routes -- --check` 101/101 · `gates --skip=6` 22 pass / 0 fail / 4 skip · `npm audit` **0 vulnerabilities**.
 `check:sql`'s behavioural flow still needs a DSN, and none of this was run inside Supabase itself: PGlite has no
 PostgREST, so RLS is not exercised for the owner.

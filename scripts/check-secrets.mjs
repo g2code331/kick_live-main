@@ -78,12 +78,15 @@ function describe(value) {
   return { state: "set", detail: shape };
 }
 
-export function audit(env, job) {
+export function audit(env, job, sources = {}) {
   const rows = [];
   for (const secret of SECRETS) {
     if (job && secret.jobs.length > 0 && !secret.jobs.includes(job)) continue;
     const value = env[secret.name];
-    const { state, detail } = describe(value);
+    let { state, detail } = describe(value);
+    // Naming the source is the difference between "configured" and "configured *from where*", which is the
+    // question an operator actually asks when a build points at the wrong project.
+    if (state === "set" && sources[secret.name]) detail += ` (from ${sources[secret.name]})`;
     const ok = state === "set";
     rows.push({ ...secret, state, detail, ok, appliesToJob: job ? secret.jobs.includes(job) : true });
   }
@@ -173,6 +176,30 @@ function reportScan(findings) {
   );
 }
 
+/** `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`, from the tracked mode files, and nothing else. */
+function readModeEnvDefaults() {
+  const out = {};
+  const sources = {};
+  const names = ["VITE_SUPABASE_URL", "VITE_SUPABASE_ANON_KEY"];
+  for (const file of [".env.production", ".env.staging"]) {
+    let text;
+    try {
+      text = fs.readFileSync(path.join(REPO_ROOT_FOR_SCAN, file), "utf8");
+    } catch {
+      continue;
+    }
+    for (const m of text.matchAll(/^([A-Z0-9_]+)=(.*)$/gm)) {
+      // production first in the list, and no overwriting: the deploy target's pair is the one worth reporting,
+      // and a "where did this come from" line that flips between files on different runs is noise, not signal.
+      if (names.includes(m[1]) && out[m[1]] === undefined && process.env[m[1]] === undefined && m[2].trim()) {
+        out[m[1]] = m[2].trim();
+        sources[m[1]] = file;
+      }
+    }
+  }
+  return { env: { ...process.env, ...out }, sources };
+}
+
 export function main() {
   const scanOnly = args.includes("--scan-only");
   const findings = scanSource(REPO_ROOT_FOR_SCAN);
@@ -182,7 +209,15 @@ export function main() {
     return findings.length === 0 ? 0 : 1;
   }
 
-  const { rows, blocking, optionalMissing } = audit(process.env, jobFlag);
+  // Two of the "required secrets" are public-by-design build inputs, and this repository now keeps them in the
+  // tracked per-mode env files (`.env.production` / `.env.staging`, generated from workers/wrangler.toml by
+  // `npm run web:env`). Treating those as a valid source is not a loosening: the values are readable by anyone
+  // who can load the site, and what the audit protects is *"does the artefact get a real URL and a matching key"*.
+  // Without this, a fresh clone reports two MISSING required secrets on a project that is in fact configured, and
+  // a checker that cries wolf on a supported state is one step away from being skipped. Service-role keys, JWT
+  // secrets and signing material are NOT read from these files — the generator refuses to write them.
+  const { env, sources } = readModeEnvDefaults();
+  const { rows, blocking, optionalMissing } = audit(env, jobFlag, sources);
   if (asJson) {
     console.log(JSON.stringify({ ok: blocking.length === 0, blocking: blocking.length, optionalMissing: optionalMissing.length, rows }, null, 2));
   } else {

@@ -72,24 +72,54 @@ function missing(name: string): never {
  * privileged click. `null` is never returned: use `isSupabaseConfigured()` for the "should we even
  * render the app" check, which is what `src/main.tsx` does to show a readable error screen.
  */
-export function getSupabaseEnv(): SupabaseEnv {
-  const url = read("VITE_SUPABASE_URL") || missing("VITE_SUPABASE_URL");
-  const anonKey = read("VITE_SUPABASE_ANON_KEY") || missing("VITE_SUPABASE_ANON_KEY");
+export interface SupabaseEnvValues {
+  url: string;
+  anonKey: string;
+  /** The project this bundle was *built* for, from `.env.<mode>` — empty when unbuilt-by-mode (dev, CI overrides). */
+  expectedRef: string;
+}
 
-  if (!/^https:\/\/[a-z0-9.-]+\/?$/i.test(url)) {
-    throw new ConfigError(`VITE_SUPABASE_URL must be an https:// URL (got "${url.replace(/[^\x20-\x7e]/g, "?").slice(0, 80)}").`);
+/**
+ * The pure half of `getSupabaseEnv`, exported so the three rules are testable without a Vite environment — the
+ * same reason `resolveApiBaseUrl` exists. A guard nobody can unit-test is a guard the next refactor deletes.
+ */
+export function assertSupabaseEnv(values: SupabaseEnvValues): { url: string; projectRef: string } {
+  const url = values.url.replace(/\/+$/, "");
+  const urlRef = projectRefFromUrl(url);
+  const keyRef = refFromAnonKey(values.anonKey);
+  if (values.url && !/^https:\/\/[a-z0-9.-]+$/i.test(url)) {
+    throw new ConfigError(`VITE_SUPABASE_URL must be an https:// URL (got "${values.url.replace(/[^\x20-\x7e]/g, "?").slice(0, 80)}").`);
   }
-  if (anonKey.length < 32) {
+  if (values.anonKey.length < 32) {
     throw new ConfigError("VITE_SUPABASE_ANON_KEY looks truncated — paste the full publishable key from the dashboard.");
   }
-
-  const urlRef = projectRefFromUrl(url);
-  const keyRef = refFromAnonKey(anonKey);
   if (urlRef && keyRef && urlRef !== keyRef) {
     throw new ConfigError(`Config mismatch: VITE_SUPABASE_URL points at project "${urlRef}" but VITE_SUPABASE_ANON_KEY was ` + `issued for project "${keyRef}". Both must come from the same project.`);
   }
+  // The third check, and the one that catches a build for the *wrong environment*: `VITE_EXPECTED_PROJECT_REF`
+  // is written by the per-mode env file (`npm run build:web:staging` / `:production`), so a production bundle
+  // assembled from a staging `.env.local` — internally consistent, valid pair, wrong database — refuses at boot
+  // instead of quietly reading and writing the other project. A URL and a key that agree with each other are not
+  // evidence that either is meant for *this* deployment; that is precisely the mistake this repository shipped
+  // once, and an earlier version of this file could not see it because both halves were individually valid.
+  if (values.expectedRef && urlRef && values.expectedRef !== urlRef) {
+    throw new ConfigError(
+      `Wrong environment: this bundle was built for project "${values.expectedRef}" but it is configured to talk to ` +
+        `"${urlRef}". Rebuild with the matching mode — \`npm run build:web:production\` or \`npm run build:web:staging\` — ` +
+        `or regenerate the mode file with \`npm run web:env\`.`,
+    );
+  }
+  if (values.expectedRef && keyRef && values.expectedRef !== keyRef) {
+    throw new ConfigError(`Wrong environment: this bundle was built for project "${values.expectedRef}" but its anon key was issued for "${keyRef}".`);
+  }
+  return { url, projectRef: urlRef };
+}
 
-  return { url: url.replace(/\/+$/, ""), anonKey, projectRef: urlRef };
+export function getSupabaseEnv(): SupabaseEnv {
+  const url = read("VITE_SUPABASE_URL") || missing("VITE_SUPABASE_URL");
+  const anonKey = read("VITE_SUPABASE_ANON_KEY") || missing("VITE_SUPABASE_ANON_KEY");
+  const { projectRef } = assertSupabaseEnv({ url, anonKey, expectedRef: read("VITE_EXPECTED_PROJECT_REF") });
+  return { url, anonKey, projectRef };
 }
 
 /**

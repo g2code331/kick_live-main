@@ -9,13 +9,19 @@
 --
 -- HOW TO RUN IT (Supabase dashboard → SQL editor → New query → paste → Run), as `postgres`:
 --   1. Sign up in the app with the account that should be admin (or create it in Auth → Users).
---   2. Replace ONE placeholder below with that address, and TYPE it: do not paste it out of a chat, a
---      ticket or a markdown preview. Those wrap an address in a markdown link as soon as you paste, and
---      an address wearing markdown brackets is not an address — the guard in this file refuses it rather
---      than granting admin to a typo. (If your editor autolinks no matter what, set p_user_id instead:
---      a bare uuid cannot be autolinked. A gmail.com address is what gets linked most aggressively.)
---      Re-run after each edit: the file is idempotent, it only ever touches the one account you named.
---   3. Run. The Results grid must come back with the new admin; anything else and the script raised.
+--   2. Set ONE of the two values below to that account, and TYPE it: do not paste an address out of a chat,
+--      a ticket or a markdown preview. Those wrap it in a markdown link as soon as you paste, and an address
+--      wearing brackets is not an address — the guard below refuses it rather than granting admin to a typo.
+--      If your editor autolinks no matter what, set p_user_id instead: a bare uuid cannot be autolinked.
+--      Both default to NULL, and that is deliberate. An earlier version of this file used a placeholder
+--      STRING and compared the input against it, which had two failures: an address that happens to equal
+--      the sentinel (it is, after all, the operator's own address in this repository) was refused as
+--      "unedited", and the comparison was a guess about the operator's editor rather than a fact about the
+--      database. NULL means "not supplied" with no possible collision; whether an account exists is a
+--      question auth.users answers exactly. So there is no placeholder left to overwrite anywhere.
+--   3. Run. The Results grid must come back with the new admin; anything else and the script raised, with
+--      the reason in the message. Re-running is safe: the grant is idempotent and only ever touches the
+--      one account named.
 --
 -- Read before running:
 --   1. Once per fresh project — this is the "who grants the first admin" answer, not a day-to-day tool.
@@ -33,23 +39,24 @@ declare
   -- FILL IN EXACTLY ONE OF THESE TWO, then Run. Type the value; do not paste it
   -- out of a chat or a ticket (see the note at the top about markdown links).
   -- ───────────────────────────────────────────────────────────────────────────
-  p_email    text := 'REPLACE-WITH-AN-EXISTING-ACCOUNT-EMAIL';
+  p_email    text := null;      -- e.g. 'you@example.com' — typed, never pasted out of a chat
   p_user_id  uuid := null;      -- e.g. '3f1a…' when you would rather not put an address in the editor
   v_user_id  uuid;
   v_email    text;
   v_count    text;
-  v_input    text := coalesce(nullif(btrim(p_email), ''), 'REPLACE-WITH-AN-EXISTING-ACCOUNT-EMAIL');
+  v_input    text := nullif(btrim(coalesce(p_email, '')), '');
 begin
-  if p_user_id is not null and v_input <> 'REPLACE-WITH-AN-EXISTING-ACCOUNT-EMAIL' then
+  if p_user_id is not null and v_input is not null then
     raise exception 'p_email and p_user_id are both set — point at one account, not two';
+  end if;
+  if p_user_id is null and v_input is null then
+    raise exception
+      'nothing supplied: set exactly one of p_email / p_user_id (both are null). The account must already '
+      'exist — sign up in the app, or Auth → Users → Add user, then re-run. This script will not create an '
+      'identity and it will not guess one.';
   end if;
 
   if p_user_id is null then
-    if v_input = 'REPLACE-WITH-AN-EXISTING-ACCOUNT-EMAIL' then
-      raise exception
-        'nothing to do on purpose: set p_email (or p_user_id) to an account that already exists in auth.users. '
-        'Sign up in the app first — this script will not create an identity and it will not guess one.';
-    end if;
     -- A markdown link is the failure this guard exists for. `[you@x.com](mailto:you@x.com)` is a perfectly
     -- valid string literal, so without this the script would report "no auth.users row" and send you off to
     -- check whether the account exists when the address is what is broken.
@@ -73,10 +80,15 @@ begin
 
   if v_user_id is null then
     select count(*)::text into v_count from auth.users;
+    -- Two different situations, and the user count tells you which one you are in: 0 means nobody has
+    -- signed up at all (create the account first), N > 0 means the account list is fine and the *address*
+    -- is what does not match — a typo, a different case than Supabase stored, or an autolinked paste.
     raise exception
-      'no auth.users row for % — that is the whole answer: create the account first (sign up in the app, or '
-      'Auth → Users → Add user), then re-run. This project currently has % auth user(s). If % ends in a '
-      'bracket, an autolinker ate your address while you were pasting: type it in.', v_input, v_count, v_input;
+      'no auth.users row for % (this project has % auth user(s)). % — if that count is 0, sign up / Add user '
+      'first and re-run; if it is not, the address above is not one of them: check spelling and case, and if '
+      'it ends in a bracket an autolinker ate it while you were pasting, so type it in.',
+      v_input, v_count,
+      case when v_count = '0' then 'no accounts exist yet' else 'the address is not among them' end;
   end if;
 
   -- The on-signup trigger normally created this row already; this only covers a profile that was

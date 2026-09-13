@@ -92,7 +92,11 @@ instead and touch nothing else.
 > into the SQL editor is where that happens. The script then looks for an account literally named
 > `[you@gmail.com](mailto:you@…` and refuses, which reads as "the script is broken" and is not: it is the guard
 > doing its job — an address wearing markdown brackets is not an address, and this file grants admin.
-> `REPLACE-WITH-AN-EXISTING-ACCOUNT-EMAIL` unchanged raises the same refusal on purpose.
+> Running it untouched raises `nothing supplied: set exactly one of p_email / p_user_id`, and running it with an
+> address that does not exist yet raises `no auth.users row … this project has 0 auth user(s)`. The second message
+> is the one to read carefully: **0 users means you have not signed up in this project yet** — go to the staging site
+> and register first, then re-run. Nothing here creates an account, and nothing needs an account to exist that
+> cannot be looked up in `auth.users`.
 
 It is intentionally **not** in `SETUP.sql` (a bundle must not be able to mint an admin), it only ever touches the
 one account you named, and it is safe to re-run. Further role changes go through the admin UI
@@ -165,6 +169,13 @@ npx wrangler secret list --config workers/wrangler.toml --env production       #
 
 ## 5 · Pages: create the two projects, give CI the keys, deploy
 
+> **If the site already deployed and shows "KickLive is not configured"**, nothing is wrong with Pages: the bundle
+> was built without a Supabase pair. Two commands clear it —
+> `npm run build:web:staging && npx wrangler pages deploy dist/web --project-name kicklive-web-staging --branch main`
+> — and `npm run web:env:check` proves the repo is in step with `workers/wrangler.toml`. A bare `npm run
+build:web` can no longer emit a silently unconfigured bundle for a _staged_ project: a missing `.env.<mode>`
+> is now a build error, on purpose, because an artefact that boots into an error screen still deploys green.
+
 ```bash
 npx wrangler pages project create kicklive-web --production-branch main
 npx wrangler pages project create kicklive-web-staging --production-branch main
@@ -176,16 +187,22 @@ it has not run in the same shell — that is the usual reason a Pages project si
 `probe-deploy.sh` check right below then reports FAIL for a project that is simply empty:
 
 ```bash
-# staging: build with the staging pair, then push the artefact
-VITE_SUPABASE_URL=https://fnefpcjeebawsebxjhcf.supabase.co VITE_SUPABASE_ANON_KEY=<staging anon key> npm run build:web
+# staging: build with the staging config baked in, then push the artefact
+npm run build:web:staging
 npx wrangler pages deploy dist/web --project-name kicklive-web-staging --branch main
 
-# production: the same two lines, with the production pair. Explicit, never "plain": a production bundle built from
-# a `.env.local` that still holds the staging pair is a failure this repo has already had once, and the boot guard
-# cannot catch it because both values are individually valid.
-VITE_SUPABASE_URL=https://xvksxqrmdbbinlrjctri.supabase.co VITE_SUPABASE_ANON_KEY=<production anon key> npm run build:web
+# production: the same two lines, and the *only* difference is the mode
+npm run build:web:production
 npx wrangler pages deploy dist/web --project-name kicklive-web --branch main
 ```
+
+`build:web:staging` / `:production` are the whole point of this step. A Pages deploy that "succeeds" and then shows
+**"KickLive is not configured"** is a build that ran without `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` — wrangler
+uploads whatever `dist/web` holds and is indifferent to whether it can talk to a backend. Do not export the pair
+inline either: the mode files (`.env.staging`, `.env.production`) are **generated from `workers/wrangler.toml`** by
+`npm run web:env` and tracked, so the values cannot be mistyped, cannot drift from the Worker's config
+(`npm run web:env:check` fails if they do), and cannot be left out of the second of two copy-pasted commands. If a
+mode file is missing the build **refuses to run** rather than producing an empty-looking app.
 
 **`https://kicklive-web.pages.dev` (and `-staging`) exists only after this first deploy** — before it the domain 404s and that is
 correct. Then `bash scripts/ci/probe-deploy.sh https://kicklive-web.pages.dev` must print PASS (routes served, missing hashed asset
@@ -236,7 +253,7 @@ and watch it replay and catch up), one real push to one device twice for the sam
 | symptom                                                             | cause, in the order it is actually likely                                                                                                                                                                                                                                                             |
 | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | deep link 404s / a stale asset returns HTML                         | the Pages contract files did not ship: `dist/web` must contain `functions/[[catchall]].js`, `_routes.json`, `_headers` — `npm run verify` checks this pre-build                                                                                                                                       |
-| app boots against the wrong data                                    | the `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` pair in that environment belongs to the other project — the boot guard says so in the console                                                                                                                                                        |
+| app boots against the wrong data                                    | the pair belongs to the other project. A URL/key that disagree was already refused; a _consistent_ wrong pair (staging's, in a production bundle) is now caught too, by `VITE_EXPECTED_PROJECT_REF` from the mode file the build used — build:web:production / :staging, not `npm run build:web`      |
 | `relation "public.profiles" does not exist` while pasting SQL       | you pasted an old copy: tables must be created before the `LANGUAGE sql` helpers read them. `npm run sql:bundle:check` and re-paste                                                                                                                                                                   |
 | `hardening failed: …` from a section that looks like it did the job | the bundle was current? Before 2026-09-13 these assertions read `has_column_privilege()`, which answers "true" for the superuser the SQL editor is — so they fired on a **correctly** hardened database. `npm run sql:bundle:check`, then re-paste `SETUP.sql`: re-running is the fix, not a rollback |
 | `SKIP` from `check-sql`                                             | `npm i --no-save pg` missing, a literal `<placeholder>` DSN, or no `--allow-any-database` for Supabase                                                                                                                                                                                                |

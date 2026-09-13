@@ -46,10 +46,12 @@ describe("the one-file SQL bundle", () => {
   });
 
   it("does not smuggle in the admin bootstrap", () => {
-    assert.ok(
-      !bundle.includes("REPLACE-WITH-AN-EXISTING-ACCOUNT-EMAIL"),
-      "the profile grant names a real user and assumes a superuser session — SETUP.sql stays runnable by whoever the dashboard hands the editor to",
-    );
+    // The bundle is pasted by whoever the dashboard hands the editor to; the admin grant assumes a superuser
+    // session and names a real account, so it must stay a separate reviewed step. Pinned on the *grant*, not
+    // on a sentinel string: the check has to keep meaning "no admin minting in here" whatever the bootstrap's
+    // placeholders happen to be called this month.
+    assert.ok(!bundle.includes("nothing supplied: set exactly one of p_email"), "the bootstrap's refusal must not live in the bundle");
+    assert.ok(!/\"p_email\"/.test(bundle) && !bundle.includes("set public.kicklive_set_user_role"), "nor its inputs, nor a direct role write");
     assert.ok(fs.existsSync(path.join(REPO, "CREATE_ADMIN_PROFILE.sql")), "it remains its own reviewed step, documented after the bundle");
   });
 
