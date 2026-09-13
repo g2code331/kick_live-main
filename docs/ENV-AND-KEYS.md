@@ -72,17 +72,21 @@ Production gets its secrets from `wrangler secret put`, per environment.
 The database and the Worker talk to FCM directly; there is no Firebase SDK in the browser and no VAPID key. You need three things
 from the **Firebase console** (console.firebase.google.com → your project → ⚙ Project settings):
 
-| what                                                             | where                                                                                | how the app learns it                                                |
-| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
-| Project id (the string in the console URL, e.g. `kicklive-push`) | `workers/wrangler.toml` → `[env.production.vars]` **and** `[env.staging.vars]`       | `FCM_PROJECT_ID` (a var, not a secret)                               |
-| The downloaded service-account JSON                              | `npx wrangler secret put FCM_SERVICE_ACCOUNT --env production` (and `--env staging`) | `FCM_SERVICE_ACCOUNT` (secret only)                                  |
-| Nothing else                                                     | —                                                                                    | the client email inside the JSON is public to whoever holds the file |
+| what                                                                                                          | where                                                                                | how the app learns it                  |
+| ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | -------------------------------------- |
+| Project id (the string in the console URL, e.g. `kicklive-push`)                                              | `workers/wrangler.toml` → `[env.production.vars]` **and** `[env.staging.vars]`       | `FCM_PROJECT_ID` (a var, not a secret) |
+| The downloaded service-account JSON                                                                           | `npx wrangler secret put FCM_SERVICE_ACCOUNT --env production` (and `--env staging`) | `FCM_SERVICE_ACCOUNT` (secret only)    |
+| For a laptop, both lines above go in `workers/.dev.vars` instead (git-ignored, read only by `wrangler dev`) — | the client email inside the JSON is public to whoever holds the file                 |
 
 Then, in the **Google Cloud** console for that same project (APIs & Services → Library), enable **Firebase Cloud Messaging API
 (V1)**. Without it every send answers `403 PERMISSION_DENIED`, and the Worker's queue path will look like a push bug rather than a
 disabled API.
 
-And the two rules that make this safe:
+And the three rules that make this safe:
+
+- Nothing named `VITE_FIREBASE_*` exists in this project, and no Firebase SDK is loaded in the browser. The push path is
+  `client → /api → Worker → FCM REST`; the browser holds a device token, not a Firebase config. So there is no Firebase key to put
+  in `.env.local` — writing one there does nothing, and the absence of one is not a bug.
 
 - The JSON never enters the repository, `.env.local`, `wrangler.toml`, or any `VITE_*` variable. `check-secrets.mjs` fails the
   build on a `"type": "service_account"` document, a PEM header, or a `firebase-adminsdk-…@` client email anywhere in the tree.
