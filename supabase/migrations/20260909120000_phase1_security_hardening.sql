@@ -207,15 +207,91 @@ create trigger kicklive_guard_profile_privileges
   before insert or update on public.profiles
   for each row execute function public.kicklive_guard_profile_privileges();
 
--- Column-level revoke: even if someone later re-creates a permissive policy, the role/email columns
--- are simply not updatable by client roles. Grants are checked before policies, so this wins.
--- `from public` is not a courtesy here: with the default privileges Supabase creates the client roles hold their own
--- ACL entries, and a revoke that names only PUBLIC leaves those entries exactly where they were.
-revoke update (role)  on public.profiles from authenticated;
-revoke update (role)  on public.profiles from anon;
-revoke update (email) on public.profiles from authenticated;
-revoke update (email) on public.profiles from anon;
-revoke update (role), update (email) on public.profiles from public;
+-- Column-level revoke: even if someone later re-creates a permissive policy, the role/email columns are
+-- simply not updatable by client roles, and grants are checked before policies, so that wins.
+--
+-- THIS BLOCK WAS WRONG, and a real Postgres said so. `revoke update (role)` removes a COLUMN aclitem; it
+-- cannot touch the table-wide `authenticated=arwdDxt/postgres` entry that Supabase's default privileges put
+-- there, and a table-wide UPDATE already covers every column of the table. So the revoke ran, updated zero
+-- rows of the ACL, and `profiles.role` stayed writable by every signed-in account — which is exactly what the
+-- self-check in §8 was built to notice, and which is why the paste finally failed with
+-- "profiles.role is still granted UPDATE to authenticated" instead of quietly "succeeding" the way the
+-- has_column_privilege() version always had. Verified on PG 18 (PGlite): before the change
+-- `has_column_privilege('authenticated','public.profiles','role','UPDATE')` is true and the UPDATE succeeds.
+--
+-- The only shape that actually removes it is revoke the privilege at table level, then re-grant it column by
+-- column minus the ones that must not be writable. The app keeps editing its own username/phone/avatar because
+-- the re-grant is derived from pg_attribute, so a column added by a later phase is covered without touching
+-- this file. PUBLIC gets no re-grant at all: §3's stated rule is that a browser session which is not signed
+-- in writes nothing, and the per-column grant to `authenticated` is what makes that safe rather than lucky.
+-- ----------------------------------------------------------------------------
+-- 2·b · NARROW A TABLE-WIDE PRIVILEGE TO "EVERY COLUMN BUT THESE"
+-- ----------------------------------------------------------------------------
+-- There is no `grant update (all columns except role)` in SQL, so the only way to take one column away from a
+-- role that holds the whole table is to take the table away and hand back the columns. Deriving the column list
+-- from the catalog rather than hardcoding it is the point: the enumeration stays correct when a later phase
+-- adds a column, where a literal list would silently stop granting it — a bug whose symptom is an app that
+-- cannot save a field, at 20:00 on a Sunday, in a file that had nothing to do with it.
+--
+-- SECURITY DEFINER with a pinned path because it runs `grant`, which only an owner or a role with grant
+-- options may do; the identifiers go through format('%I') so the statement cannot be shaped by an argument.
+create or replace function public.kicklive_narrow_column_grant(
+  p_privilege text,             -- 'update' | 'insert' | 'references' | 'trigger' | 'select' | 'delete'
+  p_table text,                 -- 'public.profiles'
+  p_role text,                  -- 'authenticated'
+  p_exclude text[]              -- columns to withhold, e.g. array['role','email']
+)
+returns text                    -- what it did, for a RAISE NOTICE or an audit row
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_rel   oid := to_regclass(p_table);
+  v_cols  text;
+  v_priv  text := lower(p_privilege);
+begin
+  if v_rel is null then
+    raise exception 'kicklive_narrow_column_grant: no such relation %', p_table using errcode = '42704';
+  end if;
+  if v_priv not in ('select', 'insert', 'update', 'delete', 'references', 'trigger') then
+    raise exception 'kicklive_narrow_column_grant: % is not a column-level privilege', p_privilege using errcode = '22023';
+  end if;
+  if p_role = any (array['postgres', 'supabase_admin', 'service_role']) then
+    -- Revoking from the owner or from the Worker's own role would break the app rather than protect it, and
+    -- neither is a client role that a browser can hold. Refuse; do not guess.
+    raise exception 'kicklive_narrow_column_grant: refusing to narrow % for %', p_role, p_privilege using errcode = '42501';
+  end if;
+
+  execute format('revoke %s on %s from %I', v_priv, p_table, p_role);
+
+  select string_agg(format('%I', a.attname), ', ' order by a.attnum)
+    into v_cols
+    from pg_attribute a
+   where a.attrelid = v_rel and a.attnum > 0 and not a.attisdropped
+     and (p_exclude is null or not (a.attname = any (p_exclude)));
+
+  if v_cols is null then
+    return format('revoked %s on %s from %s (every column is excluded, so nothing is granted back)', v_priv, p_table, p_role);
+  end if;
+
+  execute format('grant %s (%s) on %s to %I', v_priv, v_cols, p_table, p_role);
+  return format('revoked %s on %s from %s, re-granted it on every column except %s',
+                v_priv, p_table, p_role, coalesce(array_to_string(p_exclude, '/'), 'nothing'));
+end;
+$$;
+
+comment on function public.kicklive_narrow_column_grant(text, text, text, text[]) is
+  'Remove one privilege from a role on named columns of a table it holds at whole-table level, by revoking the '
+  'table-wide grant and re-granting every other column. The only shape that actually removes a column privilege '
+  'from a role Supabase granted ALL to; column list read from pg_attribute so later phases cannot be forgotten.';
+
+revoke all on function public.kicklive_narrow_column_grant(text, text, text, text[]) from public, anon, authenticated;
+grant execute on function public.kicklive_narrow_column_grant(text, text, text, text[]) to service_role;
+
+select public.kicklive_narrow_column_grant('update', 'public.profiles', 'authenticated', array['role', 'email']);
+select public.kicklive_narrow_column_grant('update', 'public.profiles', 'anon', array['role', 'email']);
+revoke update on public.profiles from public;
 
 -- ============================================================================
 -- 2a · HOW A GRANT IS CHECKED IN THIS REPOSITORY (used by every verify block that
@@ -241,6 +317,13 @@ revoke update (role), update (email) on public.profiles from public;
 -- lives in `pg_attribute.attacl` for that column, and a table-wide grant covers every column of it. So a
 -- column check consults both, in that order. `aclexplode()` yields exactly four columns — grantor, grantee,
 -- privilege_type, is_grantable — and nothing that names a fifth is a valid reading of an ACL. This repository
+-- `set search_path = pg_catalog, public, pg_temp` does two jobs. pg_catalog first, so a role able to create
+-- a `pg_roles` somewhere later in the path cannot decide what every assertion in nine migrations sees. public
+-- as well, because `oid::regprocedure::text` — the way phase 8 and phase 9 name the function they are asking
+-- about — is search-path *dependent*: with pg_catalog alone it emits an unqualified name for a function in a
+-- schema that is not on the path, and `to_regprocedure` of that string is NULL, which made the helper raise on
+-- a correct database. An assertion must not depend on which schema the caller happened to be using.
+--
 -- has no Postgres between writing this SQL and applying it in a dashboard, so that sentence is the only layer
 -- that can catch an invented column name, and tests/unit/sql-shape.test.ts enforces it.
 --
@@ -259,7 +342,7 @@ create or replace function public.kicklive_has_grant(
 )
 returns boolean
 language plpgsql stable
-set search_path = pg_catalog
+set search_path = pg_catalog, public, pg_temp
 as $hg$
 declare
   v_rel     oid;
@@ -274,7 +357,10 @@ begin
   -- comparing a letter there matches no row for anyone, which reads as 'not granted' — it vacuums
   -- every negative assertion while dooming every positive one, and it did exactly that in this bundle. Call
   -- sites keep the letters so a check still reads like the statement it verifies.
-  v_names := case lower(p_privilege)
+  -- case-sensitive on purpose: the ACL codes carry meaning in their case (D is TRUNCATE, d is DELETE; U is
+  -- USAGE, X is EXECUTE), so folding the argument to one case would map 'X' onto the 'x' of REFERENCES and
+  -- silently un-answer every function check. Long names are compared as aclexplode reports them.
+  v_names := case p_privilege
     when 'r' then array['SELECT']
     when 'a' then array['INSERT']
     when 'w' then array['UPDATE']
@@ -838,13 +924,27 @@ begin
   end if;
 
   if public.kicklive_has_grant('authenticated', 'public.profiles', 'w', 'role') then
-    raise exception 'hardening failed: profiles.role is still granted UPDATE to authenticated — revoke did not land';
+    raise exception 'hardening failed: profiles.role is still granted UPDATE to authenticated — the table-wide '
+      'grant was never narrowed (kicklive_narrow_column_grant did not run, or PUBLIC still holds update)';
   end if;
   if public.kicklive_has_grant('anon', 'public.profiles', 'w', 'role') then
     raise exception 'hardening failed: profiles.role is still granted UPDATE to anon';
   end if;
   if public.kicklive_has_grant('authenticated', 'public.profiles', 'w', 'email') then
     raise exception 'hardening failed: profiles.email is still granted UPDATE to authenticated';
+  end if;
+
+  -- The other half of a narrowing: it must withhold role/email *and* leave the ordinary profile edit alone. A
+  -- grant statement that over-revokes shows up as users unable to save their own profile, which is a worse
+  -- outage than the hole it closed, so both directions are asserted rather than discovered in the field.
+  if not public.kicklive_has_grant('authenticated', 'public.profiles', 'w', 'username') then
+    raise exception 'hardening failed: the narrowing took profiles.username away from authenticated; the app can no longer edit a profile';
+  end if;
+  if public.kicklive_has_grant('public', 'public.profiles', 'w') then
+    raise exception 'hardening failed: PUBLIC still holds table-wide UPDATE on profiles';
+  end if;
+  if public.kicklive_has_grant('anon', 'public.profiles', 'w', 'username') then
+    raise exception 'hardening failed: anon can still write profiles.username; section 3 promised no anonymous DML anywhere';
   end if;
 end;
 $$;

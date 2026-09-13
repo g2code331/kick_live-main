@@ -33,6 +33,7 @@
     "version:check": "node --import ./scripts/lib/ts-loader.mjs scripts/version.mjs check",
     "version:write": "node --import ./scripts/lib/ts-loader.mjs scripts/version.mjs write",
     "check:sql": "node --import ./scripts/lib/ts-loader.mjs scripts/check-sql.mjs",
+    "sql:run": "node --import ./scripts/lib/ts-loader.mjs scripts/sql-pglite.mjs",
     "check:secrets": "node --import ./scripts/lib/ts-loader.mjs scripts/check-secrets.mjs",
     "sql:bundle": "node --import ./scripts/lib/ts-loader.mjs scripts/build-sql-bundle.mjs",
     "sql:bundle:check": "node --import ./scripts/lib/ts-loader.mjs scripts/build-sql-bundle.mjs --check",
@@ -52,7 +53,8 @@
     "worker:local": "node --import ./scripts/lib/ts-loader.mjs scripts/worker-local.mjs",
     "worker:deploy:staging": "wrangler deploy --config workers/wrangler.toml --env staging",
     "worker:deploy:production": "wrangler deploy --config workers/wrangler.toml --env production",
-    "worker:routes": "node --import ./scripts/lib/ts-loader.mjs scripts/worker-routes.mjs"
+    "worker:routes": "node --import ./scripts/lib/ts-loader.mjs scripts/worker-routes.mjs",
+    "ci:install-loader": "node --import ./scripts/lib/ts-loader.mjs scripts/install-ts-loader.mjs --write"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.109.0",
@@ -68,6 +70,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260908.1",
+    "@electric-sql/pglite": "^0.5.8",
     "@electron/asar": "4.3.0",
     "@tailwindcss/vite": "4.1.17",
     "@types/node": "22.19.17",

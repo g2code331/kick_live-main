@@ -285,8 +285,25 @@ describe("the SQL checker is wired in, not decorative", () => {
   it("the checker skips loudly rather than quietly", () => {
     const source = fs.readFileSync(path.join(REPO, "scripts/check-sql.mjs"), "utf8");
     assert.match(source, /SKIP/, "a checker with no database must say SKIP in its output");
-    assert.match(source, /Do not treat this SKIP as a pass/, "and must say, in the same breath, that a SKIP is not a pass");
+    assert.match(source, /nothing was executed, so this remains a SKIP/, "and must say what the fallback did not cover");
     assert.match(source, /refusing to run against/, "and must refuse a DSN that does not look like a scratch database");
+  });
+
+  it("a SKIP still executes what a local engine can execute", () => {
+    // Three privilege defects in this repository were invisible to every static check and only appeared when a
+    // human pasted the bundle into the Supabase editor. `check:sql` used to answer that situation with "SKIP"
+    // and a exit-0; now it runs the chain on PGlite first, so a machine without a database still executes SQL
+    // instead of only reading it. A fallback that quietly became a full pass would be worse than the SKIP, so
+    // the skip text, the caveat and the non-zero exit on failure are all pinned here.
+    const checker = fs.readFileSync(path.join(REPO, "scripts/check-sql.mjs"), "utf8");
+    assert.match(checker, /await import\("\.\/sql-pglite\.mjs"\)/, "the skip branch must run the local engine");
+    assert.match(checker, /return local\.ok \? 0 : 1/, "and its verdict must reach the exit code");
+    const local = fs.readFileSync(path.join(REPO, "scripts/sql-pglite.mjs"), "utf8");
+    assert.match(local, /alter default privileges in schema public grant all on tables/, "the run is meaningless without Supabase\'s default ALL grants");
+    assert.match(local, /no PostgREST|Not a Supabase project|no PostgREST/i, "and it must say what it is not");
+    const pkg = JSON.parse(fs.readFileSync(path.join(REPO, "package.json"), "utf8")) as { scripts?: Record<string, string>; devDependencies?: Record<string, string> };
+    assert.ok(pkg.scripts?.["sql:run"]?.includes("sql-pglite"), "npm run sql:run must expose the runner on its own");
+    assert.ok(pkg.devDependencies?.["@electric-sql/pglite"], "the engine must be a declared dev dependency, not an ad-hoc install");
   });
   it("the behavioural flow is a repo file, not a scratch one", () => {
     assert.ok(fs.existsSync(path.join(REPO, "scripts/sql-flow.mjs")), "the flow that exercises save/refuse/serve paths belongs in the repo");
@@ -539,6 +556,41 @@ describe("the admin bootstrap refuses to guess who the admin is", () => {
   });
 });
 
+// Shared by both ordering rules: the base schema plus every migration, in the order an operator applies them.
+const targets: Array<[string, string]> = [
+  ["KICKLIVE_FINAL_SCHEMA.sql", fs.readFileSync(path.join(REPO, "KICKLIVE_FINAL_SCHEMA.sql"), "utf8")],
+  ...files.map((f) => [f, fs.readFileSync(path.join(MIGRATIONS_DIR, f), "utf8")] as [string, string]),
+];
+
+describe("a LANGUAGE sql function is never created before anything its body resolves eagerly", () => {
+  // Same rule, second object kind: `LANGUAGE sql` bodies are parsed *and planned* at CREATE FUNCTION time, so
+  // a call to a function the file defines further down is `42P01: function … does not exist` on an empty
+  // project. Phase 7 shipped exactly that for weeks — `kicklive_ad_eligibility` called `kicklive_ad_targeting_matches`
+  // 100 lines before it was created — and it survived every test because the flow that would catch it needs a
+  // database. `tests/unit/sql-executes.test.mjs` now runs the chain on a real one; this rule is the cheap version
+  // that also says *which line* to move.
+  for (const [name, raw] of targets) {
+    it(`${name}: every LANGUAGE sql body calls only functions the file already created`, () => {
+      const defined = new Map<string, number>();
+      for (const m of raw.matchAll(/CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(?:public\.)?"?(\w+)"?\s*\(/gi)) {
+        const key = m[1]!.toLowerCase();
+        if (!defined.has(key)) defined.set(key, raw.slice(0, m.index).split("\n").length);
+      }
+      for (const fn of raw.matchAll(/CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+[\w."]+\s*\([^)]*\)[^;]*?LANGUAGE\s+sql\b[\s\S]*?(\$[a-z_0-9]*\$)([\s\S]*?)\1\s*;/gi)) {
+        const at = raw.slice(0, fn.index).split("\n").length;
+        for (const call of fn[2]!.matchAll(/(?:public\.)?(kicklive_[a-z0-9_]+)\s*\(/gi)) {
+          const line = defined.get(call[1]!.toLowerCase());
+          if (line === undefined) continue; // helper defined in another file — legitimate, they apply in order
+          assert.ok(
+            line <= at,
+            `${name}: the LANGUAGE sql function at line ${at} calls ${call[1]}, which the file only creates at line ${line} — Postgres resolves that call at CREATE FUNCTION time (42P01 on an empty project)`,
+          );
+        }
+      }
+    });
+  }
+});
+
 describe("a LANGUAGE sql function is never created before the table its body reads", () => {
   // The bug this file exists for: KICKLIVE_FINAL_SCHEMA.sql created `is_admin()` (`LANGUAGE sql`, body
   // `SELECT 1 FROM public.profiles`) in SECTION 2, while `profiles` was not created until SECTION 3. Postgres
@@ -547,11 +599,6 @@ describe("a LANGUAGE sql function is never created before the table its body rea
   // project ever got. A migration that references a table created by an EARLIER file is fine (operators apply
   // them in order); a file that references its own later creations is not, and that ordering is invisible in a
   // text review unless someone knows Postgres validates `sql` bodies eagerly but leaves `plpgsql` bodies lazy.
-  const targets: Array<[string, string]> = [
-    ["KICKLIVE_FINAL_SCHEMA.sql", fs.readFileSync(path.join(REPO, "KICKLIVE_FINAL_SCHEMA.sql"), "utf8")],
-    ...files.map((f) => [f, fs.readFileSync(path.join(MIGRATIONS_DIR, f), "utf8")] as [string, string]),
-  ];
-
   for (const [name, raw] of targets) {
     it(`${name}: every LANGUAGE sql body reads only tables the file already created`, () => {
       const lines = raw.split("\n");

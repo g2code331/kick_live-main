@@ -579,6 +579,56 @@ comment on table public.advertisement_analytics is
 -- "is it live" rather than "will it survive a cache"); and the expiry sweep and the serving path are then
 -- provably asking the same question.
 
+-- The targeting predicate, separate because the admin preview, the serving path and the event validator
+-- must evaluate it identically, and because a nested EXISTS inside the CASE above is unreadable.
+--
+-- A context is what the *page* knows about itself ("match page, match 431, competition 12, season 2026,
+-- teams 7 and 9"), never what it knows about the visitor. An empty targeting object matches everything. A
+-- targeting key the context cannot answer (a team page has no `match_ids`) does NOT match: the
+-- conservative direction, because "targeted at team 7" must not quietly become "shown everywhere" just
+-- because the page did not know what a match id was.
+create or replace function public.kicklive_ad_targeting_matches(p_targeting jsonb, p_context jsonb, p_now timestamptz default now())
+returns boolean
+language sql stable
+set search_path = public, pg_temp
+as $fn$
+  with required as (
+    select e.key, v.value #>> '{}' as wanted
+      from jsonb_each(coalesce(nullif(p_targeting, 'null'::jsonb), '{}'::jsonb)) e,
+           jsonb_array_elements(e.value) v
+  ),
+  supplied as (
+    select e.key, v.value #>> '{}' as got
+      from jsonb_each(coalesce(nullif(p_context, 'null'::jsonb), '{}'::jsonb)) e,
+           jsonb_array_elements(e.value) v
+  )
+  select case
+           when (select count(1) from required) = 0 then true
+           when exists (
+                    select 1 from (select distinct key from required) rk
+                     where not exists (select 1 from supplied s where s.key = rk.key)
+                  ) then false
+           when exists (
+                    select 1 from required r
+                     where not exists (select 1 from supplied s where s.key = r.key and s.got = r.wanted)
+                  ) then false
+           -- `day_parts` is the one derived key, and the *server's* clock decides it. A client-supplied
+           -- local time would be both spoofable and wrong for a 22:00 kickoff watched from another
+           -- timezone, and "evening" is a statement about the match schedule, not about the viewer.
+           when exists (
+                    select 1 from required r
+                     where r.key = 'day_parts'
+                       and r.wanted <> case
+                             when extract(hour from p_now) between 5  and 11 then 'morning'
+                             when extract(hour from p_now) between 12 and 16 then 'afternoon'
+                             when extract(hour from p_now) between 17 and 21 then 'evening'
+                             else 'night'
+                           end
+                  ) then false
+           else true
+         end
+$fn$;
+
 create or replace function public.kicklive_ad_eligibility(
   p_advertisement_id uuid,
   p_placement_code   text,
@@ -676,55 +726,7 @@ as $fn$
   )
 $fn$;
 
--- The targeting predicate, separate because the admin preview, the serving path and the event validator
--- must evaluate it identically, and because a nested EXISTS inside the CASE above is unreadable.
---
--- A context is what the *page* knows about itself ("match page, match 431, competition 12, season 2026,
--- teams 7 and 9"), never what it knows about the visitor. An empty targeting object matches everything. A
--- targeting key the context cannot answer (a team page has no `match_ids`) does NOT match: the
--- conservative direction, because "targeted at team 7" must not quietly become "shown everywhere" just
--- because the page did not know what a match id was.
-create or replace function public.kicklive_ad_targeting_matches(p_targeting jsonb, p_context jsonb, p_now timestamptz default now())
-returns boolean
-language sql stable
-set search_path = public, pg_temp
-as $fn$
-  with required as (
-    select e.key, v.value #>> '{}' as wanted
-      from jsonb_each(coalesce(nullif(p_targeting, 'null'::jsonb), '{}'::jsonb)) e,
-           jsonb_array_elements(e.value) v
-  ),
-  supplied as (
-    select e.key, v.value #>> '{}' as got
-      from jsonb_each(coalesce(nullif(p_context, 'null'::jsonb), '{}'::jsonb)) e,
-           jsonb_array_elements(e.value) v
-  )
-  select case
-           when (select count(1) from required) = 0 then true
-           when exists (
-                    select 1 from (select distinct key from required) rk
-                     where not exists (select 1 from supplied s where s.key = rk.key)
-                  ) then false
-           when exists (
-                    select 1 from required r
-                     where not exists (select 1 from supplied s where s.key = r.key and s.got = r.wanted)
-                  ) then false
-           -- `day_parts` is the one derived key, and the *server's* clock decides it. A client-supplied
-           -- local time would be both spoofable and wrong for a 22:00 kickoff watched from another
-           -- timezone, and "evening" is a statement about the match schedule, not about the viewer.
-           when exists (
-                    select 1 from required r
-                     where r.key = 'day_parts'
-                       and r.wanted <> case
-                             when extract(hour from p_now) between 5  and 11 then 'morning'
-                             when extract(hour from p_now) between 12 and 16 then 'afternoon'
-                             when extract(hour from p_now) between 17 and 21 then 'evening'
-                             else 'night'
-                           end
-                  ) then false
-           else true
-         end
-$fn$;
+
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 8. ROTATION

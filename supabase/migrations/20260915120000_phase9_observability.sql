@@ -67,7 +67,11 @@ as $fn$
     when p_value ~* 'service_role|servicekey|supabase_service'    then 'SERVICE_KEY_NAME'
     when p_value ~* '\bsk_[a-z0-9_]{12,}|\bAKIA[0-9a-z]{12,}'     then 'CLOUD_CREDENTIAL'
     when p_value ~* 'BEGIN (RSA |EC |OPENSSH |)PRIVATE KEY'       then 'PEM_KEY'
-    when p_value ~* '(password|passwd|secret|api[_-]?key|access[_-]?token|refresh[_-]?token|fcm_token)[[:space:]]*[:=]' then 'CREDENTIAL_ASSIGNMENT'
+    -- the tail patterns matter: the list used to name only `api_key`/`access_token`/`refresh_token`/`fcm_token`,
+    -- while this file's own header promised `token=` and `secret=`. A caller writing `token=<fcm registration
+    -- token>` into `details` therefore passed the only gate that exists — which is what the execute-on-a-real-
+    -- Postgres check caught, because its verify block asks the question the prose claims is answered.
+    when p_value ~* '(password|passwd|secret|token|[a-z0-9]*_(?:key|token)|[a-z0-9]*-?(?:api|access|refresh|id)[_-]?token)[[:space:]]*[:=]' then 'CREDENTIAL_ASSIGNMENT'
     else null
   end
 $fn$;
@@ -79,12 +83,25 @@ returns text
 language sql immutable
 set search_path = public, pg_temp
 as $fn$
-  select coalesce(
-    public.kicklive_observability_refuses(k.x),
-    public.kicklive_observability_refuses(case when jsonb_typeof(p_doc -> k.x) = 'string' then p_doc #>> '{' || k.x || '}' end)
-  )
-    from unnest(coalesce((select array_agg(e.key) from jsonb_object_keys(p_doc) e(key)), array[]::text[])) k(x)
-   limit 1
+  -- One row per top-level key, and the *subtree* of that key as text — so a credential nested inside an object
+  -- or an array is caught as readily as one sitting in a top-level string. Serialising the subtree is
+  -- deliberate: a scanner that only reads the shape it expects is a scanner that misses the shape it does not,
+  -- and this is the only gate between an arbitrary caller payload and a durable row.
+  --
+  -- max() rather than `limit 1`, and that is the part that was wrong: with LIMIT the answer depended on jsonb's
+  -- key ordering, so a document whose first key was clean reported "clean" while a token sat in the second one.
+  -- Aggregating makes it "any hit anywhere", which is the only honest reading of a security check — the
+  -- ordering of jsonb keys is not a fact anybody should be relying on at 20:00 on a Sunday.
+  select max(hit)
+    from (
+      select coalesce(
+               public.kicklive_observability_refuses(k),
+               public.kicklive_observability_refuses(p_doc ->> k),
+               case when jsonb_typeof(p_doc -> k) in ('object', 'array')
+                    then public.kicklive_observability_refuses((p_doc -> k)::text) end
+             ) as hit
+        from jsonb_object_keys(p_doc) k
+    ) scan
 $fn$;
 
 -- Identifier shapes. A metric name is written by code, not typed by a person, so it is allowed to be strict:
@@ -135,7 +152,11 @@ returns boolean
 language sql immutable
 set search_path = public, pg_temp
 as $fn$
-  select p_dimension is null or p_dimension = '' or p_dimension ~ '^[A-Za-z][A-Za-z0-9_.:|*-]{0,62}$'
+  -- the first character may be a digit: the status classes are the dimensions of `api.requests` (2xx, 3xx, 4xx,
+  -- 5xx — see METRIC_CATALOGUE in workers/src/lib/observability.ts, which the anti-drift test keeps in step with
+  -- this catalogue), and a rule that rejected them would refuse every legitimate status sample at the database.
+  -- The shape is still closed: no leading punctuation, no whitespace, no runaway length.
+  select p_dimension is null or p_dimension = '' or p_dimension ~ '^[A-Za-z0-9][A-Za-z0-9_.:|*-]{0,62}$'
 $fn$;
 
 -- Latency, in milliseconds, as the Worker measured it. A negative duration is a client bug (a clock moved
@@ -1786,7 +1807,7 @@ begin
       'last24h', (select count(1) from public.activity_logs a where a.created_at > now() - interval '1 day'),
       'appendOnly', exists (select 1 from pg_trigger t
                              where t.tgname = 'activity_logs_append_only'
-                               and not t.tgdropped),
+                               and not t.tgisinternal),
       'editablePolicies', (select count(1) from pg_policies p
                             where p.tablename = 'activity_logs' and p.cmd in ('UPDATE', 'DELETE', 'ALL'))
     ),
@@ -1946,7 +1967,7 @@ begin
 
   if not exists (
     select 1 from pg_trigger t join pg_class c on c.oid = t.tgrelid
-     where t.tgname = 'activity_logs_append_only' and c.relname = 'activity_logs' and not t.tgdropped
+     where t.tgname = 'activity_logs_append_only' and c.relname = 'activity_logs' and not t.tgisinternal
   ) then
     raise exception 'phase 9 verify: the append-only trigger on activity_logs is missing' using errcode = '42501';
   end if;

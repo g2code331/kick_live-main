@@ -15,6 +15,17 @@ boot that refuses to happen.
 
 Cloudflare secrets and GitHub secrets are not files: they live on those platforms (steps below).
 
+## 0 · A question worth asking before touching either file: is this machine deploying, or developing?
+
+**Deployed values do not live in any file.** Cloudflare secrets are write-only — `wrangler secret put` sends a value to the
+account's encrypted vault and there is no command that reads it back — so a laptop that wants to run the Worker _must_ have its
+own copy in `workers/.dev.vars`. That is not "filling the keys in again"; it is the local half of a pair that Cloudflare cannot
+hand out. Conversely nothing needs re-entering for the bindings: `RATE_LIMIT_KV`, the two queues and `MEDIA_BUCKET` are
+references by id/name inside `wrangler.toml`, and local dev simulates all three under `workers/.dev.vars`-free `.wrangler/state`.
+So `workers/.dev.vars` needs only what has no other home — in practice `SUPABASE_SERVICE_ROLE_KEY` and `SUPABASE_JWT_SECRET` —
+and every other line in `workers/.dev.vars.example` may stay blank on purpose. Leaving the file absent entirely is a supported
+state: `wrangler dev` boots, `/api/health` answers, and routes needing the database return "missing required configuration".
+
 ## 1 · `.env.local` — what the browser build needs
 
 ```bash
@@ -120,6 +131,7 @@ public by design, harmless there, and it must be the widget paired with the Work
 
 ```bash
 node scripts/check-secrets.mjs            # → "All required secrets present."  (--json for the machine-readable table)
+npm run sql:run                  # applies supabase/SETUP.sql on a real Postgres (PGlite) — no server needed
 curl -s http://127.0.0.1:8787/api/health     # local Worker: {"status":"healthy","environment":"staging",…}
 curl -s https://<your-pages-url>/api/health  # deployed: same shape, and the right "env" value
 ```

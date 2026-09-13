@@ -701,7 +701,7 @@ begin
 end;
 $$;
 
-revoke all on function public.kicklive_assert_match_event(integer, text, integer, integer, integer, integer, boolean) from public, authenticated;
+revoke all on function public.kicklive_assert_match_event(integer, text, integer, integer, integer, integer, boolean) from public, anon, authenticated;
 grant execute on function public.kicklive_assert_match_event(integer, text, integer, integer, integer, integer, boolean) to authenticated;
 
 -- One place that turns a row into the wire shape, so the socket feed, the REST timeline and the
@@ -779,7 +779,7 @@ begin
 end;
 $$;
 
-revoke all on function public.kicklive_sync_match_statistics(integer) from public, authenticated;
+revoke all on function public.kicklive_sync_match_statistics(integer) from public, anon, authenticated;
 grant execute on function public.kicklive_sync_match_statistics(integer) to authenticated;
 
 -- ============================================================================
@@ -952,7 +952,7 @@ $$;
 comment on function public.kicklive_record_match_event(integer, text, text, integer, integer, integer, integer, integer, text, text, text, jsonb, integer, boolean) is
   'The only supported way to append a match event. Authorises, deduplicates on client_event_id, allocates the sequence, derives the score and audits — in one transaction.';
 
-revoke all on function public.kicklive_record_match_event(integer, text, text, integer, integer, integer, integer, integer, text, text, text, jsonb, integer, boolean) from public, authenticated;
+revoke all on function public.kicklive_record_match_event(integer, text, text, integer, integer, integer, integer, integer, text, text, text, jsonb, integer, boolean) from public, anon, authenticated;
 grant execute on function public.kicklive_record_match_event(integer, text, text, integer, integer, integer, integer, integer, text, text, text, jsonb, integer, boolean) to authenticated;
 
 -- ============================================================================
@@ -1122,7 +1122,7 @@ begin
 end;
 $$;
 
-revoke all on function public.kicklive_transition_match(integer, text, text, smallint, integer) from public, authenticated;
+revoke all on function public.kicklive_transition_match(integer, text, text, smallint, integer) from public, anon, authenticated;
 grant execute on function public.kicklive_transition_match(integer, text, text, smallint, integer) to authenticated;
 
 -- ============================================================================
@@ -1287,7 +1287,7 @@ begin
 end;
 $$;
 
-revoke all on function public.kicklive_correct_match_event(integer, text, jsonb, integer) from public, authenticated;
+revoke all on function public.kicklive_correct_match_event(integer, text, jsonb, integer) from public, anon, authenticated;
 grant execute on function public.kicklive_correct_match_event(integer, text, jsonb, integer) to authenticated;
 
 -- ============================================================================
@@ -1367,7 +1367,7 @@ begin
 end;
 $$;
 
-revoke all on function public.kicklive_finalize_match(integer, boolean) from public, authenticated;
+revoke all on function public.kicklive_finalize_match(integer, boolean) from public, anon, authenticated;
 grant execute on function public.kicklive_finalize_match(integer, boolean) to authenticated;
 
 create or replace function public.kicklive_set_match_lock(p_match_id integer, p_locked boolean, p_reason text default null)
@@ -1403,7 +1403,7 @@ begin
 end;
 $$;
 
-revoke all on function public.kicklive_set_match_lock(integer, boolean, text) from public, authenticated;
+revoke all on function public.kicklive_set_match_lock(integer, boolean, text) from public, anon, authenticated;
 grant execute on function public.kicklive_set_match_lock(integer, boolean, text) to authenticated;
 
 -- ============================================================================
@@ -1534,8 +1534,8 @@ begin
 end;
 $$;
 
-revoke all on function public.kicklive_assign_match(integer, uuid, text, text) from public, authenticated;
-revoke all on function public.kicklive_stand_down_assignment(uuid) from public, authenticated;
+revoke all on function public.kicklive_assign_match(integer, uuid, text, text) from public, anon, authenticated;
+revoke all on function public.kicklive_stand_down_assignment(uuid) from public, anon, authenticated;
 grant execute on function public.kicklive_assign_match(integer, uuid, text, text) to authenticated;
 grant execute on function public.kicklive_stand_down_assignment(uuid) to authenticated;
 
@@ -1709,18 +1709,27 @@ comment on policy "match_events: officials insert" on public.match_events is
 -- engine-owned row will accept. No policy here depends on a client-declared role.
 
 -- ============================================================================
+-- 15 · FUNCTION PRIVILEGES (final sweep: nothing left callable by a client role)--
+-- `from public` alone is not enough here, and this file now proves why: Supabase's default privileges hand
+-- anon/authenticated/service_role their OWN aclitems, which a revoke naming only PUBLIC leaves untouched. So
+-- every revoke below names the client roles it means to exclude, and the grant after it puts back exactly the
+-- one role that needs it. The three internal helpers and the three trigger functions get anon *and*
+-- authenticated: the browser's only SQL surface is the RPC list in src/lib/api and src/lib/live, none of them
+-- appear there, and a trigger function that a signed-in account can call by name is a bug even when it is
+-- inert. Verified by executing this bundle on a real Postgres (PGlite 18) with those default privileges in
+-- place — phase 16's own check is what caught the record function still being callable by anon.
 -- 15 · FUNCTION PRIVILEGES (final sweep: nothing left callable by `public`)
 -- ============================================================================
-revoke all on function public.kicklive_period_of(text) from public;
-revoke all on function public.kicklive_minute_ceiling(text) from public;
-revoke all on function public.kicklive_lifecycle_event_for(text, text) from public;
+revoke all on function public.kicklive_period_of(text) from public, anon, authenticated;
+revoke all on function public.kicklive_minute_ceiling(text) from public, anon, authenticated;
+revoke all on function public.kicklive_lifecycle_event_for(text, text) from public, anon, authenticated;
 -- Trigger functions are not meant to be called directly at all. Revoking keeps `select
 -- kicklive_guard_match_result_columns()` out of the reachable surface; the trigger itself runs as the
 -- function owner, which a revoke does not affect.
-revoke all on function public.kicklive_guard_match_result_columns() from public;
-revoke all on function public.kicklive_guard_match_events_append_only() from public;
-revoke all on function public.kicklive_sequence_on_insert() from public;
-revoke all on function public.kicklive_assert_match_event(integer, text, integer, integer, integer, integer, boolean) from public, authenticated;
+revoke all on function public.kicklive_guard_match_result_columns() from public, anon, authenticated;
+revoke all on function public.kicklive_guard_match_events_append_only() from public, anon, authenticated;
+revoke all on function public.kicklive_sequence_on_insert() from public, anon, authenticated;
+revoke all on function public.kicklive_assert_match_event(integer, text, integer, integer, integer, integer, boolean) from public, anon, authenticated;
 grant execute on function public.kicklive_assert_match_event(integer, text, integer, integer, integer, integer, boolean) to authenticated;
 
 -- ============================================================================

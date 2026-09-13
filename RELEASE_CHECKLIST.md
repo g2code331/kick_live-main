@@ -51,6 +51,48 @@ The hole is real but narrow (a signed-in caller could EXECUTE an admin-only `kic
 which each still gates on `is_admin()` internally, so it was a second line of defence rather than a bypass),
 and it is the reason this class of assertion is now unreadable in any other shape.
 
+## The SQL now runs in CI-adjacent tooling, and four more real defects came out of it
+
+`supabase/SETUP.sql` is executed, not read: `npm run sql:run` (and the fallback inside `npm run check:sql`) applies all
+846 statements to a real PostgreSQL — PGlite, WebAssembly, no server — on a database carrying Supabase's client roles
+**and their default ALL privileges**, which is the only configuration in which these grants mean anything. Three of
+this section's findings came from that run; the fourth came from asserting what the bundle leaves behind rather than
+what it says. All four were invisible to the 600-odd tests that were green before them.
+
+1. **`revoke update (role) on public.profiles` never worked.** A column revoke cannot touch the table-wide
+   `authenticated=arwdDxt` entry, and a table-wide UPDATE already covers every column — so the headline privilege fix of
+   Phase 1 was decoration, and profiles.role stayed writable by every signed-in account. Phase 1 now revokes UPDATE at
+   table level and re-grants every _other_ column, derived from `pg_attribute` (via the new
+   `kicklive_narrow_column_grant`), so a column added by a later phase cannot be forgotten. Both directions are asserted:
+   the hole is closed **and** the ordinary profile edit still works — an over-revoked grant is an outage, not a win.
+2. **`anon` could execute nine engine RPCs.** The same shape: `revoke … from public, authenticated` left anon's own
+   default aclitem in place, so `kicklive_record_match_event` and friends were callable by an anonymous role (each
+   refuses at `auth.uid() is null`, but the callable surface is the finding). Sixteen revokes across phases 3 and 7 now
+   name the role that actually holds the entry.
+3. **`anon` still held SELECT on `profiles`.** Phase 1 dropped the _policy_; the _grant_ was never revoked, so Phase 10's
+   own check raised on a real Postgres. Phase 10 now revokes it from anon and PUBLIC too.
+4. **`t.tgdropped` does not exist** (Phase 9 read a column of `pg_trigger` that is not there), and `dimension_ok`
+   rejected `2xx` while `api.requests` uses exactly that dimension — a validator that would have refused every legitimate
+   status sample. Both fixed where they live rather than by loosening the check.
+
+Also caught by executing: `LANGUAGE sql` bodies resolve _function_ references at CREATE time, not only table
+references — Phase 7 called `kicklive_ad_targeting_matches` 100 lines before defining it, so the bundle could not apply
+on an empty project at all. The ordering rule in `sql-shape` now covers functions, and both the rule and the runner were
+verified red on a re-created copy of that defect.
+
+`CREATE_ADMIN_PROFILE.sql` got the treatment the rest of this file has been getting: the raw `update profiles set role`
+now goes through `kicklive_set_user_role()` when an admin already exists, refuses with a named reason when it does not
+and the session is not a superuser, and **verifies the role afterwards** — because a `update 0 rows` (profile row
+missing) previously looked like a successful run. All four paths — unedited placeholder, autolinked address, no such
+account, happy path — are asserted in `tests/unit/sql-executes.test.mjs`, including the guarantee that it leaves exactly
+one admin.
+
+Current state on this tree: unit **629/629** · integration **99/99** · typecheck clean (four configs) · `format:check`
+clean · `verify` **18/18** · `ci:check` in sync · `sql:bundle:check` current · `sql:run` **846 statements, 0 failures** ·
+`worker:routes -- --check` 101/101 · `gates --skip=6` 22 pass / 0 fail / 4 skip · `npm audit` **0 vulnerabilities**.
+`check:sql`'s behavioural flow still needs a DSN, and none of this was run inside Supabase itself: PGlite has no
+PostgREST, so RLS is not exercised for the owner.
+
 ## Third fix on the same paste path: the ACL letter was compared to a privilege name
 
 `aclexplode()` reports `privilege_type` as a **long name** — `EXECUTE`, `SELECT`, `UPDATE` — while `r a w d D x t

@@ -1144,15 +1144,91 @@ create trigger kicklive_guard_profile_privileges
   before insert or update on public.profiles
   for each row execute function public.kicklive_guard_profile_privileges();
 
--- Column-level revoke: even if someone later re-creates a permissive policy, the role/email columns
--- are simply not updatable by client roles. Grants are checked before policies, so this wins.
--- `from public` is not a courtesy here: with the default privileges Supabase creates the client roles hold their own
--- ACL entries, and a revoke that names only PUBLIC leaves those entries exactly where they were.
-revoke update (role)  on public.profiles from authenticated;
-revoke update (role)  on public.profiles from anon;
-revoke update (email) on public.profiles from authenticated;
-revoke update (email) on public.profiles from anon;
-revoke update (role), update (email) on public.profiles from public;
+-- Column-level revoke: even if someone later re-creates a permissive policy, the role/email columns are
+-- simply not updatable by client roles, and grants are checked before policies, so that wins.
+--
+-- THIS BLOCK WAS WRONG, and a real Postgres said so. `revoke update (role)` removes a COLUMN aclitem; it
+-- cannot touch the table-wide `authenticated=arwdDxt/postgres` entry that Supabase's default privileges put
+-- there, and a table-wide UPDATE already covers every column of the table. So the revoke ran, updated zero
+-- rows of the ACL, and `profiles.role` stayed writable by every signed-in account — which is exactly what the
+-- self-check in §8 was built to notice, and which is why the paste finally failed with
+-- "profiles.role is still granted UPDATE to authenticated" instead of quietly "succeeding" the way the
+-- has_column_privilege() version always had. Verified on PG 18 (PGlite): before the change
+-- `has_column_privilege('authenticated','public.profiles','role','UPDATE')` is true and the UPDATE succeeds.
+--
+-- The only shape that actually removes it is revoke the privilege at table level, then re-grant it column by
+-- column minus the ones that must not be writable. The app keeps editing its own username/phone/avatar because
+-- the re-grant is derived from pg_attribute, so a column added by a later phase is covered without touching
+-- this file. PUBLIC gets no re-grant at all: §3's stated rule is that a browser session which is not signed
+-- in writes nothing, and the per-column grant to `authenticated` is what makes that safe rather than lucky.
+-- ----------------------------------------------------------------------------
+-- 2·b · NARROW A TABLE-WIDE PRIVILEGE TO "EVERY COLUMN BUT THESE"
+-- ----------------------------------------------------------------------------
+-- There is no `grant update (all columns except role)` in SQL, so the only way to take one column away from a
+-- role that holds the whole table is to take the table away and hand back the columns. Deriving the column list
+-- from the catalog rather than hardcoding it is the point: the enumeration stays correct when a later phase
+-- adds a column, where a literal list would silently stop granting it — a bug whose symptom is an app that
+-- cannot save a field, at 20:00 on a Sunday, in a file that had nothing to do with it.
+--
+-- SECURITY DEFINER with a pinned path because it runs `grant`, which only an owner or a role with grant
+-- options may do; the identifiers go through format('%I') so the statement cannot be shaped by an argument.
+create or replace function public.kicklive_narrow_column_grant(
+  p_privilege text,             -- 'update' | 'insert' | 'references' | 'trigger' | 'select' | 'delete'
+  p_table text,                 -- 'public.profiles'
+  p_role text,                  -- 'authenticated'
+  p_exclude text[]              -- columns to withhold, e.g. array['role','email']
+)
+returns text                    -- what it did, for a RAISE NOTICE or an audit row
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_rel   oid := to_regclass(p_table);
+  v_cols  text;
+  v_priv  text := lower(p_privilege);
+begin
+  if v_rel is null then
+    raise exception 'kicklive_narrow_column_grant: no such relation %', p_table using errcode = '42704';
+  end if;
+  if v_priv not in ('select', 'insert', 'update', 'delete', 'references', 'trigger') then
+    raise exception 'kicklive_narrow_column_grant: % is not a column-level privilege', p_privilege using errcode = '22023';
+  end if;
+  if p_role = any (array['postgres', 'supabase_admin', 'service_role']) then
+    -- Revoking from the owner or from the Worker's own role would break the app rather than protect it, and
+    -- neither is a client role that a browser can hold. Refuse; do not guess.
+    raise exception 'kicklive_narrow_column_grant: refusing to narrow % for %', p_role, p_privilege using errcode = '42501';
+  end if;
+
+  execute format('revoke %s on %s from %I', v_priv, p_table, p_role);
+
+  select string_agg(format('%I', a.attname), ', ' order by a.attnum)
+    into v_cols
+    from pg_attribute a
+   where a.attrelid = v_rel and a.attnum > 0 and not a.attisdropped
+     and (p_exclude is null or not (a.attname = any (p_exclude)));
+
+  if v_cols is null then
+    return format('revoked %s on %s from %s (every column is excluded, so nothing is granted back)', v_priv, p_table, p_role);
+  end if;
+
+  execute format('grant %s (%s) on %s to %I', v_priv, v_cols, p_table, p_role);
+  return format('revoked %s on %s from %s, re-granted it on every column except %s',
+                v_priv, p_table, p_role, coalesce(array_to_string(p_exclude, '/'), 'nothing'));
+end;
+$$;
+
+comment on function public.kicklive_narrow_column_grant(text, text, text, text[]) is
+  'Remove one privilege from a role on named columns of a table it holds at whole-table level, by revoking the '
+  'table-wide grant and re-granting every other column. The only shape that actually removes a column privilege '
+  'from a role Supabase granted ALL to; column list read from pg_attribute so later phases cannot be forgotten.';
+
+revoke all on function public.kicklive_narrow_column_grant(text, text, text, text[]) from public, anon, authenticated;
+grant execute on function public.kicklive_narrow_column_grant(text, text, text, text[]) to service_role;
+
+select public.kicklive_narrow_column_grant('update', 'public.profiles', 'authenticated', array['role', 'email']);
+select public.kicklive_narrow_column_grant('update', 'public.profiles', 'anon', array['role', 'email']);
+revoke update on public.profiles from public;
 
 -- ============================================================================
 -- 2a · HOW A GRANT IS CHECKED IN THIS REPOSITORY (used by every verify block that
@@ -1178,6 +1254,13 @@ revoke update (role), update (email) on public.profiles from public;
 -- lives in `pg_attribute.attacl` for that column, and a table-wide grant covers every column of it. So a
 -- column check consults both, in that order. `aclexplode()` yields exactly four columns — grantor, grantee,
 -- privilege_type, is_grantable — and nothing that names a fifth is a valid reading of an ACL. This repository
+-- `set search_path = pg_catalog, public, pg_temp` does two jobs. pg_catalog first, so a role able to create
+-- a `pg_roles` somewhere later in the path cannot decide what every assertion in nine migrations sees. public
+-- as well, because `oid::regprocedure::text` — the way phase 8 and phase 9 name the function they are asking
+-- about — is search-path *dependent*: with pg_catalog alone it emits an unqualified name for a function in a
+-- schema that is not on the path, and `to_regprocedure` of that string is NULL, which made the helper raise on
+-- a correct database. An assertion must not depend on which schema the caller happened to be using.
+--
 -- has no Postgres between writing this SQL and applying it in a dashboard, so that sentence is the only layer
 -- that can catch an invented column name, and tests/unit/sql-shape.test.ts enforces it.
 --
@@ -1196,7 +1279,7 @@ create or replace function public.kicklive_has_grant(
 )
 returns boolean
 language plpgsql stable
-set search_path = pg_catalog
+set search_path = pg_catalog, public, pg_temp
 as $hg$
 declare
   v_rel     oid;
@@ -1211,7 +1294,10 @@ begin
   -- comparing a letter there matches no row for anyone, which reads as 'not granted' — it vacuums
   -- every negative assertion while dooming every positive one, and it did exactly that in this bundle. Call
   -- sites keep the letters so a check still reads like the statement it verifies.
-  v_names := case lower(p_privilege)
+  -- case-sensitive on purpose: the ACL codes carry meaning in their case (D is TRUNCATE, d is DELETE; U is
+  -- USAGE, X is EXECUTE), so folding the argument to one case would map 'X' onto the 'x' of REFERENCES and
+  -- silently un-answer every function check. Long names are compared as aclexplode reports them.
+  v_names := case p_privilege
     when 'r' then array['SELECT']
     when 'a' then array['INSERT']
     when 'w' then array['UPDATE']
@@ -1775,13 +1861,27 @@ begin
   end if;
 
   if public.kicklive_has_grant('authenticated', 'public.profiles', 'w', 'role') then
-    raise exception 'hardening failed: profiles.role is still granted UPDATE to authenticated — revoke did not land';
+    raise exception 'hardening failed: profiles.role is still granted UPDATE to authenticated — the table-wide '
+      'grant was never narrowed (kicklive_narrow_column_grant did not run, or PUBLIC still holds update)';
   end if;
   if public.kicklive_has_grant('anon', 'public.profiles', 'w', 'role') then
     raise exception 'hardening failed: profiles.role is still granted UPDATE to anon';
   end if;
   if public.kicklive_has_grant('authenticated', 'public.profiles', 'w', 'email') then
     raise exception 'hardening failed: profiles.email is still granted UPDATE to authenticated';
+  end if;
+
+  -- The other half of a narrowing: it must withhold role/email *and* leave the ordinary profile edit alone. A
+  -- grant statement that over-revokes shows up as users unable to save their own profile, which is a worse
+  -- outage than the hole it closed, so both directions are asserted rather than discovered in the field.
+  if not public.kicklive_has_grant('authenticated', 'public.profiles', 'w', 'username') then
+    raise exception 'hardening failed: the narrowing took profiles.username away from authenticated; the app can no longer edit a profile';
+  end if;
+  if public.kicklive_has_grant('public', 'public.profiles', 'w') then
+    raise exception 'hardening failed: PUBLIC still holds table-wide UPDATE on profiles';
+  end if;
+  if public.kicklive_has_grant('anon', 'public.profiles', 'w', 'username') then
+    raise exception 'hardening failed: anon can still write profiles.username; section 3 promised no anonymous DML anywhere';
   end if;
 end;
 $$;
@@ -2540,7 +2640,7 @@ begin
 end;
 $$;
 
-revoke all on function public.kicklive_assert_match_event(integer, text, integer, integer, integer, integer, boolean) from public, authenticated;
+revoke all on function public.kicklive_assert_match_event(integer, text, integer, integer, integer, integer, boolean) from public, anon, authenticated;
 grant execute on function public.kicklive_assert_match_event(integer, text, integer, integer, integer, integer, boolean) to authenticated;
 
 -- One place that turns a row into the wire shape, so the socket feed, the REST timeline and the
@@ -2618,7 +2718,7 @@ begin
 end;
 $$;
 
-revoke all on function public.kicklive_sync_match_statistics(integer) from public, authenticated;
+revoke all on function public.kicklive_sync_match_statistics(integer) from public, anon, authenticated;
 grant execute on function public.kicklive_sync_match_statistics(integer) to authenticated;
 
 -- ============================================================================
@@ -2791,7 +2891,7 @@ $$;
 comment on function public.kicklive_record_match_event(integer, text, text, integer, integer, integer, integer, integer, text, text, text, jsonb, integer, boolean) is
   'The only supported way to append a match event. Authorises, deduplicates on client_event_id, allocates the sequence, derives the score and audits — in one transaction.';
 
-revoke all on function public.kicklive_record_match_event(integer, text, text, integer, integer, integer, integer, integer, text, text, text, jsonb, integer, boolean) from public, authenticated;
+revoke all on function public.kicklive_record_match_event(integer, text, text, integer, integer, integer, integer, integer, text, text, text, jsonb, integer, boolean) from public, anon, authenticated;
 grant execute on function public.kicklive_record_match_event(integer, text, text, integer, integer, integer, integer, integer, text, text, text, jsonb, integer, boolean) to authenticated;
 
 -- ============================================================================
@@ -2961,7 +3061,7 @@ begin
 end;
 $$;
 
-revoke all on function public.kicklive_transition_match(integer, text, text, smallint, integer) from public, authenticated;
+revoke all on function public.kicklive_transition_match(integer, text, text, smallint, integer) from public, anon, authenticated;
 grant execute on function public.kicklive_transition_match(integer, text, text, smallint, integer) to authenticated;
 
 -- ============================================================================
@@ -3126,7 +3226,7 @@ begin
 end;
 $$;
 
-revoke all on function public.kicklive_correct_match_event(integer, text, jsonb, integer) from public, authenticated;
+revoke all on function public.kicklive_correct_match_event(integer, text, jsonb, integer) from public, anon, authenticated;
 grant execute on function public.kicklive_correct_match_event(integer, text, jsonb, integer) to authenticated;
 
 -- ============================================================================
@@ -3206,7 +3306,7 @@ begin
 end;
 $$;
 
-revoke all on function public.kicklive_finalize_match(integer, boolean) from public, authenticated;
+revoke all on function public.kicklive_finalize_match(integer, boolean) from public, anon, authenticated;
 grant execute on function public.kicklive_finalize_match(integer, boolean) to authenticated;
 
 create or replace function public.kicklive_set_match_lock(p_match_id integer, p_locked boolean, p_reason text default null)
@@ -3242,7 +3342,7 @@ begin
 end;
 $$;
 
-revoke all on function public.kicklive_set_match_lock(integer, boolean, text) from public, authenticated;
+revoke all on function public.kicklive_set_match_lock(integer, boolean, text) from public, anon, authenticated;
 grant execute on function public.kicklive_set_match_lock(integer, boolean, text) to authenticated;
 
 -- ============================================================================
@@ -3373,8 +3473,8 @@ begin
 end;
 $$;
 
-revoke all on function public.kicklive_assign_match(integer, uuid, text, text) from public, authenticated;
-revoke all on function public.kicklive_stand_down_assignment(uuid) from public, authenticated;
+revoke all on function public.kicklive_assign_match(integer, uuid, text, text) from public, anon, authenticated;
+revoke all on function public.kicklive_stand_down_assignment(uuid) from public, anon, authenticated;
 grant execute on function public.kicklive_assign_match(integer, uuid, text, text) to authenticated;
 grant execute on function public.kicklive_stand_down_assignment(uuid) to authenticated;
 
@@ -3548,18 +3648,27 @@ comment on policy "match_events: officials insert" on public.match_events is
 -- engine-owned row will accept. No policy here depends on a client-declared role.
 
 -- ============================================================================
+-- 15 · FUNCTION PRIVILEGES (final sweep: nothing left callable by a client role)--
+-- `from public` alone is not enough here, and this file now proves why: Supabase's default privileges hand
+-- anon/authenticated/service_role their OWN aclitems, which a revoke naming only PUBLIC leaves untouched. So
+-- every revoke below names the client roles it means to exclude, and the grant after it puts back exactly the
+-- one role that needs it. The three internal helpers and the three trigger functions get anon *and*
+-- authenticated: the browser's only SQL surface is the RPC list in src/lib/api and src/lib/live, none of them
+-- appear there, and a trigger function that a signed-in account can call by name is a bug even when it is
+-- inert. Verified by executing this bundle on a real Postgres (PGlite 18) with those default privileges in
+-- place — phase 16's own check is what caught the record function still being callable by anon.
 -- 15 · FUNCTION PRIVILEGES (final sweep: nothing left callable by `public`)
 -- ============================================================================
-revoke all on function public.kicklive_period_of(text) from public;
-revoke all on function public.kicklive_minute_ceiling(text) from public;
-revoke all on function public.kicklive_lifecycle_event_for(text, text) from public;
+revoke all on function public.kicklive_period_of(text) from public, anon, authenticated;
+revoke all on function public.kicklive_minute_ceiling(text) from public, anon, authenticated;
+revoke all on function public.kicklive_lifecycle_event_for(text, text) from public, anon, authenticated;
 -- Trigger functions are not meant to be called directly at all. Revoking keeps `select
 -- kicklive_guard_match_result_columns()` out of the reachable surface; the trigger itself runs as the
 -- function owner, which a revoke does not affect.
-revoke all on function public.kicklive_guard_match_result_columns() from public;
-revoke all on function public.kicklive_guard_match_events_append_only() from public;
-revoke all on function public.kicklive_sequence_on_insert() from public;
-revoke all on function public.kicklive_assert_match_event(integer, text, integer, integer, integer, integer, boolean) from public, authenticated;
+revoke all on function public.kicklive_guard_match_result_columns() from public, anon, authenticated;
+revoke all on function public.kicklive_guard_match_events_append_only() from public, anon, authenticated;
+revoke all on function public.kicklive_sequence_on_insert() from public, anon, authenticated;
+revoke all on function public.kicklive_assert_match_event(integer, text, integer, integer, integer, integer, boolean) from public, anon, authenticated;
 grant execute on function public.kicklive_assert_match_event(integer, text, integer, integer, integer, integer, boolean) to authenticated;
 
 -- ============================================================================
@@ -7365,6 +7474,56 @@ comment on table public.advertisement_analytics is
 -- "is it live" rather than "will it survive a cache"); and the expiry sweep and the serving path are then
 -- provably asking the same question.
 
+-- The targeting predicate, separate because the admin preview, the serving path and the event validator
+-- must evaluate it identically, and because a nested EXISTS inside the CASE above is unreadable.
+--
+-- A context is what the *page* knows about itself ("match page, match 431, competition 12, season 2026,
+-- teams 7 and 9"), never what it knows about the visitor. An empty targeting object matches everything. A
+-- targeting key the context cannot answer (a team page has no `match_ids`) does NOT match: the
+-- conservative direction, because "targeted at team 7" must not quietly become "shown everywhere" just
+-- because the page did not know what a match id was.
+create or replace function public.kicklive_ad_targeting_matches(p_targeting jsonb, p_context jsonb, p_now timestamptz default now())
+returns boolean
+language sql stable
+set search_path = public, pg_temp
+as $fn$
+  with required as (
+    select e.key, v.value #>> '{}' as wanted
+      from jsonb_each(coalesce(nullif(p_targeting, 'null'::jsonb), '{}'::jsonb)) e,
+           jsonb_array_elements(e.value) v
+  ),
+  supplied as (
+    select e.key, v.value #>> '{}' as got
+      from jsonb_each(coalesce(nullif(p_context, 'null'::jsonb), '{}'::jsonb)) e,
+           jsonb_array_elements(e.value) v
+  )
+  select case
+           when (select count(1) from required) = 0 then true
+           when exists (
+                    select 1 from (select distinct key from required) rk
+                     where not exists (select 1 from supplied s where s.key = rk.key)
+                  ) then false
+           when exists (
+                    select 1 from required r
+                     where not exists (select 1 from supplied s where s.key = r.key and s.got = r.wanted)
+                  ) then false
+           -- `day_parts` is the one derived key, and the *server's* clock decides it. A client-supplied
+           -- local time would be both spoofable and wrong for a 22:00 kickoff watched from another
+           -- timezone, and "evening" is a statement about the match schedule, not about the viewer.
+           when exists (
+                    select 1 from required r
+                     where r.key = 'day_parts'
+                       and r.wanted <> case
+                             when extract(hour from p_now) between 5  and 11 then 'morning'
+                             when extract(hour from p_now) between 12 and 16 then 'afternoon'
+                             when extract(hour from p_now) between 17 and 21 then 'evening'
+                             else 'night'
+                           end
+                  ) then false
+           else true
+         end
+$fn$;
+
 create or replace function public.kicklive_ad_eligibility(
   p_advertisement_id uuid,
   p_placement_code   text,
@@ -7462,55 +7621,7 @@ as $fn$
   )
 $fn$;
 
--- The targeting predicate, separate because the admin preview, the serving path and the event validator
--- must evaluate it identically, and because a nested EXISTS inside the CASE above is unreadable.
---
--- A context is what the *page* knows about itself ("match page, match 431, competition 12, season 2026,
--- teams 7 and 9"), never what it knows about the visitor. An empty targeting object matches everything. A
--- targeting key the context cannot answer (a team page has no `match_ids`) does NOT match: the
--- conservative direction, because "targeted at team 7" must not quietly become "shown everywhere" just
--- because the page did not know what a match id was.
-create or replace function public.kicklive_ad_targeting_matches(p_targeting jsonb, p_context jsonb, p_now timestamptz default now())
-returns boolean
-language sql stable
-set search_path = public, pg_temp
-as $fn$
-  with required as (
-    select e.key, v.value #>> '{}' as wanted
-      from jsonb_each(coalesce(nullif(p_targeting, 'null'::jsonb), '{}'::jsonb)) e,
-           jsonb_array_elements(e.value) v
-  ),
-  supplied as (
-    select e.key, v.value #>> '{}' as got
-      from jsonb_each(coalesce(nullif(p_context, 'null'::jsonb), '{}'::jsonb)) e,
-           jsonb_array_elements(e.value) v
-  )
-  select case
-           when (select count(1) from required) = 0 then true
-           when exists (
-                    select 1 from (select distinct key from required) rk
-                     where not exists (select 1 from supplied s where s.key = rk.key)
-                  ) then false
-           when exists (
-                    select 1 from required r
-                     where not exists (select 1 from supplied s where s.key = r.key and s.got = r.wanted)
-                  ) then false
-           -- `day_parts` is the one derived key, and the *server's* clock decides it. A client-supplied
-           -- local time would be both spoofable and wrong for a 22:00 kickoff watched from another
-           -- timezone, and "evening" is a statement about the match schedule, not about the viewer.
-           when exists (
-                    select 1 from required r
-                     where r.key = 'day_parts'
-                       and r.wanted <> case
-                             when extract(hour from p_now) between 5  and 11 then 'morning'
-                             when extract(hour from p_now) between 12 and 16 then 'afternoon'
-                             when extract(hour from p_now) between 17 and 21 then 'evening'
-                             else 'night'
-                           end
-                  ) then false
-           else true
-         end
-$fn$;
+
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 8. ROTATION
@@ -11747,7 +11858,11 @@ as $fn$
     when p_value ~* 'service_role|servicekey|supabase_service'    then 'SERVICE_KEY_NAME'
     when p_value ~* '\bsk_[a-z0-9_]{12,}|\bAKIA[0-9a-z]{12,}'     then 'CLOUD_CREDENTIAL'
     when p_value ~* 'BEGIN (RSA |EC |OPENSSH |)PRIVATE KEY'       then 'PEM_KEY'
-    when p_value ~* '(password|passwd|secret|api[_-]?key|access[_-]?token|refresh[_-]?token|fcm_token)[[:space:]]*[:=]' then 'CREDENTIAL_ASSIGNMENT'
+    -- the tail patterns matter: the list used to name only `api_key`/`access_token`/`refresh_token`/`fcm_token`,
+    -- while this file's own header promised `token=` and `secret=`. A caller writing `token=<fcm registration
+    -- token>` into `details` therefore passed the only gate that exists — which is what the execute-on-a-real-
+    -- Postgres check caught, because its verify block asks the question the prose claims is answered.
+    when p_value ~* '(password|passwd|secret|token|[a-z0-9]*_(?:key|token)|[a-z0-9]*-?(?:api|access|refresh|id)[_-]?token)[[:space:]]*[:=]' then 'CREDENTIAL_ASSIGNMENT'
     else null
   end
 $fn$;
@@ -11759,12 +11874,25 @@ returns text
 language sql immutable
 set search_path = public, pg_temp
 as $fn$
-  select coalesce(
-    public.kicklive_observability_refuses(k.x),
-    public.kicklive_observability_refuses(case when jsonb_typeof(p_doc -> k.x) = 'string' then p_doc #>> '{' || k.x || '}' end)
-  )
-    from unnest(coalesce((select array_agg(e.key) from jsonb_object_keys(p_doc) e(key)), array[]::text[])) k(x)
-   limit 1
+  -- One row per top-level key, and the *subtree* of that key as text — so a credential nested inside an object
+  -- or an array is caught as readily as one sitting in a top-level string. Serialising the subtree is
+  -- deliberate: a scanner that only reads the shape it expects is a scanner that misses the shape it does not,
+  -- and this is the only gate between an arbitrary caller payload and a durable row.
+  --
+  -- max() rather than `limit 1`, and that is the part that was wrong: with LIMIT the answer depended on jsonb's
+  -- key ordering, so a document whose first key was clean reported "clean" while a token sat in the second one.
+  -- Aggregating makes it "any hit anywhere", which is the only honest reading of a security check — the
+  -- ordering of jsonb keys is not a fact anybody should be relying on at 20:00 on a Sunday.
+  select max(hit)
+    from (
+      select coalesce(
+               public.kicklive_observability_refuses(k),
+               public.kicklive_observability_refuses(p_doc ->> k),
+               case when jsonb_typeof(p_doc -> k) in ('object', 'array')
+                    then public.kicklive_observability_refuses((p_doc -> k)::text) end
+             ) as hit
+        from jsonb_object_keys(p_doc) k
+    ) scan
 $fn$;
 
 -- Identifier shapes. A metric name is written by code, not typed by a person, so it is allowed to be strict:
@@ -11815,7 +11943,11 @@ returns boolean
 language sql immutable
 set search_path = public, pg_temp
 as $fn$
-  select p_dimension is null or p_dimension = '' or p_dimension ~ '^[A-Za-z][A-Za-z0-9_.:|*-]{0,62}$'
+  -- the first character may be a digit: the status classes are the dimensions of `api.requests` (2xx, 3xx, 4xx,
+  -- 5xx — see METRIC_CATALOGUE in workers/src/lib/observability.ts, which the anti-drift test keeps in step with
+  -- this catalogue), and a rule that rejected them would refuse every legitimate status sample at the database.
+  -- The shape is still closed: no leading punctuation, no whitespace, no runaway length.
+  select p_dimension is null or p_dimension = '' or p_dimension ~ '^[A-Za-z0-9][A-Za-z0-9_.:|*-]{0,62}$'
 $fn$;
 
 -- Latency, in milliseconds, as the Worker measured it. A negative duration is a client bug (a clock moved
@@ -13466,7 +13598,7 @@ begin
       'last24h', (select count(1) from public.activity_logs a where a.created_at > now() - interval '1 day'),
       'appendOnly', exists (select 1 from pg_trigger t
                              where t.tgname = 'activity_logs_append_only'
-                               and not t.tgdropped),
+                               and not t.tgisinternal),
       'editablePolicies', (select count(1) from pg_policies p
                             where p.tablename = 'activity_logs' and p.cmd in ('UPDATE', 'DELETE', 'ALL'))
     ),
@@ -13626,7 +13758,7 @@ begin
 
   if not exists (
     select 1 from pg_trigger t join pg_class c on c.oid = t.tgrelid
-     where t.tgname = 'activity_logs_append_only' and c.relname = 'activity_logs' and not t.tgdropped
+     where t.tgname = 'activity_logs_append_only' and c.relname = 'activity_logs' and not t.tgisinternal
   ) then
     raise exception 'phase 9 verify: the append-only trigger on activity_logs is missing' using errcode = '42501';
   end if;
@@ -13832,6 +13964,12 @@ SELECT '10 / 10: supabase/migrations/20260916120000_phase10_privilege_tightening
 -- ─────────────────────────────────────────────────────────────────────────────
 
 -- Order matters: revoke first so the column list is the whole grant, not an addition to an older one.
+-- anon first, and named: phase 1 §7 dropped the *policy* that let a browser read profiles, but a policy is not
+-- a grant, and the table-wide SELECT that Supabase's default privileges handed `anon` was still in relacl — which
+-- is exactly what this file's own verification caught when the bundle was executed against a real Postgres. The
+-- public surface is profiles_public; the base table has no reason to be readable by an anonymous role at any layer.
+revoke select on public.profiles from anon;
+revoke select on public.profiles from public;
 revoke select on public.profiles from authenticated;
 
 grant select (id, username, role, avatar_url, team_id, created_at, updated_at)
