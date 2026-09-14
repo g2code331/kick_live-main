@@ -191,7 +191,12 @@ describe("the browser cannot mint a role", () => {
   it("AuthContext never sends a role to the API", () => {
     const s = codeOf("src/contexts/AuthContext.tsx");
     assert.ok(!/options:\s*{[^}]*role/.test(s), "no role in signUp metadata");
-    assert.ok(/upsert\(\{ id: data\.user\.id, email, username, phone \}/.test(s), "profile upsert writes display fields only");
+    // Sign-up used to `upsert({ id, email, username, phone })` straight into `profiles`. Two problems with that:
+    // the hardened schema gives a browser no write policy on the table at all, and `email` is a column a fan may
+    // not update (it is the login). Both are now expressed by *not* naming them — the only client-side write is
+    // the self-only RPC, whose parameter list is exactly `p_username` / `p_phone`.
+    assert.ok(/writeOwnProfile\(\{ username, phone \}\)/.test(s), "profile is written through the self-only RPC, never the table");
+    assert.ok(!/from\(\s*["']profiles["']\s*\)\s*\.\s*(upsert|insert|update|delete)/.test(s.replace(/\/\/[^\n]*/g, "")), "no direct table write survives here");
     assert.ok(!/signUp\([^)]*role:/.test(s), "signUp takes no role parameter");
   });
 

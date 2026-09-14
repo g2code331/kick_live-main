@@ -250,6 +250,44 @@ function checkWorkflowExpressions() {
   return problems;
 }
 
+/**
+ * No merge-conflict markers anywhere the build reads.
+ *
+ * Not paranoia, archaeology: `workers/wrangler.toml` — the single source of truth for both Supabase triples, read
+ * by regex by this repo's own scripts and parsed by `toml` in CI — carried a committed
+ * `<<<<<<< HEAD / ======= / >>>>>>> origin/arena…` block from a hand-resolved merge, and *every* check stayed
+ * green because a regex scanner walks the lines it cares about and skips the garbage in between. The docs file
+ * beside it had the same block, and markdown just renders it as an ugly quote. Anything that "parses well enough"
+ * hides that a deploy reading that file dies on line 46.
+ */
+function checkMergeMarkers() {
+  const problems = [];
+  const exts = /\.(ts|tsx|js|mjs|cjs|json|toml|ya?ml|sql|md)$/;
+  const skip = new Set(["node_modules", ".git", "dist", "coverage", ".next", ".cache", ".tmp"]);
+  const walk = (dir) => {
+    let entries = [];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (problems.length > 8) return;
+      const abs = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (!skip.has(entry.name)) walk(abs);
+        continue;
+      }
+      if (!exts.test(entry.name)) continue;
+      const text = fs.readFileSync(abs, "utf8");
+      const line = text.split("\n").findIndex((l) => /^<{7}( |$)/.test(l) || /^>{7}( |$)/.test(l));
+      if (line >= 0) problems.push(`${path.relative(REPO_ROOT, abs)}:${String(line + 1)}: unresolved merge marker — resolve it, then re-run`);
+    }
+  };
+  walk(REPO_ROOT);
+  return problems;
+}
+
 export async function main() {
   const results = [];
   if (mode === "write") {
@@ -296,6 +334,12 @@ export async function main() {
     ["CI workflows (yaml + installed copy)", checkWorkflows()],
   ]) {
     results.push({ label, ok: problems.length === 0, code: problems.length === 0 ? 0 : 1, out: problems.join("\n") });
+  }
+
+  {
+    // One walk of the tree, not three: this scans every tracked source file.
+    const probs = checkMergeMarkers();
+    results.push({ label: "no committed merge-conflict markers", ok: probs.length === 0, code: probs.length === 0 ? 0 : 1, out: probs.join("\n") });
   }
 
   {

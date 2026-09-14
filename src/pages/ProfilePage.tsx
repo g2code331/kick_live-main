@@ -4,6 +4,7 @@ import { ArrowLeft, User, Mail, Smartphone, Key, Bell, Save, LogOut, Eye, EyeOff
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import Header from '../components/Header';
+import { writeOwnProfile } from '../lib/profile-write';
 
 const DASHBOARD_BY_ROLE: Record<string, { label: string; path: string }> = {
   admin: { label: 'Go to Admin Dashboard', path: '/admin' },
@@ -36,11 +37,16 @@ export default function ProfilePage() {
     if (!user) return;
     setSaving(true);
     try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({ username, phone })
-        .eq('id', user.id);
-      if (error) throw error;
+      // Not `supabase.from('profiles').update(...)`: after phase 10 a browser session has no write policy on that
+      // table at all, and a direct write raises `permission denied for table profiles`, which the old code reported
+      // as if the user had typed something wrong. One verb for both places that write a profile, in
+      // src/lib/profile-write.ts, and no fallback to the table: a project half-set-up should say so.
+      const res = await writeOwnProfile({ username, phone });
+      if (res.fieldError) {
+        showMsg('error', res.fieldError.message);
+        return;
+      }
+      if (!res.ok) throw new Error(res.error || 'Failed to update profile');
       showMsg('success', 'Profile updated successfully!');
     } catch (err: any) {
       showMsg('error', err.message || 'Failed to update profile');

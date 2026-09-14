@@ -10,7 +10,7 @@ problems at scale, which is exactly what a scale that has not arrived yet cannot
 
 | total sites | reads | writes | rpc | `select('*')` | unbounded | files | tables | pollers |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 210 | 113 | 97 | 13 | 30 | 36 | 32 | 24 | 2 |
+| 210 | 114 | 96 | 14 | 30 | 36 | 32 | 25 | 2 |
 
 ## By table
 
@@ -27,8 +27,8 @@ problems at scale, which is exactly what a scale that has not arrived yet cannot
 | `seasons` | 2 | 4 | 1 | 1 |
 | `rpc:kicklive_profile_contacts` | 0 | 4 | 0 | 0 |
 | `team_news` | 2 | 2 | 1 | 1 |
-| `profiles` | 1 | 2 | 0 | 0 |
 | `activity_logs` | 2 | 1 | 0 | 1 |
+| `profiles` | 2 | 0 | 0 | 0 |
 | `rpc:kicklive_profile_self` | 0 | 1 | 0 | 0 |
 | `notifications` | 0 | 1 | 0 | 0 |
 | `rpc:update_player_stats` | 0 | 1 | 0 | 0 |
@@ -40,6 +40,7 @@ problems at scale, which is exactly what a scale that has not arrived yet cannot
 | `rpc:kicklive_competition_standings` | 0 | 1 | 0 | 0 |
 | `rpc:kicklive_squad_sizes` | 0 | 1 | 0 | 0 |
 | `rpc:kicklive_record_media_view` | 0 | 1 | 0 | 0 |
+| `rpc:kicklive_profile_update` | 0 | 1 | 0 | 0 |
 
 ## By file
 
@@ -69,14 +70,14 @@ problems at scale, which is exactly what a scale that has not arrived yet cannot
 | `src/pages/portals/admin/MatchControlOrganized.tsx` | 2 | 0 | 2 | 2 | `competitions` `matches` |
 | `src/pages/portals/admin/TeamSquadDashboard.tsx` | 1 | 1 | 0 | 0 | `players` |
 | `src/pages/portals/shared/PlayerCreator.tsx` | 1 | 1 | 1 | 0 | `players` `teams` |
-| `src/contexts/AuthContext.tsx` | 0 | 2 | 0 | 0 | `profiles` `rpc:kicklive_profile_self` |
-| `src/pages/ProfilePage.tsx` | 0 | 1 | 0 | 0 | `profiles` |
+| `src/contexts/AuthContext.tsx` | 1 | 1 | 0 | 0 | `profiles` `rpc:kicklive_profile_self` |
 | `src/pages/portals/admin/CompetitionEditor.tsx` | 0 | 1 | 0 | 0 | `competitions` |
 | `src/pages/portals/admin/MatchControlComplete.tsx` | 0 | 1 | 0 | 0 | `matches` |
 | `src/pages/portals/admin/MatchControlSimple.tsx` | 0 | 1 | 0 | 0 | `matches` |
 | `src/pages/portals/admin/TeamAdder.tsx` | 0 | 1 | 0 | 0 | `teams` |
 | `src/pages/portals/admin/UserManagement.tsx` | 0 | 1 | 0 | 0 | `rpc:kicklive_profile_contacts` |
 | `src/pages/portals/shared/MediaPublisher.tsx` | 0 | 1 | 0 | 0 | `media` |
+| `src/lib/profile-write.ts` | 0 | 1 | 0 | 0 | `rpc:kicklive_profile_update` |
 
 ## Components that own their own polling
 
