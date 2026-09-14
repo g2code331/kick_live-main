@@ -56,6 +56,7 @@ begin
       'identity and it will not guess one.';
   end if;
 
+
   if p_user_id is null then
     -- A markdown link is the failure this guard exists for. `[you@x.com](mailto:you@x.com)` is a perfectly
     -- valid string literal, so without this the script would report "no auth.users row" and send you off to
