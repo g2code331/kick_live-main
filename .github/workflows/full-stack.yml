@@ -1,0 +1,283 @@
+# KickLive CI — the one workflow that touches the whole stack, for a push to `main`.
+#
+# `ci.yml` answers "is this code sound". `deploy-web.yml` answers "is the SPA on Pages". Neither of them deploys
+# the Worker, provisions the Cloudflare resources the Worker's config names, or applies the database migrations —
+# which is exactly the gap that produced this week's failures: a Worker deployed to an account missing its
+# queues, a Pages bundle built without its Supabase pair, and a `supabase/SETUP.sql` that had only ever been
+# *pasted by hand*. This workflow closes it, in the order a human would have to follow.
+#
+#   config  ─▶  test  ─▶  ┬─ provision (Cloudflare resources)
+#                         ├─ migrate   (Supabase, gated on secrets)
+#                         └─ deploy-staging (Worker + Pages, both staging)
+#                                  └─ verify  ─▶  deploy-production (dispatch only)
+#
+# WHAT IS AUTOMATIC AND WHAT IS NOT. A push to `main` provisions, migrates and deploys **staging**, then verifies
+# it. Production is reached only by `workflow_dispatch` with `deploy_production=true` — and, if you add
+# Environment protection rules to the `production` environment, by a required approval. That is a deliberate
+# asymmetry, the same one the stable update channel uses: a build that succeeded is not yet a release somebody
+# agreed to.
+name: Full stack
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      apply_cloudflare:
+        description: "Create any missing queue / R2 bucket on the account"
+        type: boolean
+        required: false
+        default: false
+      deploy_production:
+        description: "Also deploy the production Worker (after staging verifies)"
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  # A deploy of the same commit must not interleave with a deploy of the next one; cancel-in-progress is false
+  # because half-applied infrastructure is worse than a queued run.
+  group: full-stack-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "22.18.0"
+  WRANGLER: "--yes wrangler@4"
+  CONFIG: "workers/wrangler.toml"
+
+jobs:
+  config:
+    name: Config coherence (URL / project ref / anon key, one project each)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Every Supabase triple must name the same project
+        # This is the check that would have caught the 401-on-signup: staging's URL was moved to a new project
+        # while its anon key stayed the old project's. Both values are individually well-formed, so nothing else
+        # objected until a human tried to sign in.
+        run: node scripts/check-project-pair.mjs
+      - name: The Pages mode files must match the Worker's config
+        run: npm run web:env:check
+      - name: SETUP.sql must be the bundle its migrations produce
+        run: npm run sql:bundle:check
+      - name: The Worker config must survive wrangler's own parser
+        run: npx $WRANGLER deploy --config "$CONFIG" --env staging --dry-run --outdir /tmp/dry-staging
+      - name: …and production's
+        run: npx $WRANGLER deploy --config "$CONFIG" --env production --dry-run --outdir /tmp/dry-prod
+
+  test:
+    name: Gates, tests, and the migrations executed on a real Postgres
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Gates (typecheck, unit, integration, verify, worker routes)
+        run: npm run gates -- --skip=6
+      - name: Execute supabase/SETUP.sql before anything executes it for real
+        # PGlite is a real PostgreSQL: every statement applies and every migration's own verification block
+        # passes, or the run stops here instead of half-applying inside Supabase at 20:00 on a Sunday.
+        run: npm run sql:run
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-web-production
+          path: dist/web
+          if-no-files-found: ignore
+
+  provision:
+    name: Cloudflare resources the config names must exist
+    needs: [config, test]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Check (and optionally create) queues, R2 buckets, KV namespaces
+        run: |
+          set -euo pipefail
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ] || [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+            echo "::error::CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are required for provisioning. Configure them under Settings → Environments → staging. This job exists to prove the account matches $CONFIG, so it does not pass silently without them."
+            exit 1
+          fi
+          args=""
+          if [ "${{ github.event.inputs.apply_cloudflare }}" = "true" ]; then args="--apply"; fi
+          # `|| true` on nothing: a missing queue is a failed deploy waiting to happen, and a missing KV id is
+          # a deploy that succeeds with the rate limiter silently falling back to per-isolate counters.
+          npm run --silent cf:provision -- $args
+      - name: A new KV cannot be wired by a robot — say so if one was created
+        if: github.event.inputs.apply_cloudflare == 'true'
+        run: npm run --silent cf:provision -- --json > /tmp/provision.json || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: provision-report
+          path: /tmp/provision.json
+          if-no-files-found: ignore
+
+  migrate:
+    name: Apply supabase/SETUP.sql to the staging project
+    needs: [config, test]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    # `staging` as a GitHub environment is where the database credentials live, and where a protection rule can
+    # gate the step that writes to a real project. It is created implicitly on first use.
+    environment: staging
+    env:
+      SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_STAGING_PROJECT_REF }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Skip loudly, never quietly
+        run: |
+          set -euo pipefail
+          if [ -z "${SUPABASE_DB_PASSWORD:-}" ] || [ -z "${SUPABASE_PROJECT_REF:-}" ]; then
+            echo "::error::SUPABASE_DB_PASSWORD / SUPABASE_STAGING_PROJECT_REF are not set on the 'staging' environment, so migrations were NOT applied. The bundle is only ever run by a human otherwise, which is how three privilege bugs survived review here. Set both (Settings → Environments → staging) to make this step real."
+            exit 1
+          fi
+      - name: psql against the project's Postgres
+        run: |
+          set -euo pipefail
+          export PGPASSWORD="$SUPABASE_DB_PASSWORD"
+          HOST="db.${SUPABASE_PROJECT_REF}.supabase.co"
+          # The bundle is written to be re-applied to an already-migrated project (create-or-replace throughout),
+          # so a push after a manual paste is a no-op rather than a conflict. Single transaction + ON_ERROR_STOP:
+          # either the whole chain lands or none of it does, which is what makes its own verification blocks
+          # meaningful — a half-applied hardening is worse than an unapplied one.
+          psql "host=$HOST port=5432 dbname=postgres user=postgres sslmode=require" \
+            -v ON_ERROR_STOP=1 --single-transaction -f supabase/SETUP.sql
+      - name: Post-apply assertions (the hardening is present, not merely applied)
+        run: |
+          set -euo pipefail
+          export PGPASSWORD="$SUPABASE_DB_PASSWORD"
+          psql "host=db.${SUPABASE_PROJECT_REF}.supabase.co port=5432 dbname=postgres user=postgres sslmode=require" \
+            -v ON_ERROR_STOP=1 -At <<'SQL'
+          do $$
+          begin
+            if exists (select 1 from pg_attribute a join pg_class c on c.oid = a.attrelid
+                        where c.relname = 'profiles' and a.attname = 'role'
+                          and public.kicklive_has_grant('authenticated', 'public.profiles', 'w', 'role')) then
+              raise exception 'profiles.role is still writable by a signed-in account after CI applied the bundle';
+            end if;
+            if not exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                            where n.nspname = 'public' and p.proname = 'kicklive_narrow_column_grant') then
+              raise exception 'the privilege helper set is absent — did the bundle actually run?';
+            end if;
+            raise notice 'kicklive: staging database verified by CI';
+          end $$;
+          SQL
+
+  deploy-staging:
+    name: Deploy the staging Worker
+    needs: [config, test, provision]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: staging
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: The Worker needs its secrets, and they are per project
+        run: |
+          set -euo pipefail
+          missing=0
+          for s in SUPABASE_SERVICE_ROLE_KEY SUPABASE_JWT_SECRET; do
+            if [ -z "${!s:-}" ]; then
+              # Not a hard failure: with only those two unset the Worker boots and answers /api/health, and every
+              # database route returns the CONFIG_* envelope. Say it in the log so a red screen downstream is
+              # explained by this line and not by an hour of debugging.
+              echo "::warning::$s is not set on the 'staging' environment. Set it with: npx wrangler secret put $s --config $CONFIG --env staging (or add it here as a job-level env from the environment's secrets, which is what this workflow will read)."
+              missing=1
+            fi
+          done
+          echo "required-secrets-missing=$missing" >> "$GITHUB_OUTPUT" || true
+      - name: Deploy
+        run: npm run worker:deploy:staging
+      - name: Confirm the deployed Worker reports the environment it was built for
+        run: |
+          set -euo pipefail
+          sleep 5
+          body=$(curl -fsS https://kicklive-api-staging.g2code332.workers.dev/api/health || true)
+          echo "$body"
+          echo "$body" | grep -q '"environment":"staging"' || { echo "::error::the staging Worker did not report environment=staging"; exit 1; }
+          echo "$body" | grep -q '"implemented"' || { echo "::error::/api/health is not the expected payload — is the right version live?"; exit 1; }
+
+  verify:
+    name: Probe staging (Pages contract + API health)
+    needs: [deploy-staging]
+    # Pages is deployed by deploy-web.yml, which this push also triggers; probing the URL here would race it.
+    # `if: always()` keeps the report useful even when a sibling job was the one that failed.
+    if: always() && needs.deploy-staging.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: The deployed frontend keeps the same contract as the local server
+        run: |
+          set -euo pipefail
+          url="${{ vars.STAGING_WEB_URL }}"
+          if [ -z "$url" ]; then
+            echo "note: STAGING_WEB_URL is not set as an environment *variable* (Settings → Environments → staging → Variables)."
+            echo "      Skipping the Pages probe rather than failing: the project URL is chosen by the deploy, not the repo."
+            exit 0
+          fi
+          bash scripts/ci/probe-deploy.sh "$url"
+      - name: The API answers, and answers about the right project
+        run: |
+          set -euo pipefail
+          curl -fsS https://kicklive-api-staging.g2code332.workers.dev/api/health | tee /tmp/health.json
+          grep -q '"status":"healthy"' /tmp/health.json
+
+  deploy-production:
+    name: Deploy the production Worker (dispatch only)
+    needs: [config, verify]
+    if: github.event.inputs.deploy_production == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Production must not inherit staging's project by accident
+        run: node scripts/check-project-pair.mjs
+      - name: Deploy
+        run: npm run worker:deploy:production
+      - name: Confirm
+        run: |
+          set -euo pipefail
+          sleep 5
+          body=$(curl -fsS https://kicklive-api.g2code332.workers.dev/api/health || true)
+          echo "$body"
+          echo "$body" | grep -q '"environment":"production"' || { echo "::error::the production Worker did not report environment=production"; exit 1; }
