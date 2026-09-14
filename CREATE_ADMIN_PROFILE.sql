@@ -19,8 +19,10 @@
 --      "unedited", and the comparison was a guess about the operator's editor rather than a fact about the
 --      database. NULL means "not supplied" with no possible collision; whether an account exists is a
 --      question auth.users answers exactly. So there is no placeholder left to overwrite anywhere.
---   3. Run. The Results grid must come back with the new admin; anything else and the script raised, with
---      the reason in the message. Re-running is safe: the grant is idempotent and only ever touches the
+--   3. Run. It first checks its own ground (this is a Supabase project, `public.profiles` exists, the sign-up
+--      trigger and the role RPC are installed) and refuses with the fixing file named in the message, rather than
+--      "succeeding" against a database that cannot hold the grant. Then the Results grid must come back with the
+--      new admin; anything else and the script raised, with the reason in the message. Re-running is safe: the grant is idempotent and only ever touches the
 --      one account named.
 --
 -- Read before running:
@@ -44,6 +46,7 @@ declare
   v_user_id  uuid;
   v_email    text;
   v_count    text;
+  v_missing  text;
   v_input    text := nullif(btrim(coalesce(p_email, '')), '');
 begin
   if p_user_id is not null and v_input is not null then
@@ -56,6 +59,44 @@ begin
       'identity and it will not guess one.';
   end if;
 
+
+  -- ── Preflight: refuse loudly when this project is not the hardened database ──────────────────────
+  -- Everything below assumes supabase/SETUP.sql has been applied in full. A project with only the base schema
+  -- produces the "ran it and nothing happened" experience these guards exist to end:
+  --   * no `on_auth_user_created` trigger → accounts created in the app get no `profiles` row, which is exactly
+  --     the state that makes sign-up report "permission denied for table profiles" (HTTP 401 from PostgREST);
+  --   * no `kicklive_set_user_role` → the supported role writer is missing, so the grant below has no path.
+  -- Both are answered by existence lookups rather than catalog joins, because `pg_trigger.tgdropped` does not
+  -- exist in every build this repo executes against (PGlite's catalog has no such column) — a join written
+  -- against it fails *for the wrong reason*, which is how this check nearly shipped broken. A database with no
+  -- auth users is skipped on purpose: that is not a hardening problem but a sign-up to do, and the account
+  -- lookup below says it better. An empty project therefore passes preflight and reads `no accounts exist yet`;
+  -- a populated-but-unhardened one stops here, because "sign up in the app" would only produce the very profile
+  -- error the operator is trying to escape.
+  if to_regclass('auth.users') is null then
+    raise exception 'this database has no auth.users — it is not a Supabase project (or the SQL editor is pointed at the wrong one). '
+      'Run this file in the Supabase project the app actually talks about; npm run pair:check prints that ref.' using errcode = '42P01';
+  end if;
+
+  if (select count(1) from auth.users) > 0 then
+    if to_regclass('public.profiles') is null then
+      raise exception 'public.profiles does not exist in this project, so there is nothing to grant into. Paste supabase/SETUP.sql — the whole '
+        'bundle, not one supabase/migrations/*.sql file — then re-run this file.' using errcode = '42P01';
+    end if;
+    if to_regprocedure('public.handle_new_user()') is null or to_regprocedure('public.kicklive_set_user_role(uuid, text)') is null then
+      -- Params come before `using` in plpgsql's grammar; the opposite order is an "unrecognized RAISE statement
+      -- option" syntax error, which is how a guard meant to prevent confusion would have shipped as a fresh one.
+      -- Nor may a parameter be a parenthesised expression: `raise …, concat_ws(…)` is a syntax error at the
+      -- comma. Hence the variable, and hence the note: only *running* this file can catch either of them.
+      v_missing := concat_ws(
+        ' and ',
+        case when to_regprocedure('public.handle_new_user()') is null then 'public.handle_new_user()' end,
+        case when to_regprocedure('public.kicklive_set_user_role(uuid, text)') is null then 'public.kicklive_set_user_role(uuid, text)' end);
+      raise exception 'this project is missing % — the sign-up trigger and/or the only supported role writer. That is the signature of a database where '
+        'supabase/SETUP.sql was never applied (or only half of it was), which is also why profile rows go missing at sign-up. Paste the whole bundle '
+        '(idempotent: create or replace everywhere), then re-run this file.', v_missing using errcode = 'P0001';
+    end if;
+  end if;
 
   if p_user_id is null then
     -- A markdown link is the failure this guard exists for. `[you@x.com](mailto:you@x.com)` is a perfectly
@@ -136,9 +177,18 @@ begin
   raise notice 'now delete this file from the working copy';
 end;
 $$;
--- What the Results grid shows after a successful run: every admin, so you can see your own address
--- in the list (and notice if the list is longer than you expected).
-select id, email, username, role, updated_at
-  from public.profiles
- where role = 'admin'
- order by updated_at desc nulls last;
+-- The Results grid you get back. It is deliberately *not* `select … from public.profiles`: the Supabase editor
+-- runs a paste statement by statement, so after the block above raises (a bad edit, an unhardened project) an
+-- unguarded trailing select adds "relation public.profiles does not exist" — a second, unrelated-looking error
+-- that sends people hunting for the wrong thing. This reads only the catalog, which always exists, and tells you
+-- which half of the story you are in: a number, or the fix. On success the NOTICE above named the account.
+select case
+         when exists (select 1 from pg_catalog.pg_class c join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+                       where n.nspname = 'public' and c.relname = 'profiles')
+           then 'public.profiles exists — run `select id, email, username, role, updated_at from public.profiles where role = ''admin'';` '
+                'to see every admin. The NOTICE above named the one this run promoted.'
+         else 'no public.profiles in this project — paste supabase/SETUP.sql (the whole bundle) into this project first, then re-run this file.'
+       end as next_step,
+       (select count(1) from pg_catalog.pg_class c join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+         where n.nspname = 'public' and c.relname = 'profiles') as profiles_table_present;
+

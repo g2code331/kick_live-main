@@ -61,7 +61,9 @@
     "worker:deploy:staging": "wrangler deploy --config workers/wrangler.toml --env staging",
     "worker:deploy:production": "wrangler deploy --config workers/wrangler.toml --env production",
     "worker:routes": "node --import ./scripts/lib/ts-loader.mjs scripts/worker-routes.mjs",
-    "ci:install-loader": "node --import ./scripts/lib/ts-loader.mjs scripts/install-ts-loader.mjs --write"
+    "ci:install-loader": "node --import ./scripts/lib/ts-loader.mjs scripts/install-ts-loader.mjs --write",
+    "db:check": "node --import ./scripts/lib/ts-loader.mjs scripts/sql-pglite.mjs --file=supabase/DB_CHECK.sql --after=supabase/SETUP.sql --print",
+    "preflight:production": "node --import ./scripts/lib/ts-loader.mjs scripts/preflight-production.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.109.0",

@@ -98,6 +98,10 @@ describe("phase 10 · nothing left reads the columns from the browser", () => {
     "src/pages/portals/AdminPortal.tsx",
     "src/pages/portals/admin/UserManagement.tsx",
     "src/pages/portals/admin/TeamDashboard.tsx",
+    // The one module that writes a profile, added when sign-up and the profile page stopped writing the table: it
+    // must be held to the same rule as the readers it replaced, or "the client cannot read a contact column"
+    // quietly becomes "the client cannot read one, but can still write one".
+    "src/lib/profile-write.ts",
   ];
 
   it("no client query projects email or phone out of profiles", () => {
@@ -118,6 +122,12 @@ describe("phase 10 · nothing left reads the columns from the browser", () => {
 
   it("the three admin desks and the account read go through the functions", () => {
     assert.match(read("src/contexts/AuthContext.tsx"), /supabase\.rpc\("kicklive_profile_self"\)/, "own row via the definer door");
+    // …and so does the write. Phase 10 removed the client's table-level write and the app kept trying to upsert
+    // `profiles` directly, which is the 401 that made sign-up look broken. The pair must stay in step.
+    assert.match(read("supabase/migrations/20260916120000_phase10_privilege_tightening.sql"), /create or replace function public\.kicklive_profile_update\(/, "phase 10 ships a self-only write verb");
+    for (const rel of ["src/contexts/AuthContext.tsx", "src/pages/ProfilePage.tsx"]) {
+      assert.match(read(rel), /writeOwnProfile\(/, `${rel} writes a profile only through the helper`);
+    }
     for (const rel of ["src/lib/access.ts", "src/pages/portals/AdminPortal.tsx", "src/pages/portals/admin/UserManagement.tsx", "src/pages/portals/admin/TeamDashboard.tsx"]) {
       assert.match(read(rel), /kicklive_profile_contacts/, `${rel} reads contacts through the gated function`);
     }

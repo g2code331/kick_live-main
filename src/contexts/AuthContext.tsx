@@ -5,6 +5,7 @@ import { supabase } from "../lib/supabase";
 import type { UserProfile, UserRole } from "../lib/supabase";
 import { log } from "../lib/log";
 import { invalidate, noteAuthIdentity } from "../lib/data";
+import { profileSetupErrorMessage, writeOwnProfile } from "../lib/profile-write";
 
 interface AuthContextType {
   user: User | null;
@@ -173,12 +174,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (error) return { error: error.message };
 
       if (data.user) {
-        // The `on_auth_user_created` trigger already created this row as a fan; this upsert only
-        // fills in the display fields. No `role` key, by design.
-        const { error: profileError } = await supabase.from("profiles").upsert({ id: data.user.id, email, username, phone }, { onConflict: "id" });
-        if (profileError) {
-          log.error("Profile upsert failed:", profileError.message);
-          return { error: `Account created, but the profile could not be saved: ${profileError.message}` };
+        // The `on_auth_user_created` trigger already created this row as a fan; this fills in the display fields,
+        // through writeOwnProfile() — the only write the hardened schema permits a browser session to make
+        // (`kicklive_profile_update`, self-only, no `role`/`email` parameter). The old direct
+        // `from("profiles").upsert({ …, email })` was refused twice over: RLS has no client write policy at all,
+        // and `email` is a column a fan may not update. Hence: never a role key, never an email key, here or later.
+        const write = await writeOwnProfile({ username, phone });
+        if (!write.ok) {
+          log.error("Profile write failed at sign-up:", write.error ?? write.fieldError?.message);
+          // A refused write is not automatically a broken account: on a hardened database the row already exists
+          // (the trigger made it) and only the display fields are missing. The read is allowed in every
+          // configuration, so read it back and fail sign-up only when there is genuinely nothing to sign in to.
+          const { data: existing } = await supabase.from("profiles").select("id").eq("id", data.user.id).maybeSingle();
+          if (!existing) return { error: profileSetupErrorMessage() };
+          log.info("Sign-up continued on the trigger-created profile; save the profile page once the SQL bundle is applied.");
         }
       }
 

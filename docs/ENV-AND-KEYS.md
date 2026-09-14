@@ -35,13 +35,9 @@ cp .env.example .env.local
 ```
 
 Then fill two values. Both come from **one** Supabase project — project → Project Settings → API → _Project URL_ and
-<<<<<<< HEAD
-_Project anon key_ (`sb_publishable_…` works too). The staging project for this repo is `opvkvbabryuipzwcanrv`, production is
-=======
-_Project anon key_ (`sb_publishable_…` works too). The staging project for this repo is `opvkvbabryuipzwcanrv` (it moved on 2026-09-13, off the retired `fnefpc…`
-project — if that older ref turns up in any build input, `npm run pair:check` says whether the key moved with it), production is
->>>>>>> origin/arena/01a08671-kick-live-main
-`xvksxqrmdbbinlrjctri`.
+_Project anon key_ (`sb_publishable_…` works too). The staging project for this repo is `opvkvbabryuipzwcanrv` (it moved on 2026-09-13, off
+the retired `fnefpc…` project — if that older ref turns up in any build input, `npm run pair:check` says whether the key moved with it),
+production is `xvksxqrmdbbinlrjctri`.
 
 ```bash
 VITE_SUPABASE_URL=https://opvkvbabryuipzwcanrv.supabase.co

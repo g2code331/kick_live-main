@@ -63,6 +63,10 @@ select
   -- pinned is the *shape* — nothing whose name says it writes may be reachable anonymously. A name is a weak
   -- signal, and it is deliberately not the only one here: the same clause would also catch a rename that
   -- hides a writer, which is the review comment that check is for.
+  -- the owner's write verb added in phase 10 §4: closed to anon, open to authenticated, and *not* a table write
+  public.kicklive_has_grant('anon', 'public.kicklive_profile_update(text, text)', 'X')           as anon_can_call_profile_write,
+  public.kicklive_has_grant('authenticated', 'public.kicklive_profile_update(text, text)', 'X') as auth_can_call_profile_write,
+  public.kicklive_has_grant('authenticated', 'public.profiles', 'w')                            as auth_can_write_profiles_table,
   (select count(1) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
      where n.nspname = 'public' and p.proname like 'kicklive\_%'
        and p.proacl is not null
@@ -110,9 +114,83 @@ test("the privilege model the bundle leaves behind is the one its comments claim
     anon_can_call_the_engine: 0,
     staff_can_call_the_engine: 1,
     anon_can_reach_a_writer: 0,
+    anon_can_call_profile_write: false,
+    auth_can_call_profile_write: true,
+    auth_can_write_profiles_table: false,
   })) {
     assert.equal(seen[key], want, `${key} = ${seen[key]}, expected ${want}`);
   }
+});
+
+// The state that actually produced the "no headache" complaint: a new Supabase project with the base schema only
+// (or a half-applied bundle) — so no trigger, no role RPC. Before these preflight guards the bootstrap could
+// "complete" while granting admin to a row that cannot exist, and the operator found out an hour later.
+test("the admin bootstrap refuses a project that never got the bundle", { skip: !available && "no pglite" }, async () => {
+  const base = fs.readFileSync(path.join(REPO, "CREATE_ADMIN_PROFILE.sql"), "utf8");
+  const withEmail = base.replace("p_email    text := null;", "p_email    text := 'chief@kicklive.football';");
+  // Built by joining lines rather than with escape sequences: a written file goes through another layer of
+  // escaping on the way here, and a literal backslash-n inside a JS string is a syntax error that reads like a
+  // broken test runner.
+  const user = ["insert into auth.users (id, email, raw_user_meta_data) values", "  ('22222222-2222-2222-2222-222222222222','chief@kicklive.football','{}'::jsonb);"].join("\n");
+  const profiles = ["create table public.profiles (id uuid primary key, email text, username text,", "  role text default 'fan', updated_at timestamptz);"].join("\n");
+  const triggerFn = ["create function public.handle_new_user() returns trigger language plpgsql as $$", "begin return new; end $$;"].join("\n");
+  const variants = [
+    { name: "a signed-up project with no supabase/SETUP.sql at all", seed: user, want: /public\.profiles does not exist/ },
+    {
+      name: "profiles present but neither the sign-up function nor the role RPC was installed",
+      seed: user + "\n" + profiles,
+      want: /missing public\.handle_new_user\(\) and public\.kicklive_set_user_role\(uuid, text\)/,
+    },
+    { name: "half-applied: the trigger function exists, the role writer does not", seed: user + "\n" + profiles + "\n" + triggerFn, want: /missing public\.kicklive_set_user_role\(uuid, text\)/ },
+  ];
+  for (const v of variants) {
+    const seed = path.join(REPO, ".tmp-admin-seed.sql");
+    const admin = path.join(REPO, ".tmp-admin-preflight.sql");
+    fs.writeFileSync(seed, v.seed + "\n");
+    fs.writeFileSync(admin, withEmail);
+    const r = await runOnPglite({ files: [".tmp-admin-seed.sql", ".tmp-admin-preflight.sql"], log: () => {} });
+    fs.rmSync(seed, { force: true });
+    fs.rmSync(admin, { force: true });
+    const msgs = r.failures.map((f) => f.message);
+    // exactly one: a second message is the story of this file — a trailing `select … from public.profiles` used to
+    // add "relation does not exist" on top of the real reason, and the operator fixed the wrong thing.
+    assert.equal(msgs.length, 1, `${v.name}: exactly one refusal, got ${JSON.stringify(msgs)}`);
+    assert.match(msgs[0], v.want, `${v.name}: wrong refusal (${msgs[0]})`);
+    assert.match(msgs[0], /SETUP\.sql/, `${v.name}: the refusal must name the file that fixes it (${msgs[0]})`);
+  }
+});
+
+// The operator-facing diagnostic must be executable SQL *and* agree with the hardened database: a check that
+// prints `fail` against a correct project is worse than no check, because it sends people to re-paste SQL that was
+// already applied (or to "fix" a grant that is right).
+test("the shipped read-only diagnostic agrees with the hardened database", { skip: !available && "no pglite" }, async () => {
+  let rows = [];
+  const r = await runOnPglite({
+    files: ["supabase/SETUP.sql", "supabase/DB_CHECK.sql"],
+    log: () => {},
+    probe: [
+      {
+        run: async (db) => {
+          rows = (await db.query(fs.readFileSync(path.join(REPO, "supabase/DB_CHECK.sql"), "utf8"))).rows;
+        },
+      },
+    ],
+  });
+  assert.deepEqual(
+    r.failures.map((f) => f.message),
+    [],
+    "DB_CHECK.sql must run, not merely read",
+  );
+  assert.ok(rows.length >= 9, `the diagnostic must answer every question it asks, saw ${rows.length} rows`);
+  assert.deepEqual(
+    rows.filter((x) => x.status !== "pass" && x.status !== "n/a").map((x) => `${x.status}: ${x.check}`),
+    [],
+    "every DB_CHECK row must be pass (or n/a) on a hardened database",
+  );
+  assert.ok(
+    rows.every((x) => x.do_next),
+    "every row carries the next action, pass rows included",
+  );
 });
 
 test("the admin bootstrap grants, verifies, and refuses every way of getting it wrong", { skip: !available && "no pglite" }, async () => {

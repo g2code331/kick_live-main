@@ -31,13 +31,21 @@ import { fileURLToPath } from "node:url";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const args = process.argv.slice(2);
-const flag = (name) =>
-  args
-    .find((a) => a.startsWith(`--${name}=`))
-    ?.split("=")
-    .slice(1)
-    .join("=");
+// `--flag=value` *and* `--flag value`: the space form is what a human types first, and silently ignoring it (and
+// then running the default file instead of the one named) is exactly the "the tool is broken" experience.
+const flag = (name) => {
+  const eq = args.find((a) => a.startsWith(`--${name}=`));
+  if (eq) return eq.split("=").slice(1).join("=");
+  const i = args.indexOf(`--${name}`);
+  return i >= 0 && args[i + 1] && !args[i + 1].startsWith("--") ? args[i + 1] : undefined;
+};
 const has = (name) => args.includes(`--${name}`);
+const KNOWN_FLAGS = ["file", "after", "print", "json"];
+const unknownFlags = args.filter((a) => a.startsWith("--") && !KNOWN_FLAGS.includes(a.replace(/^--/, "").split("=")[0]));
+if (unknownFlags.length) {
+  console.error(`sql-pglite: unknown flag(s) ${unknownFlags.join(", ")} — supported: --file=X --after=X --print --json`);
+  process.exit(2);
+}
 
 // ---------------------------------------------------------------- statement splitter
 // Splits on `;` at the top level only, respecting single-quoted strings (with '' escapes), dollar-quoted
@@ -160,7 +168,7 @@ grant usage on schema auth   to anon, authenticated, service_role;
 
 let instanceCount = 0;
 
-export async function runOnPglite({ files, log = console.log, probe = null } = {}) {
+export async function runOnPglite({ files, log = console.log, probe = null, echoRows = false } = {}) {
   let PGlite;
   try {
     ({ PGlite } = await import("@electric-sql/pglite"));
@@ -192,9 +200,16 @@ export async function runOnPglite({ files, log = console.log, probe = null } = {
         if (DROPPED.some((re) => re.test(probe.split("\n").pop().trim()))) continue;
         await db.query("savepoint stmt").catch(() => {});
         try {
-          await db.query(st);
+          const res = await db.query(st);
           await db.query("release savepoint stmt").catch(() => {});
           executed++;
+          // `--print` echoes the rows of any statement that returns them, so a *diagnostic* file can be run
+          // locally (`npm run db:check`) and not only inside the Supabase editor. Without the flag nothing is
+          // printed: 850 statements of migration noise would drown the verdict, and every `select` inside a
+          // migration would be reported as if it were an answer.
+          if (echoRows) {
+            for (const row of res?.rows ?? []) console.log(`  ${JSON.stringify(row)}`);
+          }
         } catch (e) {
           await db.query("rollback to savepoint stmt").catch(() => {});
           failures.push({
@@ -257,7 +272,7 @@ if (DIRECT) {
   const after = flag("after");
   const files = one ? [one] : ["supabase/SETUP.sql"];
   if (after) files.unshift(after);
-  const r = await runOnPglite({ files });
+  const r = await runOnPglite({ files, echoRows: has("print") });
   if (has("json")) console.log(JSON.stringify(r, null, 2));
   process.exit(r.skipped ? 0 : r.ok ? 0 : 1);
 }
