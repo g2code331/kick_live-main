@@ -14296,6 +14296,7 @@ SELECT '11 / 12: supabase/migrations/20260916120000_phase11_privilege_tightening
 -- so the two can never disagree again — which is the actual defect behind both errors you have seen.
 -- ============================================================================
 
+
 -- The shipped SETUP.sql wraps itself in explicit begin/commit for the same reason: if the editor already opened a
 -- transaction this begin is a no-op warning, and if it did not, the four blocks below either all apply or none do.
 begin;
