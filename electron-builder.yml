@@ -74,7 +74,12 @@ linux:
 
 deb:
   packageName: kicklive
-  section: web
+  # electron-builder 26 renamed this: it is `packageCategory` now (it becomes fpm's --category,
+  # which is the deb control `Section` field that verify-packaging's C1e asserts equals "web").
+  # Spelling it `section` makes the whole config fail schema validation — `DebOptions` sets
+  # additionalProperties:false, and electron-builder reports it as the unhelpful
+  # "configuration.deb should be one of these: null".
+  packageCategory: web
   priority: optional
   compression: xz
   # electron-builder's built-in default dependency list still uses the pre-`t64` package names,
