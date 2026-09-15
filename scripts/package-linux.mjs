@@ -69,6 +69,18 @@ export async function main() {
   const builderArgs = ["--config", "electron-builder.yml", "--linux"];
   if (has("dir")) builderArgs.push("--dir");
   else builderArgs.push(...targets());
+  // electron-builder writes `linux.desktop.entry` values into the .desktop file VERBATIM — there is
+  // no macro expansion on that path (LinuxTargetHelper.computeDesktopEntry just does
+  // `data += \`\n${name}=${desktopMeta[name]}\``). So the `${version}` in electron-builder.yml is a
+  // placeholder, not a value: left to itself the builder ships the six characters "${version}" into
+  // /usr/share/applications/kicklive.desktop, and tier C6 fails with
+  // "X-KickLive-Version: expected 1.0.0 got ${version}".
+  //
+  // `-c.<dotted.key>=<value>` is the documented way to combine a config file with CLI overrides
+  // (electron-builder#2016: `config` becomes [file, object] and the object is deep-assigned over
+  // it), so the resolved version is injected here, where VERSION is already known. The macro stays
+  // in electron-builder.yml because `branding check` asserts the packager declares the key.
+  builderArgs.push(`-c.linux.desktop.entry.X-KickLive-Version=${version}`);
   builderArgs.push("--x64", "--publish", "never");
   const localBin = path.join(REPO_ROOT, "node_modules", ".bin", "electron-builder");
   const builder = fs.existsSync(localBin) ? localBin : "npx";

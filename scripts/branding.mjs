@@ -297,7 +297,11 @@ function checkElectronBuilder(root, f) {
   for (const key of ["StartupNotify", "X-KickLive-Version", "X-KickLive-Feed"]) {
     if (!(key in entry)) f.error(`builder.desktop.entry.${key}`, "the .desktop expectation declares this key, so the packager must emit it");
   }
-  if (entry["X-KickLive-Version"] !== "${version}") f.error("builder.desktop.entry.X-KickLive-Version", `expected the "${"${version}"}" macro`);
+  // The macro is the config-of-record placeholder, not the value that ships: electron-builder does
+  // not expand macros in `desktop.entry`, so scripts/package-linux.mjs overrides this exact key on
+  // the command line with the resolved VERSION. Asserting the macro here keeps one place that says
+  // "the packager declares this key" while the number comes from VERSION at build time.
+  if (entry["X-KickLive-Version"] !== "${version}") f.error("builder.desktop.entry.X-KickLive-Version", `expected the "${"${version}"}" macro (resolved at build time by scripts/package-linux.mjs)`);
   // depends must be t64-aware, or the deb is uninstallable on Ubuntu 24.04.
   const depends = (deb.depends ?? []).join(" ");
   for (const pkg of ["libgtk-3-0t64 | libgtk-3-0", "libasound2t64 | libasound2", "libnotify4", "libnss3", "xdg-utils"]) {
