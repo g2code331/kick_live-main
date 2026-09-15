@@ -61,8 +61,15 @@ export async function main() {
   // stray positional — "Unknown arguments: electron-builder.yml, never". A command whose first
   // argument is a subcommand (wrangler `deploy`) escapes this by accident; one that starts with a
   // flag does not. `npx --no -- <pkg> …` also works; the local binary is more predictable.
-  const builderArgs = ["--config", "electron-builder.yml", "--linux", "--x64", "--publish", "never"];
-  for (const t of targets()) builderArgs.push(t === "dir" ? "--dir" : `--${t}`);
+  // electron-builder takes the target list as VALUES of the `--linux` ARRAY option
+  // (`--linux deb AppImage`). Neither `--deb --AppImage` nor bare positionals are accepted —
+  // both are rejected with "Unknown arguments: deb, AppImage", which this script then reported
+  // as a download failure. An EMPTY list means "use linux.target from electron-builder.yml",
+  // which is what `--dir` relies on (`args.dir` is promoted to DIR_TARGET internally).
+  const builderArgs = ["--config", "electron-builder.yml", "--linux"];
+  if (has("dir")) builderArgs.push("--dir");
+  else builderArgs.push(...targets());
+  builderArgs.push("--x64", "--publish", "never");
   const localBin = path.join(REPO_ROOT, "node_modules", ".bin", "electron-builder");
   const builder = fs.existsSync(localBin) ? localBin : "npx";
   const argv = fs.existsSync(localBin) ? builderArgs : ["--no", "--", "electron-builder", ...builderArgs];
@@ -70,8 +77,20 @@ export async function main() {
   const res = run("electron-builder", builder, argv, { cwd: REPO_ROOT, env: { ELECTRON_BUILDER_CACHE: process.env.ELECTRON_BUILDER_CACHE ?? "" } });
   const out = res.stdout + res.stderr;
   if (!res.ok) {
-    const blocked = /ETIMEDOUT|ENOTFOUND|self-signed|unable to verify|EAI_AGAIN|Could not download|download.*failed/i.test(out);
-    console.error(`\npackage-linux: electron-builder failed${blocked ? " — it could not download the Electron runtime/fpm tooling" : ""}`);
+    // Classify before speaking. The old pattern included a bare `self-signed`, which matches
+    // electron-builder's own help text ("create-self-signed-cert") — so a CLI usage error was
+    // reported as "it could not download the Electron runtime", pointing at the network when the
+    // problem was the argument list. A usage error now says so by name.
+    const usage = /Unknown arguments?:|Unknown option|Invalid configuration object/i.test(out);
+    const blocked = !usage && /ETIMEDOUT|ENOTFOUND|EAI_AGAIN|Could not download|download.*failed|unable to verify the first certificate|self.signed certificate/i.test(out);
+    console.error(
+      `\npackage-linux: electron-builder failed${usage ? " — the builder rejected its own arguments or config" : blocked ? " — it could not download the Electron runtime/fpm tooling" : ""}`,
+    );
+    if (usage) {
+      console.error(`  electron-builder never started building: ${tail(out, 2).trim()}`);
+      console.error(`  invoked as: ${[builder, ...argv].join(" ")}`);
+      console.error("  Targets are values of the `--linux` array (`--linux deb AppImage`), not `--deb --AppImage` flags.");
+    }
     if (blocked) {
       console.error(
         "  This step needs network access to github.com release assets. In CI it is available;\n" +
