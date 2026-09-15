@@ -18,7 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
-import { REPO_ROOT, fmtBytes, readVersionFile, walk } from "../tools/vite-shared.ts";
+import { REPO_ROOT, readVersionFile, walk } from "../tools/vite-shared.ts";
 import { fmtSize, run, tail } from "./lib/run.mjs";
 
 const args = process.argv.slice(2);
@@ -52,10 +52,22 @@ export async function main() {
     }
   }
 
-  const builderArgs = ["--no", "electron-builder", "--config", "electron-builder.yml", "--linux", "--x64", "--publish", "never"];
+  // Call electron-builder directly, never through `npx --no electron-builder …`.
+  //
+  // npx keeps parsing options as npm's OWN until it meets a non-option argument, then hands the
+  // rest to the binary. So `npx --no prettier --version` prints npm's version, and this script's
+  // original `npx --no electron-builder --config electron-builder.yml …` made npm eat `--config`
+  // (npm reads it as an npmrc path!) and forward `electron-builder.yml` to electron-builder as a
+  // stray positional — "Unknown arguments: electron-builder.yml, never". A command whose first
+  // argument is a subcommand (wrangler `deploy`) escapes this by accident; one that starts with a
+  // flag does not. `npx --no -- <pkg> …` also works; the local binary is more predictable.
+  const builderArgs = ["--config", "electron-builder.yml", "--linux", "--x64", "--publish", "never"];
   for (const t of targets()) builderArgs.push(t === "dir" ? "--dir" : `--${t}`);
+  const localBin = path.join(REPO_ROOT, "node_modules", ".bin", "electron-builder");
+  const builder = fs.existsSync(localBin) ? localBin : "npx";
+  const argv = fs.existsSync(localBin) ? builderArgs : ["--no", "--", "electron-builder", ...builderArgs];
   console.log(`package-linux: electron-builder ${targets().join(",")} @ v${version}`);
-  const res = run("electron-builder", "npx", builderArgs, { cwd: REPO_ROOT, env: { ELECTRON_BUILDER_CACHE: process.env.ELECTRON_BUILDER_CACHE ?? "" } });
+  const res = run("electron-builder", builder, argv, { cwd: REPO_ROOT, env: { ELECTRON_BUILDER_CACHE: process.env.ELECTRON_BUILDER_CACHE ?? "" } });
   const out = res.stdout + res.stderr;
   if (!res.ok) {
     const blocked = /ETIMEDOUT|ENOTFOUND|self-signed|unable to verify|EAI_AGAIN|Could not download|download.*failed/i.test(out);

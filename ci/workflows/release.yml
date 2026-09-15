@@ -147,10 +147,16 @@ jobs:
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           VITE_UPDATE_CHANNEL: ${{ needs.preflight.outputs.channel }}
       - name: Verify the built bundle answers over the hardened server
+        # --web-only: this job builds dist/web only (see deploy-web.yml) — no renderer/dist, no
+        # build/electron, so tier A1/A3/A6 do not apply here.
         run: |
-          node scripts/verify-packaging.mjs
+          node scripts/verify-packaging.mjs --web-only
           node server/cli.ts --root dist/web --port 4173 --quiet & pid=$!
-          sleep 1
+          # Wait for the socket instead of sleeping a fixed second.
+          for _ in $(seq 1 40); do
+            curl -fsS -o /dev/null "http://127.0.0.1:4173/version.json" && break
+            sleep 0.5
+          done
           curl -fsS http://127.0.0.1:4173/version.json | tee /tmp/version.json
           grep -q '"version": *"${{ needs.preflight.outputs.version }}"' /tmp/version.json
           curl -fsS http://127.0.0.1:4173/sw.js | head -1
