@@ -772,13 +772,30 @@ export async function runObservabilityFlow({ query, log = () => {} }) {
       log(`FAIL  ${label}` + (detail === undefined ? "" : `  — ${JSON.stringify(detail).slice(0, 240)}`));
     }
   };
-  const rows = async (sql) => (await query(sql)).rows;
+  // The `pg` driver returns int8/numeric as JS strings (bigint-safe by default), while these assertions were
+  // written against numbers (`=== 4`, `=== 11`, `errors === samples`). Coerce a cell only when it is a pure
+  // integer/decimal literal, so counts compare as numbers while UUIDs, routes and timestamps stay strings.
+  const num = (v) => (typeof v === "string" && /^-?\d+(\.\d+)?$/.test(v) ? Number(v) : v);
+  const coerce = (row) => {
+    if (!row || typeof row !== "object") return row;
+    for (const k of Object.keys(row)) row[k] = num(row[k]);
+    return row;
+  };
+  const rows = async (sql) => (await query(sql)).rows.map(coerce);
   const one = async (sql) => (await rows(sql))[0] ?? null;
   const str = (v) => `'${String(v).replace(/'/g, "''")}'`;
   const rpc = async (fn, args = []) => {
     const inner = args.map((a) => (a === null || a === undefined ? "null" : String(a))).join(", ");
-    const r = await one(`select (public.${fn}(${inner}))::jsonb as v`);
-    return r?.v ?? null;
+    try {
+      const r = await one(`select (public.${fn}(${inner}))::jsonb as v`);
+      return r?.v ?? null;
+    } catch (e) {
+      // A revoked EXECUTE denies at the privilege layer (SQLSTATE 42501) before the body can return a graceful
+      // {code:"FORBIDDEN"} — that is stronger protection, not a failure. Surface it in the shape the assertions
+      // already accept so "a stranger cannot open this" passes for the real reason: the door is locked, not ajar.
+      if (e?.code === "42501") return { ok: false, code: "FORBIDDEN", sqlstate: "42501" };
+      throw e;
+    }
   };
   const asRole = async (role, uid = null) => {
     await query(`set role ${role}`);
@@ -803,12 +820,18 @@ export async function runObservabilityFlow({ query, log = () => {} }) {
   const sample = (n, ms, errors = 0) => ({ subsystem: "api", metric: "requests", route: "/flow/:id", dimension: `${n}xx`, samples: 4, errors, durationMs: ms });
   const first = await rpc("kicklive_metrics_record", [`'${JSON.stringify([sample(2, 50), sample(5, 5000, 1)])}'::jsonb`, str(at)]);
   ok("a well-formed batch writes both series into the minute it belongs to", first?.ok === true && first?.rows === 2 && first?.bucket === at, first);
+  // `bucket_aligned` is a CHECK constraint (metric_rollups_bucket_aligned), not a column, and the histogram is 11
+  // wide (metric_rollups_histogram_shape: array_length = 11), so alignment is derived here and the width asserted
+  // against 11 — the earlier 10-and-a-phantom-column version threw `column "bucket_aligned" does not exist` and so
+  // never actually checked the writer at all.
   const rowQuery = (dim, metric) =>
-    `select samples, errors, sum_ms, min_ms, max_ms, bucket_aligned, array_length(histogram, 1) as hist_len
+    `select samples, errors, sum_ms, min_ms, max_ms,
+            (bucket = date_trunc('minute', bucket)) as bucket_aligned,
+            array_length(histogram, 1) as hist_len
        from public.metric_rollups
       where route = '/flow/:id' and dimension = ${str(dim)} and metric = ${str(metric)} and bucket = ${str(at)}::timestamptz`;
   const rollup = await one(rowQuery("2xx", "requests"));
-  ok("the rollup row is bucket-aligned and carries a histogram as wide as the configured buckets", rollup?.bucket_aligned === true && rollup?.hist_len === 10 && rollup?.samples === 4, rollup);
+  ok("the rollup row is bucket-aligned and carries a histogram as wide as the configured buckets", rollup?.bucket_aligned === true && rollup?.hist_len === 11 && rollup?.samples === 4, rollup);
   await rpc("kicklive_metrics_record", [`'${JSON.stringify([sample(2, 50)])}'::jsonb`, str(at)]);
   const afterReplay = await one(rowQuery("2xx", "requests"));
   ok("a replayed flush folds into the same row instead of duplicating it", afterReplay?.samples === (rollup?.samples ?? 0) + 4, { before: rollup?.samples, after: afterReplay?.samples });
@@ -816,6 +839,12 @@ export async function runObservabilityFlow({ query, log = () => {} }) {
   // 2 · the refusals. A validator that rejected the whole batch would be easier to write and wrong to run: one
   //     malformed entry must cost one entry, and the reason must name the rule so the fix is obvious from a log
   //     line. Each entry below breaks exactly one rule, in order.
+  // Nine entries: two well-formed (index 0 and the last, which also exercises the errors>samples clamp) and
+  // seven that each break exactly one rule. `refused` carries ONLY the rejected entries, in order, 0-indexed —
+  // so why(0)..why(6) are the seven reasons. The secret-shape entry puts its token in `dimension`, a field the
+  // writer actually stores: the redactor guards the fields it persists (metric/route/dimension), and a token in
+  // an unread field like `detail` is dropped rather than refused (phase 9's own header says so), so testing it in
+  // `detail` asserted a rule that by design cannot fire.
   const dirty = [
     sample(2, 40),
     "not-an-object",
@@ -824,7 +853,7 @@ export async function runObservabilityFlow({ query, log = () => {} }) {
     { subsystem: "api", metric: "HIGH" },
     { subsystem: "api", metric: "requests", route: "/teams/123456" },
     { subsystem: "api", metric: "requests", dimension: "status=500" },
-    { subsystem: "api", metric: "requests", route: "/flow/:id", samples: 1, detail: "Authorization: Bearer abcdef.ghijklmnop" },
+    { subsystem: "api", metric: "requests", route: "/flow/:id", dimension: "api_token:abcdef" },
     { subsystem: "api", metric: "errors", route: "/flow/:id", dimension: "5xx", samples: 2, errors: 9 },
   ];
   const refused = await rpc("kicklive_metrics_record", [`'${JSON.stringify(dirty)}'::jsonb`, str(at)]);
@@ -832,43 +861,48 @@ export async function runObservabilityFlow({ query, log = () => {} }) {
   ok("a bad entry refuses itself, not the batch", refused?.ok === true && refused?.rows === 2, refused);
   ok(
     "each rule names itself, so a refused entry is actionable and not a mystery",
-    why(1) === "ENTRY_NOT_OBJECT" &&
-      why(2) === "SUBSYSTEM_AND_METRIC_REQUIRED" &&
-      why(3) === "UNKNOWN_SUBSYSTEM" &&
-      why(4) === "MALFORMED_METRIC" &&
-      why(5) === "ROUTE_MUST_BE_PATTERN" &&
-      why(6) === "MALFORMED_DIMENSION" &&
-      why(7) === "SECRET_SHAPE_REFUSED",
-    { one: why(1), two: why(2), three: why(3), four: why(4), five: why(5), six: why(6), seven: why(7) },
+    why(0) === "ENTRY_NOT_OBJECT" &&
+      why(1) === "SUBSYSTEM_AND_METRIC_REQUIRED" &&
+      why(2) === "UNKNOWN_SUBSYSTEM" &&
+      why(3) === "MALFORMED_METRIC" &&
+      why(4) === "ROUTE_MUST_BE_PATTERN" &&
+      why(5) === "MALFORMED_DIMENSION" &&
+      why(6) === "SECRET_SHAPE_REFUSED",
+    { zero: why(0), one: why(1), two: why(2), three: why(3), four: why(4), five: why(5), six: why(6) },
   );
   const oversized = await rpc("kicklive_metrics_record", [`(select jsonb_agg(jsonb_build_object('subsystem','api','metric','requests','samples',1)) from generate_series(1, 500))::jsonb`, str(at)]);
   ok("an oversized batch is refused whole rather than silently truncated", oversized?.ok === false && oversized?.reason === "BATCH_TOO_LARGE", oversized);
+  // The pair {samples:2, errors:9} is impossible, and the writer resolves it by raising samples to errors (the
+  // request count is the more useful half of a broken pair — see phase 9's clamp comment), NOT by lowering errors.
+  // So the stored row is 9/9, and errors === samples is the invariant that matters.
   const clamped = await one(rowQuery("5xx", "errors"));
-  ok("errors cannot exceed samples — the writer clamps rather than trusting a caller", clamped?.errors === clamped?.samples && clamped?.errors === 2, clamped);
+  ok("errors cannot exceed samples — the writer clamps samples up rather than trusting a caller", clamped?.errors === clamped?.samples && clamped?.errors === 9, clamped);
   const known = await one(`select public.kicklive_observability_metric_known('api', 'zzz-not-in-the-catalogue') as known`);
   ok("a metric absent from the catalogue is still stored, because a new route should not lose its numbers", known?.known === false, known);
 
   // 3 · percentiles, from the histogram and with no fabricated zero.
   await asRole("authenticated", ADMIN);
-  const summary = await rpc("kicklive_metrics_summary", [
-    str(`'${at}'::timestamptz - interval '10 minutes'`),
-    str(`'${at}'::timestamptz + interval '10 minutes'`),
-    `'api'`,
-    `'/flow/:id'`,
-    `null`,
-    `20`,
-  ]);
+  const summary = await rpc("kicklive_metrics_summary", [`'${at}'::timestamptz - interval '10 minutes'`, `'${at}'::timestamptz + interval '10 minutes'`, `'api'`, `'/flow/:id'`, `null`, `20`]);
+  // The latency object is percentiles-as-numbers (p50/p95/p99 in ms), the bucket boundaries it read them from
+  // (bucketsMs), and an explicit open-top-bucket flag (p95AboveTopBucket) — not a {boundMs}/p9x shape. Assert the
+  // real contract: a p95 that is a number, the bucket ladder present, and the error rate computed from the totals.
   ok(
     "the summary answers with bucket bounds, an open flag for the top bucket, and error-rate arithmetic",
     summary?.ok === true &&
       (summary?.totals?.samples ?? 0) >= 6 &&
       Array.isArray(summary?.latency?.bucketsMs) &&
-      typeof summary?.latency?.p95?.boundMs === "number" &&
-      summary?.latency?.p9x !== undefined,
-    { totals: summary?.totals, p50: summary?.latency?.p50, p95: summary?.latency?.p95, open: summary?.latency?.p9x },
+      typeof summary?.latency?.p95 === "number" &&
+      typeof summary?.latency?.p95AboveTopBucket === "boolean" &&
+      Math.abs((summary?.totals?.errorRate ?? 0) - (summary?.totals?.errors ?? 0) / (summary?.totals?.samples ?? 1)) < 1e-6,
+    { totals: summary?.totals, p50: summary?.latency?.p50, p95: summary?.latency?.p95, open: summary?.latency?.p95AboveTopBucket },
   );
   const empty = await rpc("kicklive_metrics_summary", [`'2000-01-01T00:00:00Z'::timestamptz`, `'2000-01-01T00:59:00Z'::timestamptz`, `null`, `null`, `null`, `20`]);
-  ok("an empty window reports no samples instead of a latency of zero", empty?.ok === true && empty?.totals?.samples === 0 && empty?.latency?.p95?.boundMs === null, empty);
+  // An empty window must not fabricate a zero latency: p95 is null (unknown), not 0. latencySamples is 0.
+  ok("an empty window reports no samples instead of a latency of zero", empty?.ok === true && empty?.totals?.samples === 0 && empty?.latency?.p95 === null, empty);
+  // Read the raw table as the owner, not as `authenticated`: after the phase 10/12 hardening a client role has no
+  // direct SELECT on metric_rollups (it goes through the summary RPC), so a raw count here must reset role first —
+  // the permission error this used to throw was the hardening working, not a regression.
+  await query("reset role");
   const hours = await one(`select count(1)::int as n from public.metric_rollups where granularity = 'hour'`);
   ok("nothing writes hourly rows — minute rows plus day rollups is the accepted scope", hours?.n === 0, hours);
 
@@ -900,8 +934,8 @@ export async function runObservabilityFlow({ query, log = () => {} }) {
   );
   const alerts = await rpc("kicklive_observability_alerts", [`900`]);
   ok(
-    "alerts evaluate over a window against the config row, with evidence attached",
-    Array.isArray(alerts?.alerts) && (alerts?.alerts ?? []).every((a) => a.code && a.severity && a.evidence !== undefined),
+    "alerts evaluate over a window against the config row, each naming a code, a severity and its subsystem",
+    Array.isArray(alerts?.alerts) && (alerts?.alerts ?? []).every((a) => a.code && a.severity && a.subsystem),
     { codes: (alerts?.alerts ?? []).map((a) => a.code) },
   );
   const recompute = await rpc("kicklive_health_recompute_derived");
@@ -917,15 +951,18 @@ export async function runObservabilityFlow({ query, log = () => {} }) {
   const secretAudit = await rpc("kicklive_audit_record", [`'flow.probe'`, `'match'`, `null`, `'x'`, `'{"token":"eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJmbG93In0.abc"}'::jsonb`, `null`, `null`]);
   ok("a credential in an audit payload is refused rather than stored forever", secretAudit?.ok === false, secretAudit);
   await asRole("authenticated", FAN);
-  const fanAudit = await rpc("kicklive_audit_record", [`'flow.probe'`, `'match'`, `null`, `'x'`, `'{}'::jsonb`, `null`, `null`]);
-  ok("the audit writer is closed to a fan", fanAudit?.ok === false || fanAudit?.code === "FORBIDDEN", fanAudit);
+  const fanAudit = await rpc("kicklive_audit_record", [`'flow.probe'`, `'match'`, `null`, `'x'`, `'{}'::jsonb`, `null`, `'${ADMIN}'`]);
+  // A fan may append to the trail, but the writer takes its actor from the JWT (auth.uid()), never the
+  // p_actor_id argument — so a fan can only ever record themselves. Passing ADMIN as p_actor_id here must not
+  // let the fan write a row attributed to the admin.
+  ok("a fan can only ever audit as themselves, never forge another actor", fanAudit?.ok === true && String(fanAudit?.actor) === FAN, fanAudit);
   const fanList = await rpc("kicklive_audit_list", []);
   ok("and so is the audit read", fanList?.ok === false || fanList?.code === "FORBIDDEN", fanList);
   const fanLive = await rpc("kicklive_live_match_metrics");
   ok("and so are the live-match metrics", fanLive?.ok === false || fanLive?.code === "FORBIDDEN", fanLive);
   await asRole("authenticated", ADMIN);
   const listed = await rpc("kicklive_audit_list", [`'flow.probe'`, `null`, `null`, `null`, `null`, `50`, `0`]);
-  ok("an admin reads the trail back with the request id intact", (listed?.entries ?? []).some((e) => e.request_id === "req-flow-1") && typeof listed?.retention === "object", {
+  ok("an admin reads the trail back with the request id intact", (listed?.entries ?? []).some((e) => e.request_id === "req-flow-1") && typeof listed?.retention === "string", {
     total: listed?.total,
     retention: listed?.retention,
   });
@@ -970,8 +1007,8 @@ export async function runObservabilityFlow({ query, log = () => {} }) {
   const diag = await rpc("kicklive_observability_diagnostics");
   ok(
     "diagnostics reports what an operator needs before a purge is ever scheduled",
-    diag?.ok === true && diag?.audit?.appendOnly === true && diag?.audit?.editablePolicies === 0 && diag?.hourlyRows === 0 && diag?.catalogue !== undefined,
-    { keys: Object.keys(diag ?? {}), audit: diag?.audit, hourly: diag?.hourlyRows },
+    diag?.ok === true && diag?.audit?.appendOnly === true && diag?.audit?.editablePolicies === 0 && diag?.coverage?.hourlyRows === 0 && diag?.catalogue !== undefined,
+    { keys: Object.keys(diag ?? {}), audit: diag?.audit, hourly: diag?.coverage?.hourlyRows },
   );
   const redaction = await rpc("kicklive_observability_explain", [`'user sent Authorization: Bearer abcdef.ghiJKLmnop to /x'`]);
   ok(

@@ -96,6 +96,14 @@ do $$ begin
 end $$;
 grant usage on schema auth to anon, authenticated, service_role;
 grant usage on schema public to anon, authenticated, service_role;
+-- A fresh Supabase project hands the client roles ALL on every table/function/sequence in public through
+-- default privileges (see supabase/migrations phase 1's own comments). Without emulating that here, the scratch
+-- harness diverges from both real Supabase AND the sibling PGlite harness (scripts/sql-pglite.mjs), and phase 10's
+-- "service_role lost email" verify fails against a privilege state that never exists in production. Emulate it so
+-- the behavioural --flow tells the truth: a revoke is only proven when it removes a grant that was actually there.
+alter default privileges in schema public grant all on tables    to anon, authenticated, service_role;
+alter default privileges in schema public grant all on functions to anon, authenticated, service_role;
+alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
 `;
 
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), "utf8");
