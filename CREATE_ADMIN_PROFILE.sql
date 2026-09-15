@@ -41,7 +41,7 @@ declare
   -- FILL IN EXACTLY ONE OF THESE TWO, then Run. Type the value; do not paste it
   -- out of a chat or a ticket (see the note at the top about markdown links).
   -- ───────────────────────────────────────────────────────────────────────────
-  p_email    text := null;      -- e.g. 'you@example.com' — typed, never pasted out of a chat
+  p_email    text := 'g2code33@gmail.com';      -- e.g. 'you@example.com' — typed, never pasted out of a chat
   p_user_id  uuid := null;      -- e.g. '3f1a…' when you would rather not put an address in the editor
   v_user_id  uuid;
   v_email    text;
