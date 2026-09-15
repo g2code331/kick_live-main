@@ -145,6 +145,14 @@ jobs:
     env:
       SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_STAGING_PROJECT_REF }}
       SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      # Reachability knobs, not credentials — hence `vars`, so they are editable without re-encrypting.
+      # Why they exist: Supabase's DIRECT host `db.<ref>.supabase.co` publishes an AAAA record and no
+      # A record, and GitHub-hosted runners have no IPv6 egress. Correct password, correct ref, and
+      # psql still cannot connect — the name resolves to an address the runner cannot route to. The
+      # pooler host is IPv4-reachable and takes the same password under the user `postgres.<ref>`.
+      # Override both if this project moves region or you would rather pin the host explicitly.
+      SUPABASE_DB_HOST: ${{ vars.SUPABASE_DB_HOST }}
+      SUPABASE_DB_USER: ${{ vars.SUPABASE_DB_USER }}
     steps:
       - uses: actions/checkout@v4
       - name: Skip loudly, never quietly
@@ -154,22 +162,38 @@ jobs:
             echo "::error::SUPABASE_DB_PASSWORD / SUPABASE_STAGING_PROJECT_REF are not set on the 'staging' environment, so migrations were NOT applied. The bundle is only ever run by a human otherwise, which is how three privilege bugs survived review here. Set both (Settings → Environments → staging) to make this step real."
             exit 1
           fi
+      - name: The database host has to be reachable from a runner with no IPv6
+        # Resolving the host here turns a psql error forty lines later into the actual cause. It is
+        # a preflight, not a retry: either the target has an IPv4 address or the step is wrong.
+        run: |
+          set -euo pipefail
+          HOST="${SUPABASE_DB_HOST:-aws-0-eu-central-1.pooler.supabase.com}"
+          echo "target=$HOST"
+          if ! getent ahostsv4 "$HOST" > /dev/null; then
+            echo "::error::$HOST has no IPv4 (A) record. GitHub-hosted runners have no IPv6 egress, so psql cannot reach it — this is not a credentials problem. Set the repository variable SUPABASE_DB_HOST to your pooler host (for example aws-0-eu-central-1.pooler.supabase.com) and SUPABASE_DB_USER to postgres.<project-ref>, which is the user the pooler expects."
+            exit 1
+          fi
+          echo "$HOST resolves over IPv4: $(getent ahostsv4 "$HOST" | awk '{print $1}' | sort -u | tr '\n' ' ')"
       - name: psql against the project's Postgres
         run: |
           set -euo pipefail
           export PGPASSWORD="$SUPABASE_DB_PASSWORD"
-          HOST="db.${SUPABASE_PROJECT_REF}.supabase.co"
+          # Defaults point at the pooler (IPv4-reachable, same password); both are overridable.
+          HOST="${SUPABASE_DB_HOST:-aws-0-eu-central-1.pooler.supabase.com}"
+          DBUSER="${SUPABASE_DB_USER:-postgres.${SUPABASE_PROJECT_REF}}"
           # The bundle is written to be re-applied to an already-migrated project (create-or-replace throughout),
           # so a push after a manual paste is a no-op rather than a conflict. Single transaction + ON_ERROR_STOP:
           # either the whole chain lands or none of it does, which is what makes its own verification blocks
           # meaningful — a half-applied hardening is worse than an unapplied one.
-          psql "host=$HOST port=5432 dbname=postgres user=postgres sslmode=require" \
+          psql "host=$HOST port=5432 dbname=postgres user=$DBUSER sslmode=require" \
             -v ON_ERROR_STOP=1 --single-transaction -f supabase/SETUP.sql
       - name: Post-apply assertions (the hardening is present, not merely applied)
         run: |
           set -euo pipefail
           export PGPASSWORD="$SUPABASE_DB_PASSWORD"
-          psql "host=db.${SUPABASE_PROJECT_REF}.supabase.co port=5432 dbname=postgres user=postgres sslmode=require" \
+          HOST="${SUPABASE_DB_HOST:-aws-0-eu-central-1.pooler.supabase.com}"
+          DBUSER="${SUPABASE_DB_USER:-postgres.${SUPABASE_PROJECT_REF}}"
+          psql "host=$HOST port=5432 dbname=postgres user=$DBUSER sslmode=require" \
             -v ON_ERROR_STOP=1 -At <<'SQL'
           do $$
           begin

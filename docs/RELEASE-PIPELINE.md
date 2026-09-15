@@ -292,6 +292,13 @@ Layout test tiers (`scripts/verify-packaging.mjs`):
 `--require-full` (used by `package:linux` and the desktop job) turns a missing tier B/C into a
 failure, so CI can never "pass" without ever having looked at a `.deb`.
 
+`--web-only` (used by the web-deploy jobs in `deploy-web.yml` and `release.yml`) is the opposite
+trade in the other direction: those jobs run `build:web` and nothing else, so they have no
+`renderer/dist`, no `build/electron` and no asar. Under `--web-only` the desktop halves of tier A
+(A1, A3, A6) are skipped and the web half (A2) becomes **required** — a missing `dist/web` is a
+FAIL rather than a skip, because a job whose only job is to produce `dist/web` must never pass on
+an empty directory.
+
 ## 8. Secrets
 
 `node scripts/check-secrets.mjs --job=<job>` runs in every job that consumes secrets. Missing

@@ -32,6 +32,7 @@ const RELEASE = path.join(REPO_ROOT, "release");
 const args = process.argv.slice(2);
 const REQUIRE_FULL = args.includes("--require-full");
 const WRITE_REPORT = !args.includes("--no-report");
+const WEB_ONLY = args.includes("--web-only");
 
 const results = [];
 function add(name, status, detail = "") {
@@ -58,6 +59,20 @@ async function tierA() {
   const rendererDist = path.join(REPO_ROOT, "renderer", "dist");
   const webDist = path.join(REPO_ROOT, "dist", "web");
   const electronOut = path.join(REPO_ROOT, "build", "electron");
+
+  // A web deploy (`--web-only`) builds dist/web and nothing else: there is no renderer bundle, no
+  // esbuild electron output and no asar to pack, so the desktop halves of this tier are skipped —
+  // but the web half is REQUIRED. Without that, a job that produced no bundle at all would report
+  // "0 pass, N skipped" and exit 0, which is how a broken deploy looks like a green one.
+  if (WEB_ONLY) {
+    const webOk = tierA2(version, webDist);
+    tierA4();
+    tierA5(version);
+    skip("A1 renderer/dist", "--web-only: no renderer build in this job (the desktop gates cover it)");
+    skip("A3 electron bundles", "--web-only: no build/electron in this job");
+    skip("A6 asar layout", "--web-only: a web deploy packs no asar");
+    return { version, rendererDist, webDist, electronOut, fatal: !webOk };
+  }
 
   // A1 — renderer bundle present at the path the shell loads.
   const indexHtml = path.join(rendererDist, "index.html");
@@ -94,24 +109,7 @@ async function tierA() {
   check("A1j no absolute asset URLs anywhere in the bundle", !/src="\/[^"/]/.test(html) && !/href="\/[^"/]/.test(html), 'absolute "/" URLs resolve to the filesystem root under file://');
 
   // A2 — web/PWA bundle.
-  if (exists(webDist)) {
-    const files = listFiles(webDist);
-    const names = files.map((f) => path.basename(f));
-    check("A2 web bundle present", names.includes("index.html") && names.includes("sw.js") && names.includes("version.json"), `${String(files.length)} files`);
-    const swText = fs.readFileSync(path.join(webDist, "sw.js"), "utf8");
-    check(
-      "A2b sw.js cache is versioned",
-      swText.includes(`kicklive-static-v${version}`.replace("v" + version, () => "v")) || /kicklive-static-v/.test(swText),
-      "cache names must include the build version",
-    );
-    check("A2c sw.js is self-contained", !/from\s+["']\.\/[^"']+["']/.test(swText), "an unbundled sw would 404 on importScripts");
-    const vjson = JSON.parse(fs.readFileSync(path.join(webDist, "version.json"), "utf8"));
-    check("A2d version.json matches VERSION", vjson.version === version, `version.json=${String(vjson.version)} VERSION=${version}`);
-    const manifest = JSON.parse(fs.readFileSync(path.join(webDist, "site.webmanifest"), "utf8"));
-    check("A2e built webmanifest matches source", JSON.stringify(manifest) === JSON.stringify(JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "public", "site.webmanifest"), "utf8"))));
-  } else {
-    skip("A2 web bundle", "dist/web is missing (npm run build:web)");
-  }
+  tierA2(version, webDist);
 
   // A3 — electron bundles.
   try {
@@ -134,9 +132,58 @@ async function tierA() {
   }
 
   // A4 — hook scripts.
+  tierA4();
+
+  // A5 — branding + version lockstep.
+  tierA5(version);
+
+  // A6 — synthetic asar repack with the real tool.
+  await syntheticAsar(version);
+  return { version, rendererDist, webDist, electronOut, fatal: false };
+}
+
+function runQuiet(cmd, args2) {
+  return run("", cmd, args2, { cwd: REPO_ROOT, echo: false });
+}
+
+/**
+ * A2 — the web/PWA bundle in dist/web.
+ *
+ * Returns false when there is no bundle at all. In a full run that is a SKIP (a laptop may have
+ * built only the desktop half); under `--web-only` the caller turns it into a FAIL, because a job
+ * whose entire purpose is "build dist/web and ship it" must never pass on an empty directory.
+ */
+function tierA2(version, webDist) {
+  if (!exists(webDist)) {
+    if (WEB_ONLY) {
+      check("A2 web bundle present", false, "dist/web is missing — the build produced nothing (npm run build:web)");
+      return false;
+    }
+    skip("A2 web bundle", "dist/web is missing (npm run build:web)");
+    return true;
+  }
+  const files = listFiles(webDist);
+  const names = files.map((f) => path.basename(f));
+  const present = check("A2 web bundle present", names.includes("index.html") && names.includes("sw.js") && names.includes("version.json"), `${String(files.length)} files`);
+  if (!present) return false; // the reads below would throw on a bundle that is not there
+  const swText = fs.readFileSync(path.join(webDist, "sw.js"), "utf8");
+  check(
+    "A2b sw.js cache is versioned",
+    swText.includes(`kicklive-static-v${version}`.replace("v" + version, () => "v")) || /kicklive-static-v/.test(swText),
+    "cache names must include the build version",
+  );
+  check("A2c sw.js is self-contained", !/from\s+["']\.\/[^"']+["']/.test(swText), "an unbundled sw would 404 on importScripts");
+  const vjson = JSON.parse(fs.readFileSync(path.join(webDist, "version.json"), "utf8"));
+  check("A2d version.json matches VERSION", vjson.version === version, `version.json=${String(vjson.version)} VERSION=${version}`);
+  const manifest = JSON.parse(fs.readFileSync(path.join(webDist, "site.webmanifest"), "utf8"));
+  check("A2e built webmanifest matches source", JSON.stringify(manifest) === JSON.stringify(JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "public", "site.webmanifest"), "utf8"))));
+  return true;
+}
+
+/** A4 — every hook script in the repo parses (`bash -n`) and starts with a bash shebang. */
+function tierA4() {
   const shellFiles = walk(REPO_ROOT, (f) => f.endsWith(".sh") && !f.includes(`${path.sep}node_modules${path.sep}`) && !f.includes(`${path.sep}.git${path.sep}`));
   const bash = which("bash") ?? "/bin/bash";
-  let hooksOk = shellFiles.length > 0;
   for (const file of shellFiles) {
     const rel = relPath(REPO_ROOT, file);
     const text = fs.readFileSync(file, "utf8");
@@ -144,7 +191,6 @@ async function tierA() {
     const noCrlf = !text.includes("\r\n");
     const res = runQuiet(bash, ["-n", file]);
     const ok = hasShebang && noCrlf && res.code === 0;
-    if (!ok) hooksOk = false;
     check(
       `A4 bash -n ${rel}`,
       ok,
@@ -158,20 +204,14 @@ async function tierA() {
     );
   }
   if (shellFiles.length === 0) check("A4 hook scripts exist", false, "no *.sh found: after-install/after-remove hooks are required by the deb target");
+}
 
-  // A5 — branding + version lockstep.
+/** A5 — branding and version stay in lockstep across every file that carries them. */
+function tierA5(version) {
   const branding = runQuiet(process.execPath, [path.join(REPO_ROOT, "scripts/branding.mjs"), "check"]);
   check("A5 branding check", branding.code === 0, branding.code === 0 ? tail(branding.stdout, 1) : tail(branding.stdout + branding.stderr, 12));
   const versionCheck = runQuiet(process.execPath, [path.join(REPO_ROOT, "scripts/version.mjs"), "check"]);
   check("A5b version lockstep", versionCheck.code === 0, versionCheck.code === 0 ? `all fields at ${version}` : tail(versionCheck.stdout + versionCheck.stderr, 12));
-
-  // A6 — synthetic asar repack with the real tool.
-  await syntheticAsar(version);
-  return { version, rendererDist, webDist, electronOut, fatal: false };
-}
-
-function runQuiet(cmd, args2) {
-  return run("", cmd, args2, { cwd: REPO_ROOT, echo: false });
 }
 
 function stageSyntheticApp(dir) {
