@@ -66,11 +66,19 @@ export async function main() {
   }
   if (problems.length > 0) console.log(`ci:install: resolved ${String(problems.length)} sync problem(s)`);
   if (doPush) {
-    const version = "ci: install GitHub Actions workflows";
-    const add = run("git add", "git", ["add", ".github/workflows"], { cwd: REPO_ROOT, echo: false });
-    const commit = run("git commit", "git", ["commit", "-m", version], { cwd: REPO_ROOT, echo: false });
+    // `-f` is not belt-and-braces: .gitignore lists .github/workflows/ (it is generated from ci/workflows),
+    // so on a checkout that has never had the directory committed, a plain `git add` refuses it, `git commit`
+    // then has nothing staged, and `git push` succeeds by pushing nothing — exit 0, no workflows, no error.
+    // The failure was silent, which is the one thing a release step must never be.
+    const add = run("git add", "git", ["add", "-f", ".github/workflows"], { cwd: REPO_ROOT, echo: false });
+    const commit = run("git commit", "git", ["commit", "-m", "ci: install GitHub Actions workflows"], { cwd: REPO_ROOT, echo: false });
+    if (!add.ok || !commit.ok) {
+      for (const r of [add, commit]) if (!r.ok) console.error(r.stdout + r.stderr);
+      console.error("ci:install: nothing was pushed — see above.");
+      return 1;
+    }
     const push = run("git push", "git", ["push"], { cwd: REPO_ROOT, echo: false });
-    for (const r of [add, commit, push]) if (!r.ok) console.error(r.stdout + r.stderr);
+    if (!push.ok) console.error(push.stdout + push.stderr);
     return push.ok ? 0 : 1;
   }
   console.log("ci:install: done. git add -f .github/workflows (the dir is deliberately gitignored), commit, push. A human with Actions:write may be required.");
