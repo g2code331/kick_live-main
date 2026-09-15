@@ -190,6 +190,10 @@ comment on function public.kicklive_set_user_role(uuid, text) is
 -- a (function, grantee) pair that was never granted. Two statements, each idempotent on its own.
 revoke all on function public.kicklive_set_user_role(uuid, text) from public;
 revoke all on function public.kicklive_set_user_role(uuid, text) from anon;
+-- `authenticated` is revoked too, even though the next line grants it straight back: `revoke … from public`
+-- does not remove the aclitem Supabase's default privileges created for the role itself, and this file grants
+-- execute to `authenticated`, so a stale entry here would be a grant no line in this file accounts for.
+revoke all on function public.kicklive_set_user_role(uuid, text) from authenticated;
 grant execute on function public.kicklive_set_user_role(uuid, text) to authenticated, service_role;
 
 -- ── 4 · the privilege half, only if it is actually missing ─────────────────────────────────────────────────
@@ -231,7 +235,7 @@ declare
                     where n.nspname = 'public' and c.relname = 'profiles');
   v_cap   boolean := has_schema_privilege(v_login, 'public', 'CREATE');
 begin
-  if has_function_privilege('anon', 'public.kicklive_set_user_role(uuid, text)', 'execute') then
+  if public.kicklive_has_grant('anon', 'public.kicklive_set_user_role(uuid, text)', 'X') then
     raise exception 'anon may execute the role writer — re-run supabase/SETUP.sql (phases 3 and 7 revoke it), then re-run this file'
       using errcode = '42501';
   end if;
@@ -262,8 +266,8 @@ end;
 $$;
 
 -- Proof that the writer is reachable by the only two roles that should reach it — read the row, it changes nothing:
-select has_function_privilege('anon',          'public.kicklive_set_user_role(uuid, text)', 'execute') as anon_can     -- want false
-     , has_function_privilege('authenticated', 'public.kicklive_set_user_role(uuid, text)', 'execute') as authed_can   -- want true
+select public.kicklive_has_grant('anon',          'public.kicklive_set_user_role(uuid, text)', 'X') as anon_can     -- want false
+     , public.kicklive_has_grant('authenticated', 'public.kicklive_set_user_role(uuid, text)', 'X') as authed_can   -- want true
      , public.kicklive_is_dashboard_session() as dashboard_session;                                                  -- want true here
 
 commit;

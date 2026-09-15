@@ -208,7 +208,16 @@ describe("phase 10 · the migration history is one path, not a crowd", () => {
       "filenames are already in apply order",
     );
     const phases = files.map((f) => Number(f.match(/_phase(\d+)_/)?.[1] ?? -1));
-    assert.deepEqual(phases, [1, 3, 4, 5, 6, 7, 8, 9, 10], "phase 2 has no migration because it is Worker-only — a gap is fine, a renumbering is not");
+    // The nine phases this file was written against are pinned as a PREFIX — phase 2 has no migration because
+    // it is Worker-only, a gap is fine, a renumbering is not. Anything added after them only has to keep
+    // climbing, so a new phase is not blocked by a list written back when phase 10 was the last one.
+    const known = [1, 3, 4, 5, 6, 7, 8, 9, 10];
+    assert.deepEqual(phases.slice(0, known.length), known, "phase 2 has no migration because it is Worker-only — a gap is fine, a renumbering is not");
+    assert.deepEqual(
+      [...phases].sort((a, b) => a - b),
+      phases,
+      "later phases keep climbing with the filenames — a renumbering is not",
+    );
   });
 
   it("names every file for what it does, so the authoritative path is guessable", () => {
