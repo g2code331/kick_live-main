@@ -159,6 +159,20 @@ export async function main() {
   for (const r of rows) console.log(`  ${r.name.padEnd(42)} ${fmtSize(r.bytes).padStart(10)}  sha256:${r.sha256}…`);
 
   const verify = run("verify-packaging", process.execPath, ["scripts/verify-packaging.mjs", ...(has("dir") ? [] : ["--require-full"])], { cwd: REPO_ROOT });
+  // Append the artifact inventory + the FULL verify-packaging transcript to the same log the CI
+  // smoke-log upload collects. electron-builder can SUCCEED and this verify step still fail (a tier
+  // B/C layout mismatch), in which case the electron-builder-only log above looks clean and hides the
+  // real cause. Recording both here means the downloadable artifact always explains the exit code —
+  // which matters because this sandbox cannot read GitHub's step logs.
+  try {
+    const inventory = rows.length ? rows.map((r) => `  ${r.name}  ${fmtSize(r.bytes)}  sha256:${r.sha256}…`).join("\n") : "  (no artifacts found in release/)";
+    fs.appendFileSync(
+      path.join(REPO_ROOT, "release", "package-linux.log"),
+      `\n\n# ── artifacts ──\n${inventory}\n\n# ── verify-packaging${has("dir") ? "" : " --require-full"} (exit ${String(verify.code)}) ──\n${verify.stdout}\n`,
+    );
+  } catch {
+    /* best-effort */
+  }
   return verify.ok ? 0 : verify.code || 1;
 }
 
