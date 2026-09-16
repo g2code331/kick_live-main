@@ -120,9 +120,17 @@ jobs:
           esac
           missing=0
           for s in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do
-            if [ -z "${!s:-}" ]; then echo "::error::$s is not set: the web deploy cannot run. Configure it under Settings → Environments → $target (or repository secrets); see docs/ENVIRONMENT_SETUP.md §3."; missing=1; fi
+            # Diagnostic that never leaks the value: report only whether the secret arrived and its
+            # length. An empty length here means the `staging` environment did not inject the secret
+            # into this job (wrong environment, wrong name, or the value was saved empty); a non-zero
+            # length means the secret is present and any failure below is wrangler's, not GitHub's.
+            val="${!s:-}"
+            echo "secret $s: length=${#val}"
+            if [ -z "$val" ]; then echo "::error::$s is not set: the web deploy cannot run. Configure it under Settings → Environments → $target (or repository secrets); see docs/ENVIRONMENT_SETUP.md §3."; missing=1; fi
           done
           [ "$missing" = "0" ] || exit 1
+          # From here on, name the sub-command that fails so a red step is not a mystery.
+          trap 'echo "::error::deploy step failed at: ${BASH_COMMAND}"' ERR
           npm ci --no-audit --no-fund
           # Rebuild here rather than shipping the artifact from the build job: Pages wants a directory, the
           # artifact round-trip would lose the hashed-asset names in index.html's preload hints, and a second
