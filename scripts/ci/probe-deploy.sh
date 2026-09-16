@@ -16,6 +16,9 @@ status=0
 note() { echo "  $*"; }
 fail() {
   echo "  FAIL: $*" >&2
+  # GitHub Actions annotations are retrievable via the API even when the job-log blob is not, so name
+  # the exact broken contract there — otherwise a red probe is just "exit code 1" with no reason.
+  [ -n "${GITHUB_ACTIONS:-}" ] && printf '::error::probe-deploy: %s\n' "$*"
   status=1
 }
 
@@ -35,9 +38,9 @@ if [ -n "$asset" ]; then
   actype=$(curl -sSI "$url/$asset" | tr -d '\r' | awk 'tolower($1)=="content-type:"{sub($1 FS,"");print;exit}')
   acode=$(curl -sS -o /dev/null -w '%{http_code}' "$url/$asset")
   [ "$acode" = "200" ] || fail "$asset returned $acode"
-  case "$acctype" in
-  text/javascript*) note "ok: /$asset is $acctype" ;;
-  *) fail "$asset is '$acctype' — browsers refuse ES modules without a JS MIME type" ;;
+  case "$actype" in
+  text/javascript* | application/javascript*) note "ok: /$asset is $actype" ;;
+  *) fail "$asset is '$actype' — browsers refuse ES modules without a JS MIME type" ;;
   esac
 else
   note "note: no hashed asset reference found in the served HTML (inline build?)"
