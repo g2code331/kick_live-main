@@ -141,10 +141,21 @@ jobs:
           esac
           npm run "web:env:check"
           npm run "build:web:$mode"
-          out=$(npx --yes wrangler@4 pages deploy dist/web --project-name "$project" --branch "$branch" 2>&1)
-          echo "$out"
+          # Stream wrangler's output to the log AND a file via `tee`, instead of `out=$(… 2>&1)` which
+          # swallows everything until the command returns — on failure `set -e` aborts before the
+          # captured text is ever echoed, so wrangler's actual error (bad token scope, missing project,
+          # account mismatch) was invisible. `set +e` around the call lets us print the real exit + a
+          # hint before exiting, rather than a bare "exit code 1".
+          set +e
+          npx --yes wrangler@4 pages deploy dist/web --project-name "$project" --branch "$branch" 2>&1 | tee /tmp/wrangler-deploy.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          if [ "$rc" != "0" ]; then
+            echo "::error::wrangler pages deploy exited $rc for project '$project' (branch '$branch'). Common causes: the API token lacks the 'Cloudflare Pages: Edit' permission, the token/account do not match, or the Pages project '$project' does not exist in this account. The wrangler output above has the specifics."
+            exit "$rc"
+          fi
           # Pages prints one or two *.pages.dev URLs; the last is this deployment's own.
-          url=$(printf '%s\n' "$out" | grep -oE 'https://[a-z0-9.-]*pages\.dev[^ ]*' | tail -1)
+          url=$(grep -oE 'https://[a-z0-9.-]*pages\.dev[^ ]*' /tmp/wrangler-deploy.log | tail -1)
           [ -n "$url" ] || { echo "::error::could not parse a Pages URL from the deploy output"; exit 1; }
           echo "deployed=$url" >> "$GITHUB_ENV"
           echo "### Web deploy ($target → $project)" >> "$GITHUB_STEP_SUMMARY"
