@@ -25,11 +25,16 @@ const SECRETS = [
   {
     name: "VITE_SUPABASE_URL",
     required: true,
-    jobs: ["web", "desktop", "release", "deploy-web"],
+    jobs: ["web", "desktop", "windows", "mobile", "release", "deploy-web"],
     why: "baked into the bundle at build time (src/lib/supabase.ts); an empty value ships an app that cannot load a schedule",
     note: "since Phase 1 there is no fallback project in src/lib/supabase.ts: `npm run build` still succeeds, but the app refuses to boot and prints which variable is missing (src/lib/env.ts)",
   },
-  { name: "VITE_SUPABASE_ANON_KEY", required: true, jobs: ["web", "desktop", "release", "deploy-web"], why: "same as above; it is a public anon key, but it must be the one matching the URL" },
+  {
+    name: "VITE_SUPABASE_ANON_KEY",
+    required: true,
+    jobs: ["web", "desktop", "windows", "mobile", "release", "deploy-web"],
+    why: "same as above; it is a public anon key, but it must be the one matching the URL",
+  },
   {
     name: "CLOUDFLARE_API_TOKEN",
     required: false,

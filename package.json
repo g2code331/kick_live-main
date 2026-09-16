@@ -15,6 +15,14 @@
     "build:web": "node --import ./scripts/lib/ts-loader.mjs scripts/build-web.mjs",
     "build:web:staging": "node --import ./scripts/lib/ts-loader.mjs scripts/build-web.mjs --mode=staging",
     "build:web:production": "node --import ./scripts/lib/ts-loader.mjs scripts/build-web.mjs --mode=production",
+    "build:web:mobile": "node --import ./scripts/lib/ts-loader.mjs scripts/build-web.mjs --mode=mobile",
+    "mobile:add:android": "cap add android",
+    "mobile:add:ios": "cap add ios",
+    "mobile:sync": "npm run build:web:mobile && cap sync",
+    "mobile:sync:android": "npm run build:web:mobile && cap sync android",
+    "mobile:sync:ios": "npm run build:web:mobile && cap sync ios",
+    "mobile:open:android": "cap open android",
+    "mobile:open:ios": "cap open ios",
     "web:env": "node --import ./scripts/lib/ts-loader.mjs scripts/build-web-env.mjs",
     "web:env:check": "node --import ./scripts/lib/ts-loader.mjs scripts/build-web-env.mjs --check",
     "build:renderer": "vite build --config vite.renderer.config.ts",
@@ -24,6 +32,7 @@
     "start:desktop": "electron .",
     "dev:desktop": "node --import ./scripts/lib/ts-loader.mjs scripts/dev-desktop.mjs",
     "package:linux": "node --import ./scripts/lib/ts-loader.mjs scripts/package-linux.mjs",
+    "package:win": "node --import ./scripts/lib/ts-loader.mjs scripts/package-win.mjs",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json && tsc -p tsconfig.workers.json",
     "test": "node --import ./scripts/lib/ts-loader.mjs scripts/run-tests.mjs all",
     "test:unit": "node --import ./scripts/lib/ts-loader.mjs scripts/run-tests.mjs unit",
@@ -52,6 +61,7 @@
     "ci:install": "node --import ./scripts/lib/ts-loader.mjs scripts/install-ci.mjs",
     "ci:check": "node --import ./scripts/lib/ts-loader.mjs scripts/install-ci.mjs --check",
     "package:linux:dir": "node --import ./scripts/lib/ts-loader.mjs scripts/package-linux.mjs --dir",
+    "package:win:dir": "node --import ./scripts/lib/ts-loader.mjs scripts/package-win.mjs --dir",
     "worker:dev": "wrangler dev --config workers/wrangler.toml --port 8787 --inspector-port 0",
     "worker:secret": "wrangler secret put --config workers/wrangler.toml",
     "pair:check": "node --import ./scripts/lib/ts-loader.mjs scripts/check-project-pair.mjs",
@@ -66,6 +76,9 @@
     "preflight:production": "node --import ./scripts/lib/ts-loader.mjs scripts/preflight-production.mjs"
   },
   "dependencies": {
+    "@capacitor/android": "^6.2.2",
+    "@capacitor/core": "^6.2.2",
+    "@capacitor/ios": "^6.2.2",
     "@supabase/supabase-js": "^2.109.0",
     "@types/canvas-confetti": "^1.9.0",
     "canvas-confetti": "^1.9.4",
@@ -78,6 +91,7 @@
     "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {
+    "@capacitor/cli": "^6.2.2",
     "@cloudflare/workers-types": "^5.20260908.1",
     "@electric-sql/pglite": "^0.5.8",
     "@electron/asar": "4.3.0",

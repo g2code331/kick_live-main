@@ -283,7 +283,12 @@ SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS
 # The packaged desktop renderer must be listed too, or desktop builds fail on every API call while
 # the web app works — the worst possible shape for a bug report. Add its origin when Phase 2 ships
 # the API to the desktop shell.
-ALLOWED_ORIGINS = "https://kicklive.football,https://www.kicklive.football"
+# The two capacitor origins are the mobile shells: Android's WebView serves from https://localhost and
+# iOS from capacitor://localhost, so a native app's fetch to the Worker carries one of those as Origin.
+# Without them every mobile request fails CORS while the web app works — see capacitor.config.ts and
+# the mobile mode in scripts/build-web-env.mjs. The FIRST plain https origin is what the mobile build
+# reads as its VITE_API_BASE_URL, so kicklive.football must stay first.
+ALLOWED_ORIGINS = "https://kicklive.football,https://www.kicklive.football,https://localhost,capacitor://localhost"
 # Same rule as staging: per-environment and explicit, because [vars] are not inherited.
 MEDIA_MAX_BYTES = 26214400
 

@@ -74,7 +74,9 @@ linux:
 
 deb:
   packageName: kicklive
-  section: web
+  # electron-builder 26 renamed the Debian "Section:" control field to `packageCategory` (the old
+  # `section` key is rejected by the config schema — `configuration.deb should be one of these`).
+  packageCategory: web
   priority: optional
   compression: xz
   # electron-builder's built-in default dependency list still uses the pre-`t64` package names,
@@ -105,5 +107,34 @@ deb:
 
 appImage:
   artifactName: KickLive-${version}-${arch}.AppImage
+
+# ── Windows ──────────────────────────────────────────────────────────────────────────────────────
+# Built by the `windows` job in .github/workflows/release.yml on a windows-latest runner (electron-builder
+# cannot cross-build an NSIS installer from Linux). The produced KickLive-<version>-win32-x64.exe is what the
+# update manifest's `win32_x64` platform entry (schema kind `nsis`) points at, so the desktop auto-updater
+# covers Windows the same way it covers Linux. The artifact name deliberately matches
+# shared/platform.ts:expectedArtifactName('win32_x64', …) so the client and the builder agree on one string.
+win:
+  # No code-signing certificate is wired up yet, so the installer is unsigned; SmartScreen will warn on first
+  # run. Adding a cert later is a `certificateFile`/`certificatePassword` pair (or Azure Trusted Signing) here
+  # plus the matching secrets — nothing else in the pipeline changes.
+  target:
+    - nsis
+  icon: packaging/buildResources/icon.ico
+  # One installer per push; do not spawn a per-arch matrix here — the release job builds x64 only.
+  artifactName: "KickLive-${version}-win32-${arch}.${ext}"
+
+nsis:
+  # A per-user install (no elevation prompt) matches the auto-updater: the running app can replace itself
+  # without asking for admin, which is what makes silent background updates possible.
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  # Keep the download deterministic — no web installer that fetches a second payload at runtime.
+  installerIcon: packaging/buildResources/icon.ico
+  uninstallerIcon: packaging/buildResources/icon.ico
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: KickLive
 
 artifactName: "${name}_${version}_${arch}.${ext}"

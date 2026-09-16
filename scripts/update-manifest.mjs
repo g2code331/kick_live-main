@@ -50,6 +50,20 @@ export function buildManifest({ version, channel, releaseDir = "release", notes,
   } else warnings.push("no .deb found in the release dir: linux_x64 clients will see platform-missing");
   if (!linuxX64AppImage) warnings.push("no .AppImage found: users without root cannot be offered an update");
 
+  // Windows: the NSIS installer produced by scripts/package-win.mjs on a windows-latest runner. The
+  // .exe carries the schema kind `nsis`; its presence is what turns the desktop auto-updater on for
+  // Windows. Absence is only a warning, so a Linux-only re-run still produces a valid manifest.
+  const winX64Exe = artifactForPath(dir, /\.exe$/);
+  if (winX64Exe) {
+    platforms.win32_x64 = {
+      kind: "nsis",
+      fileName: winX64Exe.name,
+      url: assetUrl(winX64Exe.name, baseUrl, allowInsecureUrls),
+      sha256: winX64Exe.sha256,
+      size: winX64Exe.bytes,
+    };
+  } else warnings.push("no .exe found in the release dir: win32_x64 clients will see platform-missing");
+
   const manifest = {
     schemaVersion: 1,
     product: "kicklive",
@@ -66,7 +80,7 @@ export function buildManifest({ version, channel, releaseDir = "release", notes,
       precache: ["/", "/index.html", "/site.webmanifest"],
     },
   };
-  return { manifest, warnings, artifacts: { deb: linuxX64Deb, appimage: linuxX64AppImage } };
+  return { manifest, warnings, artifacts: { deb: linuxX64Deb, appimage: linuxX64AppImage, exe: winX64Exe } };
 }
 
 function artifactForPath(dir, re) {

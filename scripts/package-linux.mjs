@@ -18,7 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
-import { REPO_ROOT, fmtBytes, readVersionFile, walk } from "../tools/vite-shared.ts";
+import { REPO_ROOT, readVersionFile, walk } from "../tools/vite-shared.ts";
 import { fmtSize, run, tail } from "./lib/run.mjs";
 
 const args = process.argv.slice(2);

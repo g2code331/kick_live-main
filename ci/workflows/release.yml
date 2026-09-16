@@ -162,9 +162,49 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  windows:
+    name: Desktop win32-x64 (NSIS)
+    needs: preflight
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Secrets audit (windows leg)
+        shell: bash
+        run: node scripts/check-secrets.mjs --job=windows
+      - name: Build the app
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+      - name: Package the NSIS installer + hash it into checksums-win.json
+        run: npm run package:win -- --skip-build
+        env:
+          ELECTRON_CACHE: ${{ github.workspace }}\.cache\electron
+          ELECTRON_BUILDER_CACHE: ${{ github.workspace }}\.cache\electron-builder
+      - uses: actions/cache@v4
+        with:
+          path: .cache
+          key: electron-win-${{ hashFiles('package.json', 'package-lock.json') }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-win32-x64
+          path: |
+            release/*.exe
+            release/*.exe.blockmap
+            release/checksums-win.json
+            release/artifacts-win.json
+          if-no-files-found: error
+          retention-days: 30
+
   release:
     name: Publish release + update manifest
-    needs: [preflight, desktop, web]
+    needs: [preflight, desktop, web, windows]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -186,8 +226,27 @@ jobs:
           path: release
       - uses: actions/download-artifact@v4
         with:
+          name: desktop-win32-x64
+          path: release
+      - uses: actions/download-artifact@v4
+        with:
           name: web-bundle
           path: dist/web
+      - name: Fold the Windows checksums into release/checksums.json
+        run: |
+          set -euo pipefail
+          # Each OS leg wrote its own checksums file so they never clobber each other's upload; merge the
+          # Windows entries into the canonical release/checksums.json the release body reads from.
+          if [ -f release/checksums-win.json ]; then
+            node -e '
+              const fs=require("fs");
+              const base=JSON.parse(fs.readFileSync("release/checksums.json","utf8"));
+              const win=JSON.parse(fs.readFileSync("release/checksums-win.json","utf8"));
+              base.files={...base.files,...win.files};
+              fs.writeFileSync("release/checksums.json",JSON.stringify(base,null,2)+"\n");
+              console.log("merged",Object.keys(win.files).length,"windows checksum(s)");
+            '
+          fi
       - name: Build the update manifest from the real artifacts
         run: |
           set -euo pipefail
@@ -230,12 +289,13 @@ jobs:
           gh "${args[@]}" \
             release/*.deb \
             release/*.AppImage \
+            release/*.exe \
             "release/kicklive-update-${channel}.json" \
             release/checksums.json \
             release/artifacts.json \
             --repo "$GITHUB_REPOSITORY" 2>/dev/null || {
             # Re-running a release: update the assets instead of failing on an existing tag.
-            gh release upload "$tag" release/*.deb release/*.AppImage "release/kicklive-update-${channel}.json" release/checksums.json release/artifacts.json --clobber
+            gh release upload "$tag" release/*.deb release/*.AppImage release/*.exe "release/kicklive-update-${channel}.json" release/checksums.json release/artifacts.json --clobber
           }
       - name: Point the beta channel at this release
         if: needs.preflight.outputs.channel == 'beta'
@@ -264,6 +324,9 @@ jobs:
             if(!m.platforms.linux_x64||!m.platforms.linux_x64.url) throw new Error("no linux_x64 artifact in the published manifest");
             console.log("published manifest OK:",m.version,"->",m.platforms.linux_x64.url);
             if(!m.platforms.linux_x64.url.includes(want)) throw new Error("artifact url does not carry the version");
+            if(!m.platforms.win32_x64||!m.platforms.win32_x64.url) throw new Error("no win32_x64 artifact in the published manifest — the Windows leg did not reach the release");
+            if(!m.platforms.win32_x64.url.includes(want)) throw new Error("windows artifact url does not carry the version");
+            console.log("published manifest OK (windows):",m.platforms.win32_x64.url);
           ' "$version"
           # The download URL must actually deliver the bytes the manifest promises.
           url_of=$(node -e 'console.log(require("/tmp/published.json").platforms.linux_x64.url)')
@@ -271,6 +334,13 @@ jobs:
           test "$(sha256sum /tmp/pkg.deb | cut -d' ' -f1)" = "$(node -e 'console.log(require("/tmp/published.json").platforms.linux_x64.sha256)')" \
             || { echo "::error::published .deb sha256 does not match the manifest" >&2; exit 1; }
           echo "artifact checksum verified against the published manifest"
+          # Same proof for the Windows installer: the manifest is only trustworthy if every URL it hands a
+          # client actually returns the promised bytes.
+          win_url=$(node -e 'console.log(require("/tmp/published.json").platforms.win32_x64.url)')
+          curl -fsSL "$win_url" -o /tmp/pkg.exe
+          test "$(sha256sum /tmp/pkg.exe | cut -d' ' -f1)" = "$(node -e 'console.log(require("/tmp/published.json").platforms.win32_x64.sha256)')" \
+            || { echo "::error::published .exe sha256 does not match the manifest" >&2; exit 1; }
+          echo "windows installer checksum verified against the published manifest"
       - uses: actions/upload-artifact@v4
         with:
           name: release-manifests

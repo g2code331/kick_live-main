@@ -1,0 +1,196 @@
+# KickLive mobile — the Android APK and the iOS .app, from the SAME dist/web bundle the website ships.
+#
+# This is deliberately SEPARATE from release.yml. The desktop release pipeline (release.yml) is wired to
+# the update manifest + checksums + channel promotion, which is a *self-update* mechanism: a .deb/.exe the
+# app downloads and installs over itself. Mobile does not self-update — Android and iOS updates ship through
+# the Play Store and the App Store — so folding the APK/IPA into the desktop manifest would be modelling a
+# flow that does not exist. Here the artifacts are built, checked, and (on a tag) attached to the GitHub
+# Release for download / store upload, and nothing more.
+#
+# Runners: Android builds on ubuntu-latest (the Android SDK + JDK are free there); iOS builds on
+# macos-latest (Xcode only exists on macOS). Both are GitHub-hosted, so no platform needs a local machine.
+#
+# Signing is optional. Without the ANDROID_KEYSTORE_* secrets the APK is signed with the debug key — still
+# installable for testing, just not Play-Store-uploadable. iOS is built with signing disabled, which yields
+# an unsigned .app for simulator/inspection; a real distributable IPA needs an Apple developer cert and is a
+# follow-up (documented in docs/RELEASE-PIPELINE.md).
+name: Build mobile
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write # attach APK/app to a release on a tag build
+
+concurrency:
+  group: mobile-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "22.18.0"
+
+jobs:
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Set up JDK 21 (temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Set up the Android SDK
+        uses: android-actions/setup-android@v3
+      - run: npm ci --no-audit --no-fund
+      - name: Secrets audit (mobile leg)
+        run: node scripts/check-secrets.mjs --job=mobile
+      - name: Build the mobile web bundle and sync it into android/
+        run: npm run mobile:sync:android
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+      - name: Assemble the debug APK (always builds, no secrets required)
+        if: ${{ github.ref_type != 'tag' }}
+        run: |
+          set -euo pipefail
+          cd android
+          chmod +x ./gradlew
+          ./gradlew assembleDebug --no-daemon
+          ls -la app/build/outputs/apk/debug
+      - name: Assemble the release APK (signed if the keystore secret is present, else debug-key fallback)
+        if: ${{ github.ref_type == 'tag' }}
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          cd android
+          chmod +x ./gradlew
+          if [ -n "${ANDROID_KEYSTORE_BASE64:-}" ]; then
+            echo "signing with the provided upload keystore"
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > app/release-keystore.p12
+            ./gradlew assembleRelease --no-daemon \
+              -Pandroid.injected.signing.store.file="$PWD/app/release-keystore.p12" \
+              -Pandroid.injected.signing.store.password="$ANDROID_KEYSTORE_PASSWORD" \
+              -Pandroid.injected.signing.key.alias="$ANDROID_KEY_ALIAS" \
+              -Pandroid.injected.signing.key.password="$ANDROID_KEY_PASSWORD"
+            rm -f app/release-keystore.p12
+          else
+            echo "::warning::no ANDROID_KEYSTORE_BASE64 secret — building an unsigned/debug-key release APK (installable, not Play-Store uploadable)"
+            ./gradlew assembleRelease --no-daemon || ./gradlew assembleDebug --no-daemon
+          fi
+          ls -la app/build/outputs/apk/*/*.apk
+      - name: Stage the APK with a versioned name
+        id: stage
+        run: |
+          set -euo pipefail
+          version="$(cat VERSION)"
+          apk="$(find android/app/build/outputs/apk -name '*.apk' | sort | tail -1)"
+          test -n "$apk" || { echo "::error::no APK produced" >&2; exit 1; }
+          out="kicklive-${version}.apk"
+          cp "$apk" "$out"
+          echo "apk=$out" >> "$GITHUB_OUTPUT"
+          echo "built $out from $apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: ${{ steps.stage.outputs.apk }}
+          if-no-files-found: error
+          retention-days: 30
+      - name: Attach the APK to the release (tag builds only)
+        if: ${{ github.ref_type == 'tag' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          # release.yml may still be creating the release; retry so a race does not fail the upload.
+          for i in 1 2 3 4 5 6; do
+            if gh release upload "$tag" "${{ steps.stage.outputs.apk }}" --clobber --repo "$GITHUB_REPOSITORY"; then
+              echo "APK attached to $tag"; exit 0
+            fi
+            echo "release $tag not ready yet (attempt $i); waiting…"; sleep 20
+          done
+          echo "::error::could not attach the APK to $tag after 6 attempts" >&2
+          exit 1
+
+  ios:
+    name: iOS app
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Secrets audit (mobile leg)
+        run: node scripts/check-secrets.mjs --job=mobile
+      - name: Build the mobile web bundle and sync it into ios/
+        run: npm run mobile:sync:ios
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+      - name: Install CocoaPods dependencies
+        run: |
+          set -euo pipefail
+          cd ios/App
+          pod install
+      - name: Build the app (code signing disabled — an unsigned .app for inspection/simulator)
+        run: |
+          set -euo pipefail
+          cd ios/App
+          xcodebuild \
+            -workspace App.xcworkspace \
+            -scheme App \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            build
+      - name: Zip the built .app
+        id: stage
+        run: |
+          set -euo pipefail
+          version="$(cat VERSION)"
+          app="$(find ios/App/build -name 'App.app' -type d | head -1)"
+          test -n "$app" || { echo "::error::no App.app produced" >&2; exit 1; }
+          out="kicklive-${version}-ios-app.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$app" "$out"
+          echo "zip=$out" >> "$GITHUB_OUTPUT"
+          echo "zipped $app -> $out"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-app
+          path: ${{ steps.stage.outputs.zip }}
+          if-no-files-found: error
+          retention-days: 30
+      - name: Attach the iOS app to the release (tag builds only)
+        if: ${{ github.ref_type == 'tag' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          for i in 1 2 3 4 5 6; do
+            if gh release upload "$tag" "${{ steps.stage.outputs.zip }}" --clobber --repo "$GITHUB_REPOSITORY"; then
+              echo "iOS app attached to $tag"; exit 0
+            fi
+            echo "release $tag not ready yet (attempt $i); waiting…"; sleep 20
+          done
+          echo "::error::could not attach the iOS app to $tag after 6 attempts" >&2
+          exit 1
