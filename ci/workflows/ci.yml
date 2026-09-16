@@ -76,7 +76,12 @@ jobs:
         # compared "Content-Type: text/javascript; …" against "text/javascript; …" and failed.
         # Splitting on ": " and lowering only the field name makes the comparison exact.
         run: |
-          node server/cli.ts --root dist/web --port 4173 --quiet & echo $! > /tmp/serve.pid
+          # Launch through the repo's ts-loader (the same one `npm run serve:web` uses) rather than
+          # relying on `node`'s native type-stripping: a raw `node server/cli.ts` fails to start on a
+          # runner whose Node build strips types differently, and the only symptom is "server never
+          # came up". A `trap` dumps the server log so a real failure is diagnosable from the run page.
+          node --import ./scripts/lib/ts-loader.mjs server/cli.ts --root dist/web --port 4173 --quiet >/tmp/serve.log 2>&1 & echo $! > /tmp/serve.pid
+          trap 'echo "--- static server log ---"; cat /tmp/serve.log 2>/dev/null || true' EXIT
           set -e
           code() { curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:4173$1"; }
           mime() { curl -sSI "http://127.0.0.1:4173$1" | tr -d '\r' | awk -F': ' 'tolower($1)=="content-type"{print $2; exit}'; }
