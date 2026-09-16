@@ -164,11 +164,39 @@ const existsCache = new Map();
 async function exists(kind, name) {
   const key = `${kind}:${name}`;
   if (existsCache.has(key)) return existsCache.get(key);
-  const argv = kind === "queue" ? ["queues", "info", name] : kind === "r2" ? ["r2", "bucket", "info", name] : ["kv:namespace", "info", name];
-  const r = wrangler(argv);
-  const ok = r.code === 0 && !/not found|does not exist|Could not find|Resource not found/i.test(r.out);
+  // Wrangler v4 command surface (this repo pins wrangler@4). The old code used
+  // `r2 bucket info` and `kv:namespace info`, which reported EXISTING R2 buckets and KV namespaces as
+  // MISSING: `kv:namespace` colon syntax was removed in v4 and there is no `kv namespace info` at all
+  // (KV is checked separately by kvNamespaceExists via `kv namespace list`), and R2's `info` was
+  // flaky. Only queues (`queues info`) worked, which is exactly what the failing run showed.
+  let ok;
+  if (kind === "queue") {
+    // `queues info <name>` is valid in v4 and already worked here — leave it.
+    const r = wrangler(["queues", "info", name]);
+    ok = r.code === 0 && !/not found|does not exist|Could not find|Resource not found/i.test(r.out);
+  } else {
+    // R2: `r2 bucket info <name>` exists in v4 but was reporting existing buckets as MISSING; list +
+    // match is immune to per-bucket info output/permission quirks and needs only *list* token scope.
+    const r = wrangler(["r2", "bucket", "list"]);
+    ok = r.code === 0 && new RegExp(`(^|[\\s"'|])${escapeRe(name)}([\\s"'|]|$)`, "m").test(r.out);
+  }
   existsCache.set(key, ok);
   return ok;
+}
+
+function escapeRe(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// KV namespaces are identified by id, not name, and there is no `kv namespace info` in wrangler v4,
+// so existence is proven by listing the account's namespaces once and checking the id is present.
+let kvListCache;
+function kvNamespaceExists(id) {
+  if (kvListCache === undefined) {
+    const r = wrangler(["kv", "namespace", "list"]);
+    kvListCache = r.code === 0 ? r.out : "";
+  }
+  return kvListCache.includes(id);
 }
 
 async function main() {
@@ -190,12 +218,13 @@ async function main() {
         problems.push(`${label}: kv binding ${ns.binding} has no id in the config — create it, then paste the id into ${CONFIG}`);
         continue;
       }
-      const r = wrangler(["kv:namespace", "info", ns.binding, "--namespace-id", ns.id]);
-      const ok = r.code === 0 && !/not found|Could not find|Unable to/i.test(r.out);
+      const ok = kvNamespaceExists(ns.id);
       log(`  ${ok ? "ok  " : "MISSING"} kv ${ns.binding} (${ns.id})`);
       if (!ok) {
-        problems.push(`${label}: KV namespace ${ns.id} for binding ${ns.binding} is not readable on this account (deleted, wrong account, or the token lacks Scope:KV read)`);
-        if (APPLY) actions.push({ kind: "kv", env, name: `${label}:${ns.binding}`, cmd: `kv:namespace create ${ns.binding}` });
+        problems.push(
+          `${label}: KV namespace ${ns.id} for binding ${ns.binding} is not in this account's \`wrangler kv namespace list\` (deleted, wrong account, or the token lacks Workers KV Storage read)`,
+        );
+        if (APPLY) actions.push({ kind: "kv", env, name: `${label}:${ns.binding}`, cmd: `kv namespace create ${ns.binding}` });
       }
     }
     for (const b of want.r2) {
