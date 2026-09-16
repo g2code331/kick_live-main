@@ -184,12 +184,14 @@ comment on function public.kicklive_set_user_role(uuid, text) is
   'The only supported way to change a role. Admin-only or database-session-only, audited, refuses to demote the '
   'last admin. A browser/API session never qualifies: kicklive_is_dashboard_session() reads the PostgREST JWT GUCs.';
 
--- Revoke the broad `public` pseudo-role first, then name anon: a single statement listing both aborts the whole
--- statement (and therefore the grant below it) if the function's ACL has no `anon` entry yet, which is exactly what
--- happens on a project that has never run the revoke — Postgres answers `function … does not exist` for a revoke on
--- a (function, grantee) pair that was never granted. Two statements, each idempotent on its own.
-revoke all on function public.kicklive_set_user_role(uuid, text) from public;
-revoke all on function public.kicklive_set_user_role(uuid, text) from anon;
+-- Revoke from the broad `public` pseudo-role AND the client roles in one statement, then re-grant the two roles
+-- that are actually allowed. Revoking from `public` alone does NOT remove the `anon`/`authenticated` aclitems that
+-- Supabase's default privileges create, so a lone `from public` would leave a signed-in fan able to execute the
+-- role writer — which is exactly what tests/unit/sql-shape.test.ts asserts against. A combined
+-- `from public, anon, authenticated` is safe even when one of those grantees has no explicit ACL entry yet:
+-- Postgres treats revoking a privilege that was never granted as a no-op, not an error (verified against the same
+-- PGlite engine the suite runs on). This mirrors the phase-1 pattern (`from public, anon`).
+revoke all on function public.kicklive_set_user_role(uuid, text) from public, anon, authenticated;
 grant execute on function public.kicklive_set_user_role(uuid, text) to authenticated, service_role;
 
 -- ── 4 · the privilege half, only if it is actually missing ─────────────────────────────────────────────────
@@ -231,7 +233,7 @@ declare
                     where n.nspname = 'public' and c.relname = 'profiles');
   v_cap   boolean := has_schema_privilege(v_login, 'public', 'CREATE');
 begin
-  if has_function_privilege('anon', 'public.kicklive_set_user_role(uuid, text)', 'execute') then
+  if public.kicklive_has_grant('anon', 'public.kicklive_set_user_role(uuid, text)', 'X') then
     raise exception 'anon may execute the role writer — re-run supabase/SETUP.sql (phases 3 and 7 revoke it), then re-run this file'
       using errcode = '42501';
   end if;
@@ -262,8 +264,8 @@ end;
 $$;
 
 -- Proof that the writer is reachable by the only two roles that should reach it — read the row, it changes nothing:
-select has_function_privilege('anon',          'public.kicklive_set_user_role(uuid, text)', 'execute') as anon_can     -- want false
-     , has_function_privilege('authenticated', 'public.kicklive_set_user_role(uuid, text)', 'execute') as authed_can   -- want true
+select public.kicklive_has_grant('anon',          'public.kicklive_set_user_role(uuid, text)', 'X') as anon_can     -- want false
+     , public.kicklive_has_grant('authenticated', 'public.kicklive_set_user_role(uuid, text)', 'X') as authed_can   -- want true
      , public.kicklive_is_dashboard_session() as dashboard_session;                                                  -- want true here
 
 commit;

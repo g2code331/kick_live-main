@@ -201,14 +201,37 @@ describe("migrations · the shapes Postgres forgives and then punishes", () => {
     // `too few parameters specified for RAISE`, raised when the body is compiled. Same fix class as the regex:
     // a literal that has to be written as `%%`, or the placeholder removed.
     for (const [file, text] of Object.entries(SOURCE)) {
-      for (const m of text.matchAll(/\braise\s+(?:exception|warning|notice|info|log|debug1|debug2|debug3|debug4|debug5|fatal)\s+((?:'[^']*'|[^\s;,()]+)(?:\s*\|\|[^(;]*)?)/gi)) {
-        const head = m[1]!;
-        const quoted = /^'((?:[^']|'')*)'/.exec(head)?.[1];
-        if (quoted === undefined) continue;
-        const specifiers = (quoted.match(/(?:^|[^%])%[sILNO]?/g) ?? []).length;
+      for (const m of text.matchAll(/\braise\s+(?:exception|warning|notice|info|log|debug1|debug2|debug3|debug4|debug5|fatal)\s+(?=')/gi)) {
+        // Postgres concatenates adjacent string literals — including across newlines — into one format
+        // string, so a RAISE message may be written as several quoted fragments before the `,` argument
+        // list or the `USING`/`;` terminator. Walk from the first quote collecting every fragment (and the
+        // whitespace between them) so the specifier count is taken over the WHOLE message, and the argument
+        // list is read from what follows the last fragment. Counting only the first fragment is a false
+        // positive on a long multi-line message whose `%` args sit after the continuation lines.
+        const start = (m.index ?? 0) + m[0].length;
+        let i = start;
+        let combined = "";
+        for (;;) {
+          const frag = /^'((?:[^']|'')*)'/.exec(text.slice(i));
+          if (!frag) break;
+          combined += frag[1];
+          i += frag[0].length;
+          const gap = /^\s*/.exec(text.slice(i))![0];
+          if (text[i + gap.length] === "'") {
+            i += gap.length;
+            continue;
+          }
+          break;
+        }
+        const specifiers = (combined.match(/(?:^|[^%])%[sILNO]?/g) ?? []).length;
         if (specifiers === 0) continue;
-        const rest = text.slice((m.index ?? 0) + m[0].length);
-        const argList = /^\s*,/.test(rest) ? rest.slice(rest.indexOf(",") + 1, rest.indexOf(";")).trim() : "";
+        const rest = text.slice(i);
+        const argList = /^\s*,/.test(rest)
+          ? rest
+              .slice(rest.indexOf(",") + 1)
+              .split(/;|\busing\b/i)[0]!
+              .trim()
+          : "";
         const args = argList && argList.length > 0 ? argList.split(",").filter((a) => a.trim().length > 0).length : 0;
         assert.ok(
           args >= specifiers,
@@ -225,7 +248,12 @@ describe("migrations · the shapes Postgres forgives and then punishes", () => {
       const arrays = new Set<string>();
       for (const m of text.matchAll(/\b(v_\w+)\s+(?:[\w.]+\s*)?text\[\]/g)) arrays.add(m[1]!.toLowerCase());
       for (const m of text.matchAll(/\b(v_\w+)\s*(?::=|:=)\s*\1\s*\|\|\s*'[^']*'/g)) {
-        assert.fail(`${file}: ${m[1]} is appended to with || 'literal'; for a text[] that means "malformed array literal" — use array_append(${m[1]}, …)`);
+        // Only a text[] misbehaves here — `v := v || 'x'` on a plain `text` is ordinary string
+        // concatenation and correct. Restrict the failure to variables actually declared `text[]`, or a
+        // scalar accumulator like phase-12's `v_bad text := ''` is a false positive.
+        if (arrays.has(m[1]!.toLowerCase())) {
+          assert.fail(`${file}: ${m[1]} is appended to with || 'literal'; for a text[] that means "malformed array literal" — use array_append(${m[1]}, …)`);
+        }
       }
       for (const m of text.matchAll(/\b(v_\w+)\s*\|\|\s*'/g)) {
         if (arrays.has(m[1]!.toLowerCase())) {
@@ -469,7 +497,19 @@ describe("privilege assertions in the migrations read the catalog, not the super
       const text = fs.readFileSync(path.join(MIGRATIONS_DIR, f), "utf8");
       for (const m of text.matchAll(/if not public\.kicklive_has_grant\([\s\S]{0,400}?\) then/g)) {
         const tail = text.slice(m.index, m.index + m[0].length + 260);
-        assert.ok(/raise exception/.test(tail), `${f}: a positive assertion with no raise is not an assertion`);
+        // The direct form is `if not granted then raise exception …`. The accumulate form — used where a phase
+        // wants to report EVERY missing grant in one message rather than abort on the first — is
+        // `if not granted then v_x := v_x || ' name'; end if;` followed later by `raise exception '…:%', v_x`.
+        // Both end in a raise, so both are real assertions; only a bare `v_x := kicklive_has_grant(…)` with no
+        // branch and no raise (the degradation this guards against) is not.
+        let ok = /raise exception/.test(tail);
+        if (!ok) {
+          const acc = /then\s+(v_\w+)\s*:=\s*\1\s*\|\|/.exec(tail);
+          if (acc) {
+            ok = new RegExp(`raise\\s+exception[\\s\\S]*\\b${acc[1]!}\\b`).test(text);
+          }
+        }
+        assert.ok(ok, `${f}: a positive assertion with no raise is not an assertion`);
       }
     }
   });

@@ -14461,12 +14461,14 @@ comment on function public.kicklive_set_user_role(uuid, text) is
   'The only supported way to change a role. Admin-only or database-session-only, audited, refuses to demote the '
   'last admin. A browser/API session never qualifies: kicklive_is_dashboard_session() reads the PostgREST JWT GUCs.';
 
--- Revoke the broad `public` pseudo-role first, then name anon: a single statement listing both aborts the whole
--- statement (and therefore the grant below it) if the function's ACL has no `anon` entry yet, which is exactly what
--- happens on a project that has never run the revoke — Postgres answers `function … does not exist` for a revoke on
--- a (function, grantee) pair that was never granted. Two statements, each idempotent on its own.
-revoke all on function public.kicklive_set_user_role(uuid, text) from public;
-revoke all on function public.kicklive_set_user_role(uuid, text) from anon;
+-- Revoke from the broad `public` pseudo-role AND the client roles in one statement, then re-grant the two roles
+-- that are actually allowed. Revoking from `public` alone does NOT remove the `anon`/`authenticated` aclitems that
+-- Supabase's default privileges create, so a lone `from public` would leave a signed-in fan able to execute the
+-- role writer — which is exactly what tests/unit/sql-shape.test.ts asserts against. A combined
+-- `from public, anon, authenticated` is safe even when one of those grantees has no explicit ACL entry yet:
+-- Postgres treats revoking a privilege that was never granted as a no-op, not an error (verified against the same
+-- PGlite engine the suite runs on). This mirrors the phase-1 pattern (`from public, anon`).
+revoke all on function public.kicklive_set_user_role(uuid, text) from public, anon, authenticated;
 grant execute on function public.kicklive_set_user_role(uuid, text) to authenticated, service_role;
 
 -- ── 4 · the privilege half, only if it is actually missing ─────────────────────────────────────────────────
@@ -14508,7 +14510,7 @@ declare
                     where n.nspname = 'public' and c.relname = 'profiles');
   v_cap   boolean := has_schema_privilege(v_login, 'public', 'CREATE');
 begin
-  if has_function_privilege('anon', 'public.kicklive_set_user_role(uuid, text)', 'execute') then
+  if public.kicklive_has_grant('anon', 'public.kicklive_set_user_role(uuid, text)', 'X') then
     raise exception 'anon may execute the role writer — re-run supabase/SETUP.sql (phases 3 and 7 revoke it), then re-run this file'
       using errcode = '42501';
   end if;
@@ -14539,8 +14541,8 @@ end;
 $$;
 
 -- Proof that the writer is reachable by the only two roles that should reach it — read the row, it changes nothing:
-select has_function_privilege('anon',          'public.kicklive_set_user_role(uuid, text)', 'execute') as anon_can     -- want false
-     , has_function_privilege('authenticated', 'public.kicklive_set_user_role(uuid, text)', 'execute') as authed_can   -- want true
+select public.kicklive_has_grant('anon',          'public.kicklive_set_user_role(uuid, text)', 'X') as anon_can     -- want false
+     , public.kicklive_has_grant('authenticated', 'public.kicklive_set_user_role(uuid, text)', 'X') as authed_can   -- want true
      , public.kicklive_is_dashboard_session() as dashboard_session;                                                  -- want true here
 
 commit;
@@ -14563,18 +14565,18 @@ begin;
 
 -- ── 1 · what the API roles actually hold, right now (run it again after the revokes and diff the two rows)
 select 'public.profiles' as object,
-       has_table_privilege('authenticated', 'public.profiles', 'SELECT')     as auth_select,
-       has_table_privilege('authenticated', 'public.profiles', 'INSERT')     as auth_insert,
-       has_table_privilege('authenticated', 'public.profiles', 'DELETE')     as auth_delete,
-       has_table_privilege('authenticated', 'public.profiles', 'TRUNCATE')   as auth_truncate,
-       has_table_privilege('anon', 'public.profiles', 'TRUNCATE')            as anon_truncate
+       public.kicklive_has_grant('authenticated', 'public.profiles', 'r')     as auth_select,
+       public.kicklive_has_grant('authenticated', 'public.profiles', 'a')     as auth_insert,
+       public.kicklive_has_grant('authenticated', 'public.profiles', 'd')     as auth_delete,
+       public.kicklive_has_grant('authenticated', 'public.profiles', 'D')   as auth_truncate,
+       public.kicklive_has_grant('anon', 'public.profiles', 'D')            as anon_truncate
 union all
 select 'public.activity_logs',
-       has_table_privilege('authenticated', 'public.activity_logs', 'SELECT'),
-       has_table_privilege('authenticated', 'public.activity_logs', 'INSERT'),
-       has_table_privilege('authenticated', 'public.activity_logs', 'DELETE'),
-       has_table_privilege('authenticated', 'public.activity_logs', 'TRUNCATE'),
-       has_table_privilege('anon', 'public.activity_logs', 'TRUNCATE');
+       public.kicklive_has_grant('authenticated', 'public.activity_logs', 'r'),
+       public.kicklive_has_grant('authenticated', 'public.activity_logs', 'a'),
+       public.kicklive_has_grant('authenticated', 'public.activity_logs', 'd'),
+       public.kicklive_has_grant('authenticated', 'public.activity_logs', 'D'),
+       public.kicklive_has_grant('anon', 'public.activity_logs', 'D');
 
 -- ── 2 · revoke exactly what nothing uses
 revoke truncate on public.profiles from authenticated, anon;
@@ -14590,22 +14592,22 @@ do $$
 declare
   v_bad text := '';
 begin
-  if has_table_privilege('authenticated', 'public.profiles', 'TRUNCATE') then v_bad := v_bad || ' profiles-TRUNCATE'; end if;
-  if has_table_privilege('authenticated', 'public.profiles', 'DELETE')   then v_bad := v_bad || ' profiles-DELETE'; end if;
-  if has_table_privilege('authenticated', 'public.profiles', 'INSERT')   then v_bad := v_bad || ' profiles-INSERT'; end if;
-  if has_table_privilege('anon',          'public.profiles', 'TRUNCATE') then v_bad := v_bad || ' anon-profiles-TRUNCATE'; end if;
-  if has_table_privilege('authenticated', 'public.activity_logs', 'TRUNCATE') then v_bad := v_bad || ' trail-TRUNCATE'; end if;
-  if has_table_privilege('authenticated', 'public.activity_logs', 'DELETE')   then v_bad := v_bad || ' trail-DELETE'; end if;
+  if public.kicklive_has_grant('authenticated', 'public.profiles', 'D') then v_bad := v_bad || ' profiles-TRUNCATE'; end if;
+  if public.kicklive_has_grant('authenticated', 'public.profiles', 'd')   then v_bad := v_bad || ' profiles-DELETE'; end if;
+  if public.kicklive_has_grant('authenticated', 'public.profiles', 'a')   then v_bad := v_bad || ' profiles-INSERT'; end if;
+  if public.kicklive_has_grant('anon', 'public.profiles', 'D') then v_bad := v_bad || ' anon-profiles-TRUNCATE'; end if;
+  if public.kicklive_has_grant('authenticated', 'public.activity_logs', 'D') then v_bad := v_bad || ' trail-TRUNCATE'; end if;
+  if public.kicklive_has_grant('authenticated', 'public.activity_logs', 'd')   then v_bad := v_bad || ' trail-DELETE'; end if;
   if to_regprocedure('public.kicklive_set_user_role(uuid, text)') is not null
-     and has_function_privilege('anon', 'public.kicklive_set_user_role(uuid, text)', 'execute') then
+     and public.kicklive_has_grant('anon', 'public.kicklive_set_user_role(uuid, text)', 'X') then
     raise exception 'anon may execute the role writer — re-run the bundle; this file does not grant it' using errcode = '42501';
   end if;
-  if not has_table_privilege('postgres', 'public.profiles', 'UPDATE') then
+  if not public.kicklive_has_grant('postgres', 'public.profiles', 'w') then
     raise exception 'the owner lost UPDATE on public.profiles: kicklive_set_user_role() could not write, and the '
       'bootstrap would fail with a bare "permission denied for table profiles". Restore it: '
       'grant update, insert, references on public.profiles to postgres;';
   end if;
-  if has_column_privilege('authenticated', 'public.profiles', 'role', 'UPDATE') then
+  if public.kicklive_has_grant('authenticated', 'public.profiles', 'w', 'role') then
     raise notice 'STILL EXPOSED: authenticated can update profiles.role at the PRIVILEGE layer, so the guard trigger '
       'is the only thing between a signed-in fan and an admin account. Find what confers it with: '
       'select * from aclexplode((select relacl from pg_class where oid = ''public.profiles''::regclass)). '
@@ -14648,19 +14650,21 @@ begin;
 
 -- ── 1 · what the API roles hold right now: every table where authenticated or anon can TRUNCATE
 --        (run this same select after the revoke and the two result sets should differ by exactly these rows).
---        The privilege probe takes c.oid — the oid-typed overload of has_table_privilege — rather than a
---        formatted name: the planner is free to evaluate a WHERE function before the nspname filter narrows the
---        scan, and a name like format('public.%I', 'users') built from the auth.users row would resolve against
---        a non-existent public.users and error. An oid never leaves its own catalog row, so it is filter-safe.
+--        The probe reads the real ACL through public.kicklive_has_grant (never has_table_privilege, which a
+--        superuser SQL-editor session answers "true" for regardless of the grant — the reason phase 1 built the
+--        helper). It is fed c.oid::regclass::text rather than a hand-formatted name: the planner is free to
+--        evaluate a WHERE function before the nspname filter narrows the scan, and a name like
+--        format('public.%I', 'users') built from an unrelated row could resolve against a non-existent relation
+--        and error. An oid round-trips through regclass to its own, always-resolvable name, so it is filter-safe.
 select c.relname as object,
-       has_table_privilege('authenticated', c.oid, 'TRUNCATE') as auth_truncate,
-       has_table_privilege('anon',          c.oid, 'TRUNCATE') as anon_truncate
+       public.kicklive_has_grant('authenticated', c.oid::regclass::text, 'D') as auth_truncate,
+       public.kicklive_has_grant('anon', c.oid::regclass::text, 'D') as anon_truncate
 from pg_class c
 join pg_namespace n on n.oid = c.relnamespace
 where n.nspname = 'public'
   and c.relkind = 'r'
-  and (has_table_privilege('authenticated', c.oid, 'TRUNCATE')
-    or has_table_privilege('anon',          c.oid, 'TRUNCATE'))
+  and (public.kicklive_has_grant('authenticated', c.oid::regclass::text, 'D')
+    or public.kicklive_has_grant('anon', c.oid::regclass::text, 'D'))
 order by c.relname;
 
 -- ── 2 · revoke TRUNCATE from every existing table in the schema, from both API roles.
@@ -14689,14 +14693,14 @@ begin
   -- 4a · any table where an API role can still TRUNCATE, after the revoke
   for r in
     select c.relname,
-           has_table_privilege('authenticated', c.oid, 'TRUNCATE') as a,
-           has_table_privilege('anon',          c.oid, 'TRUNCATE') as n
+           public.kicklive_has_grant('authenticated', c.oid::regclass::text, 'D') as a,
+           public.kicklive_has_grant('anon', c.oid::regclass::text, 'D') as n
     from pg_class c
     join pg_namespace nsp on nsp.oid = c.relnamespace
     where nsp.nspname = 'public'
       and c.relkind = 'r'
-      and (has_table_privilege('authenticated', c.oid, 'TRUNCATE')
-        or has_table_privilege('anon',          c.oid, 'TRUNCATE'))
+      and (public.kicklive_has_grant('authenticated', c.oid::regclass::text, 'D')
+        or public.kicklive_has_grant('anon', c.oid::regclass::text, 'D'))
     order by c.relname
   loop
     v_left := v_left || ' ' || r.relname || case when r.a and r.n then '(auth,anon)'
@@ -14706,17 +14710,17 @@ begin
 
   -- 4b · the app-critical DML that MUST survive — this revoke was TRUNCATE-only, so any of these turning false
   --       means something went wrong and the paste should not stand.
-  if not has_table_privilege('authenticated', 'public.match_interest', 'INSERT')       then v_broke := v_broke || ' match_interest-INSERT'; end if;
-  if not has_table_privilege('authenticated', 'public.match_interest', 'SELECT')       then v_broke := v_broke || ' match_interest-SELECT'; end if;
-  if not has_table_privilege('authenticated', 'public.match_interest', 'DELETE')       then v_broke := v_broke || ' match_interest-DELETE'; end if;
-  if not has_table_privilege('authenticated', 'public.notification_devices', 'SELECT') then v_broke := v_broke || ' notification_devices-SELECT'; end if;
-  if not has_table_privilege('authenticated', 'public.notification_devices', 'DELETE') then v_broke := v_broke || ' notification_devices-DELETE'; end if;
-  if not has_table_privilege('authenticated', 'public.notification_preferences', 'INSERT') then v_broke := v_broke || ' notification_preferences-INSERT'; end if;
-  if not has_table_privilege('authenticated', 'public.notification_preferences', 'UPDATE') then v_broke := v_broke || ' notification_preferences-UPDATE'; end if;
+  if not public.kicklive_has_grant('authenticated', 'public.match_interest', 'a')       then v_broke := v_broke || ' match_interest-INSERT'; end if;
+  if not public.kicklive_has_grant('authenticated', 'public.match_interest', 'r')       then v_broke := v_broke || ' match_interest-SELECT'; end if;
+  if not public.kicklive_has_grant('authenticated', 'public.match_interest', 'd')       then v_broke := v_broke || ' match_interest-DELETE'; end if;
+  if not public.kicklive_has_grant('authenticated', 'public.notification_devices', 'r') then v_broke := v_broke || ' notification_devices-SELECT'; end if;
+  if not public.kicklive_has_grant('authenticated', 'public.notification_devices', 'd') then v_broke := v_broke || ' notification_devices-DELETE'; end if;
+  if not public.kicklive_has_grant('authenticated', 'public.notification_preferences', 'a') then v_broke := v_broke || ' notification_preferences-INSERT'; end if;
+  if not public.kicklive_has_grant('authenticated', 'public.notification_preferences', 'w') then v_broke := v_broke || ' notification_preferences-UPDATE'; end if;
   -- profiles SELECT is NOT checked at the table level: phase 10 deliberately revoked the table-wide SELECT grant
-  -- and left authenticated only the column grants it needs, so has_table_privilege(...,'SELECT') is false by
-  -- design. The column grant is what survives, and phase 13 does not touch it.
-  if not has_column_privilege('authenticated', 'public.profiles', 'id', 'SELECT')       then v_broke := v_broke || ' profiles-id-SELECT'; end if;
+  -- and left authenticated only the column grants it needs, so a table-wide SELECT read is false by design. The
+  -- column grant is what survives — asked below with the p_column argument — and phase 13 does not touch it.
+  if not public.kicklive_has_grant('authenticated', 'public.profiles', 'r', 'id')       then v_broke := v_broke || ' profiles-id-SELECT'; end if;
 
   if v_broke <> '' then
     raise exception 'step 22 went too wide: a TRUNCATE-only revoke must not have touched these, but they are now missing:%', v_broke

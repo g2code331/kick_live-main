@@ -8,18 +8,18 @@ begin;
 
 -- ── 1 · what the API roles actually hold, right now (run it again after the revokes and diff the two rows)
 select 'public.profiles' as object,
-       has_table_privilege('authenticated', 'public.profiles', 'SELECT')     as auth_select,
-       has_table_privilege('authenticated', 'public.profiles', 'INSERT')     as auth_insert,
-       has_table_privilege('authenticated', 'public.profiles', 'DELETE')     as auth_delete,
-       has_table_privilege('authenticated', 'public.profiles', 'TRUNCATE')   as auth_truncate,
-       has_table_privilege('anon', 'public.profiles', 'TRUNCATE')            as anon_truncate
+       public.kicklive_has_grant('authenticated', 'public.profiles', 'r')     as auth_select,
+       public.kicklive_has_grant('authenticated', 'public.profiles', 'a')     as auth_insert,
+       public.kicklive_has_grant('authenticated', 'public.profiles', 'd')     as auth_delete,
+       public.kicklive_has_grant('authenticated', 'public.profiles', 'D')   as auth_truncate,
+       public.kicklive_has_grant('anon', 'public.profiles', 'D')            as anon_truncate
 union all
 select 'public.activity_logs',
-       has_table_privilege('authenticated', 'public.activity_logs', 'SELECT'),
-       has_table_privilege('authenticated', 'public.activity_logs', 'INSERT'),
-       has_table_privilege('authenticated', 'public.activity_logs', 'DELETE'),
-       has_table_privilege('authenticated', 'public.activity_logs', 'TRUNCATE'),
-       has_table_privilege('anon', 'public.activity_logs', 'TRUNCATE');
+       public.kicklive_has_grant('authenticated', 'public.activity_logs', 'r'),
+       public.kicklive_has_grant('authenticated', 'public.activity_logs', 'a'),
+       public.kicklive_has_grant('authenticated', 'public.activity_logs', 'd'),
+       public.kicklive_has_grant('authenticated', 'public.activity_logs', 'D'),
+       public.kicklive_has_grant('anon', 'public.activity_logs', 'D');
 
 -- ── 2 · revoke exactly what nothing uses
 revoke truncate on public.profiles from authenticated, anon;
@@ -35,22 +35,22 @@ do $$
 declare
   v_bad text := '';
 begin
-  if has_table_privilege('authenticated', 'public.profiles', 'TRUNCATE') then v_bad := v_bad || ' profiles-TRUNCATE'; end if;
-  if has_table_privilege('authenticated', 'public.profiles', 'DELETE')   then v_bad := v_bad || ' profiles-DELETE'; end if;
-  if has_table_privilege('authenticated', 'public.profiles', 'INSERT')   then v_bad := v_bad || ' profiles-INSERT'; end if;
-  if has_table_privilege('anon',          'public.profiles', 'TRUNCATE') then v_bad := v_bad || ' anon-profiles-TRUNCATE'; end if;
-  if has_table_privilege('authenticated', 'public.activity_logs', 'TRUNCATE') then v_bad := v_bad || ' trail-TRUNCATE'; end if;
-  if has_table_privilege('authenticated', 'public.activity_logs', 'DELETE')   then v_bad := v_bad || ' trail-DELETE'; end if;
+  if public.kicklive_has_grant('authenticated', 'public.profiles', 'D') then v_bad := v_bad || ' profiles-TRUNCATE'; end if;
+  if public.kicklive_has_grant('authenticated', 'public.profiles', 'd')   then v_bad := v_bad || ' profiles-DELETE'; end if;
+  if public.kicklive_has_grant('authenticated', 'public.profiles', 'a')   then v_bad := v_bad || ' profiles-INSERT'; end if;
+  if public.kicklive_has_grant('anon', 'public.profiles', 'D') then v_bad := v_bad || ' anon-profiles-TRUNCATE'; end if;
+  if public.kicklive_has_grant('authenticated', 'public.activity_logs', 'D') then v_bad := v_bad || ' trail-TRUNCATE'; end if;
+  if public.kicklive_has_grant('authenticated', 'public.activity_logs', 'd')   then v_bad := v_bad || ' trail-DELETE'; end if;
   if to_regprocedure('public.kicklive_set_user_role(uuid, text)') is not null
-     and has_function_privilege('anon', 'public.kicklive_set_user_role(uuid, text)', 'execute') then
+     and public.kicklive_has_grant('anon', 'public.kicklive_set_user_role(uuid, text)', 'X') then
     raise exception 'anon may execute the role writer — re-run the bundle; this file does not grant it' using errcode = '42501';
   end if;
-  if not has_table_privilege('postgres', 'public.profiles', 'UPDATE') then
+  if not public.kicklive_has_grant('postgres', 'public.profiles', 'w') then
     raise exception 'the owner lost UPDATE on public.profiles: kicklive_set_user_role() could not write, and the '
       'bootstrap would fail with a bare "permission denied for table profiles". Restore it: '
       'grant update, insert, references on public.profiles to postgres;';
   end if;
-  if has_column_privilege('authenticated', 'public.profiles', 'role', 'UPDATE') then
+  if public.kicklive_has_grant('authenticated', 'public.profiles', 'w', 'role') then
     raise notice 'STILL EXPOSED: authenticated can update profiles.role at the PRIVILEGE layer, so the guard trigger '
       'is the only thing between a signed-in fan and an admin account. Find what confers it with: '
       'select * from aclexplode((select relacl from pg_class where oid = ''public.profiles''::regclass)). '

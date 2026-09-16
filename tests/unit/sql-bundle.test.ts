@@ -37,12 +37,12 @@ describe("the one-file SQL bundle", () => {
       assert.ok(marker > lastEnd, `${rel} appears as section ${String(n + 1)} in apply order`);
       lastEnd = marker;
     }
-    assert.equal(sources.length, 10, "the count is the fact an operator needs: base + nine");
+    assert.equal(sources.length, 13, "the count is the fact an operator needs: base + twelve");
   });
 
   it("announces each section, so the SQL editor's first result row names the failing step", () => {
-    assert.ok(bundle.includes("SELECT '1 / 10: KICKLIVE_FINAL_SCHEMA.sql' AS kicklive_sql_section;"));
-    assert.ok(bundle.includes("SELECT '10 / 10: supabase/migrations/20260916120000_phase10_privilege_tightening.sql' AS kicklive_sql_section;"));
+    assert.ok(bundle.includes("SELECT '1 / 13: KICKLIVE_FINAL_SCHEMA.sql' AS kicklive_sql_section;"));
+    assert.ok(bundle.includes("SELECT '13 / 13: supabase/migrations/20260916230000_phase13_truncate_lockdown.sql' AS kicklive_sql_section;"));
   });
 
   it("does not smuggle in the admin bootstrap", () => {
