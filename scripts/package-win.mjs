@@ -44,9 +44,7 @@ export async function main() {
   // options as npm's OWN until the first non-option argument, so `--config` gets eaten by npm (read as
   // an npmrc path) and electron-builder is handed a stray positional — the same trap package-linux.mjs
   // documents. On Windows the shim is electron-builder.cmd; fall back to npx only if neither exists.
-  const localBin = ["electron-builder", "electron-builder.cmd", "electron-builder.CMD"]
-    .map((n) => path.join(REPO_ROOT, "node_modules", ".bin", n))
-    .find((p) => fs.existsSync(p));
+  const localBin = ["electron-builder", "electron-builder.cmd", "electron-builder.CMD"].map((n) => path.join(REPO_ROOT, "node_modules", ".bin", n)).find((p) => fs.existsSync(p));
   const coreArgs = ["--config", "electron-builder.yml", "--win", "--x64", "--publish", "never", ...(has("dir") ? ["--dir"] : ["nsis"])];
   const builder = localBin ?? "npx";
   const builderArgs = localBin ? coreArgs : ["--no", "--", "electron-builder", ...coreArgs];
