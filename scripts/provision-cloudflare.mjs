@@ -160,6 +160,16 @@ function j_placeholder(lines, i) {
   return j - 1;
 }
 
+// GitHub Actions annotations ARE retrievable from outside the runner (the job log blob is not), so a
+// MISSING result prints the raw wrangler exit code + output here. That is the only channel that tells us
+// whether a resource is genuinely absent, the token lacks list scope, or the token/account mismatch.
+function annotateError(title, r) {
+  if (!process.env.GITHUB_ACTIONS) return;
+  const body = `${title} — wrangler exit ${r.code}. Output: ${(r.out || "(no output)").trim()}`;
+  const encoded = body.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
+  process.stdout.write(`::error::${encoded}\n`);
+}
+
 const existsCache = new Map();
 async function exists(kind, name) {
   const key = `${kind}:${name}`;
@@ -170,16 +180,18 @@ async function exists(kind, name) {
   // (KV is checked separately by kvNamespaceExists via `kv namespace list`), and R2's `info` was
   // flaky. Only queues (`queues info`) worked, which is exactly what the failing run showed.
   let ok;
+  let r;
   if (kind === "queue") {
     // `queues info <name>` is valid in v4 and already worked here — leave it.
-    const r = wrangler(["queues", "info", name]);
+    r = wrangler(["queues", "info", name]);
     ok = r.code === 0 && !/not found|does not exist|Could not find|Resource not found/i.test(r.out);
   } else {
     // R2: `r2 bucket info <name>` exists in v4 but was reporting existing buckets as MISSING; list +
     // match is immune to per-bucket info output/permission quirks and needs only *list* token scope.
-    const r = wrangler(["r2", "bucket", "list"]);
+    r = wrangler(["r2", "bucket", "list"]);
     ok = r.code === 0 && new RegExp(`(^|[\\s"'|])${escapeRe(name)}([\\s"'|]|$)`, "m").test(r.out);
   }
+  if (!ok) annotateError(`${kind} ${name} not confirmed`, r);
   existsCache.set(key, ok);
   return ok;
 }
@@ -190,13 +202,12 @@ function escapeRe(s) {
 
 // KV namespaces are identified by id, not name, and there is no `kv namespace info` in wrangler v4,
 // so existence is proven by listing the account's namespaces once and checking the id is present.
-let kvListCache;
+let kvListResult;
 function kvNamespaceExists(id) {
-  if (kvListCache === undefined) {
-    const r = wrangler(["kv", "namespace", "list"]);
-    kvListCache = r.code === 0 ? r.out : "";
-  }
-  return kvListCache.includes(id);
+  if (kvListResult === undefined) kvListResult = wrangler(["kv", "namespace", "list"]);
+  const ok = kvListResult.code === 0 && kvListResult.out.includes(id);
+  if (!ok) annotateError(`kv namespace ${id} not confirmed`, kvListResult);
+  return ok;
 }
 
 async function main() {
