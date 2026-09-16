@@ -40,15 +40,39 @@ export async function main() {
     }
   }
 
-  const builderArgs = ["--no", "electron-builder", "--config", "electron-builder.yml", "--win", "--x64", "--publish", "never"];
-  if (has("dir")) builderArgs.push("--dir");
-  else builderArgs.push("nsis");
+  // Call the local electron-builder binary directly, never `npx --no electron-builder …`: npx parses
+  // options as npm's OWN until the first non-option argument, so `--config` gets eaten by npm (read as
+  // an npmrc path) and electron-builder is handed a stray positional — the same trap package-linux.mjs
+  // documents. On Windows the shim is electron-builder.cmd; fall back to npx only if neither exists.
+  const localBin = ["electron-builder", "electron-builder.cmd", "electron-builder.CMD"]
+    .map((n) => path.join(REPO_ROOT, "node_modules", ".bin", n))
+    .find((p) => fs.existsSync(p));
+  const coreArgs = ["--config", "electron-builder.yml", "--win", "--x64", "--publish", "never", ...(has("dir") ? ["--dir"] : ["nsis"])];
+  const builder = localBin ?? "npx";
+  const builderArgs = localBin ? coreArgs : ["--no", "--", "electron-builder", ...coreArgs];
   console.log(`package-win: electron-builder ${has("dir") ? "dir" : "nsis"} @ v${version}`);
-  const res = run("electron-builder", "npx", builderArgs, { cwd: REPO_ROOT, env: { ELECTRON_BUILDER_CACHE: process.env.ELECTRON_BUILDER_CACHE ?? "" } });
+  const res = run("electron-builder", builder, builderArgs, { cwd: REPO_ROOT, env: { ELECTRON_BUILDER_CACHE: process.env.ELECTRON_BUILDER_CACHE ?? "" } });
   const out = res.stdout + res.stderr;
+  // Persist the FULL builder transcript before deciding pass/fail — the release workflow's windows job
+  // uploads release/*.log, and this sandbox cannot read GitHub step logs, so a committed transcript is
+  // the only way to see WHY a Windows packaging run failed after the fact.
+  try {
+    fs.mkdirSync(path.join(REPO_ROOT, "release"), { recursive: true });
+    fs.writeFileSync(
+      path.join(REPO_ROOT, "release", "package-win.log"),
+      `# electron-builder ${has("dir") ? "dir" : "nsis"} @ v${version}\n# invoked: ${[builder, ...builderArgs].join(" ")}\n# exit: ${String(res.code)}\n\n${out}\n`,
+    );
+  } catch {
+    /* best-effort: never mask the real failure with a logging error */
+  }
   if (!res.ok) {
-    const blocked = /ETIMEDOUT|ENOTFOUND|self-signed|unable to verify|EAI_AGAIN|Could not download|download.*failed/i.test(out);
-    console.error(`\npackage-win: electron-builder failed${blocked ? " — it could not download the Electron runtime tooling" : ""}`);
+    const usage = /Unknown arguments?:|Unknown option|Invalid configuration object/i.test(out);
+    const blocked = !usage && /ETIMEDOUT|ENOTFOUND|self-signed|unable to verify|EAI_AGAIN|Could not download|download.*failed/i.test(out);
+    console.error(`\npackage-win: electron-builder failed${usage ? " — the builder rejected its own arguments or config" : blocked ? " — it could not download the Electron runtime tooling" : ""}`);
+    if (usage) {
+      console.error(`  electron-builder never started building: ${tail(out, 2).trim()}`);
+      console.error(`  invoked as: ${[builder, ...builderArgs].join(" ")}`);
+    }
     if (blocked) {
       console.error(
         "  This step needs network access to github.com release assets. In CI it is available;\n" + "  locally you can pre-seed ~/.cache/electron with electron-v" + version + "-win32-x64.zip.",

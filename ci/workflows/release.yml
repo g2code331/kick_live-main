@@ -197,6 +197,17 @@ jobs:
         with:
           path: .cache
           key: electron-win-${{ hashFiles('package.json', 'package-lock.json') }}
+      - name: Upload the packaging transcript (even on failure)
+        # Separate from the artifact upload below (which is if-no-files-found: error): when packaging
+        # fails there is no .exe, so that step would error and the log — the one thing that explains the
+        # failure — would be lost. package-win.log is written unconditionally by scripts/package-win.mjs.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-package-log
+          path: release/*.log
+          if-no-files-found: warn
+          retention-days: 14
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-win32-x64
