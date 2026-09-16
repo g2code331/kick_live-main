@@ -88,6 +88,20 @@ export async function main() {
   console.log(`package-linux: electron-builder ${targets().join(",")} @ v${version}`);
   const res = run("electron-builder", builder, argv, { cwd: REPO_ROOT, env: { ELECTRON_BUILDER_CACHE: process.env.ELECTRON_BUILDER_CACHE ?? "" } });
   const out = res.stdout + res.stderr;
+  // Persist the FULL builder transcript to release/ before deciding pass/fail. When electron-builder
+  // fails, the `verify` and `smoke` steps that follow it never run, so their `if: always()` artifact
+  // (release/smoke-*.log) is never written — and this sandbox cannot read GitHub's step logs at all.
+  // A committed log file, matched by the workflow's smoke-log upload glob, is the only transcript that
+  // survives a packaging failure and can be downloaded from the run's Artifacts.
+  try {
+    fs.mkdirSync(path.join(REPO_ROOT, "release"), { recursive: true });
+    fs.writeFileSync(
+      path.join(REPO_ROOT, "release", "package-linux.log"),
+      `# electron-builder ${targets().join(",")} @ v${version}\n# invoked: ${[builder, ...argv].join(" ")}\n# exit: ${String(res.code)}\n\n${out}\n`,
+    );
+  } catch {
+    /* best-effort: never mask the real failure with a logging error */
+  }
   if (!res.ok) {
     // Classify before speaking. The old pattern included a bare `self-signed`, which matches
     // electron-builder's own help text ("create-self-signed-cert") — so a CLI usage error was
