@@ -37,12 +37,20 @@ describe("the one-file SQL bundle", () => {
       assert.ok(marker > lastEnd, `${rel} appears as section ${String(n + 1)} in apply order`);
       lastEnd = marker;
     }
+    // Pinned on purpose: the operator-facing number is the point. Whoever is handed the paste is told how
+    // many files the bundle holds, and adding a migration is exactly the moment to revisit that sentence.
     assert.equal(sources.length, 13, "the count is the fact an operator needs: base + twelve");
   });
 
   it("announces each section, so the SQL editor's first result row names the failing step", () => {
-    assert.ok(bundle.includes("SELECT '1 / 13: KICKLIVE_FINAL_SCHEMA.sql' AS kicklive_sql_section;"));
-    assert.ok(bundle.includes("SELECT '13 / 13: supabase/migrations/20260916230000_phase13_truncate_lockdown.sql' AS kicklive_sql_section;"));
+    // Derived, not pinned: the total is the bundle's own section count, so a hardcoded "1 / 10" broke on
+    // every migration added after it, for no extra guarantee. What matters is that the first and the last
+    // section announce the same total the bundle actually has.
+    const total = sources.length;
+    const first = sources[0]!;
+    const last = sources[sources.length - 1]!;
+    assert.ok(bundle.includes(`SELECT '1 / ${total}: ${first}' AS kicklive_sql_section;`), `the first section announces 1 / ${total}`);
+    assert.ok(bundle.includes(`SELECT '${total} / ${total}: ${last}' AS kicklive_sql_section;`), `the last section announces ${total} / ${total}`);
   });
 
   it("does not smuggle in the admin bootstrap", () => {

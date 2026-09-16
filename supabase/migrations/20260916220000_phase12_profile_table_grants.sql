@@ -8,11 +8,11 @@ begin;
 
 -- ── 1 · what the API roles actually hold, right now (run it again after the revokes and diff the two rows)
 select 'public.profiles' as object,
-       public.kicklive_has_grant('authenticated', 'public.profiles', 'r')     as auth_select,
-       public.kicklive_has_grant('authenticated', 'public.profiles', 'a')     as auth_insert,
-       public.kicklive_has_grant('authenticated', 'public.profiles', 'd')     as auth_delete,
-       public.kicklive_has_grant('authenticated', 'public.profiles', 'D')   as auth_truncate,
-       public.kicklive_has_grant('anon', 'public.profiles', 'D')            as anon_truncate
+       public.kicklive_has_grant('authenticated', 'public.profiles', 'r') as auth_select,
+       public.kicklive_has_grant('authenticated', 'public.profiles', 'a') as auth_insert,
+       public.kicklive_has_grant('authenticated', 'public.profiles', 'd') as auth_delete,
+       public.kicklive_has_grant('authenticated', 'public.profiles', 'D') as auth_truncate,
+       public.kicklive_has_grant('anon', 'public.profiles', 'D')          as anon_truncate
 union all
 select 'public.activity_logs',
        public.kicklive_has_grant('authenticated', 'public.activity_logs', 'r'),
@@ -38,14 +38,19 @@ begin
   if public.kicklive_has_grant('authenticated', 'public.profiles', 'D') then v_bad := v_bad || ' profiles-TRUNCATE'; end if;
   if public.kicklive_has_grant('authenticated', 'public.profiles', 'd')   then v_bad := v_bad || ' profiles-DELETE'; end if;
   if public.kicklive_has_grant('authenticated', 'public.profiles', 'a')   then v_bad := v_bad || ' profiles-INSERT'; end if;
-  if public.kicklive_has_grant('anon', 'public.profiles', 'D') then v_bad := v_bad || ' anon-profiles-TRUNCATE'; end if;
+  if public.kicklive_has_grant('anon',          'public.profiles', 'D') then v_bad := v_bad || ' anon-profiles-TRUNCATE'; end if;
   if public.kicklive_has_grant('authenticated', 'public.activity_logs', 'D') then v_bad := v_bad || ' trail-TRUNCATE'; end if;
   if public.kicklive_has_grant('authenticated', 'public.activity_logs', 'd')   then v_bad := v_bad || ' trail-DELETE'; end if;
   if to_regprocedure('public.kicklive_set_user_role(uuid, text)') is not null
      and public.kicklive_has_grant('anon', 'public.kicklive_set_user_role(uuid, text)', 'X') then
     raise exception 'anon may execute the role writer — re-run the bundle; this file does not grant it' using errcode = '42501';
   end if;
-  if not public.kicklive_has_grant('postgres', 'public.profiles', 'w') then
+  -- The owner is the one case where the ACL reader and has_table_privilege() disagree, and the ACL is the
+  -- wrong answer: an owner needs no aclitem, so a table nobody was ever granted anything on reports false
+  -- while `postgres` can still write. Ask ownership, then fall back to the grant.
+  if not (public.kicklive_has_grant('postgres', 'public.profiles', 'w')
+          or exists (select 1 from pg_class c join pg_roles r on r.oid = c.relowner
+                      where c.oid = to_regclass('public.profiles') and r.rolname = 'postgres')) then
     raise exception 'the owner lost UPDATE on public.profiles: kicklive_set_user_role() could not write, and the '
       'bootstrap would fail with a bare "permission denied for table profiles". Restore it: '
       'grant update, insert, references on public.profiles to postgres;';

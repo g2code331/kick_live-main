@@ -70,19 +70,35 @@ jobs:
       - name: "Layout tests (tier A: renderer/dist, asar, hooks, identity, version)"
         run: node scripts/verify-packaging.mjs
       - name: Serve the built web bundle and assert the static-server contract
+        # `mime()` must print the header VALUE only. An earlier revision matched the header with a
+        # case-insensitive `~` but then called `sub(k," ")` with a lowercase `k`; awk's sub() is
+        # case-sensitive, so the substitution never happened and every content-type assertion
+        # compared "Content-Type: text/javascript; …" against "text/javascript; …" and failed.
+        # Splitting on ": " and lowering only the field name makes the comparison exact.
         run: |
           node server/cli.ts --root dist/web --port 4173 --quiet & echo $! > /tmp/serve.pid
-          sleep 1
           set -e
           code() { curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:4173$1"; }
-          type() { curl -sSI "http://127.0.0.1:4173$1" | tr -d '\r' | awk -v k="content-type:" 'tolower($0) ~ k {sub(k," ");print;exit}'; }
-          test "$(code /)" = 200
+          mime() { curl -sSI "http://127.0.0.1:4173$1" | tr -d '\r' | awk -F': ' 'tolower($1)=="content-type"{print $2; exit}'; }
+          # `sleep 1` is a race: wait for the socket to answer instead.
+          for _ in $(seq 1 40); do
+            [ "$(code / 2>/dev/null || true)" = "200" ] && break
+            sleep 0.5
+          done
+          test "$(code /)" = 200 || { echo "::error::the static server never came up on 4173"; exit 1; }
           test "$(code /admin/anything)" = 200
           [ "$(code /assets/nope-does-not-exist.js)" = 404 ] || { echo "missing asset must 404"; exit 1; }
           JS=$(ls dist/web/assets/*.js | head -1 | xargs basename)
           test "$(code /assets/$JS)" = 200
-          test "$(type /assets/$JS)" = "text/javascript; charset=utf-8"
-          test "$(type /site.webmanifest)" = "application/manifest+json"
+          # A JS MIME type is what lets the browser run the bundle as a module at all.
+          test "$(mime /assets/$JS)" = "text/javascript; charset=utf-8" || {
+            echo "::error::/assets/$JS served as [$(mime /assets/$JS)], expected [text/javascript; charset=utf-8]"; exit 1; }
+          # The manifest is compared as a media type, not an exact string: server/mime.ts appends
+          # "; charset=utf-8", and both forms are correct per RFC 9110 §8.3.
+          case "$(mime /site.webmanifest)" in
+            application/manifest+json*) ;;
+            *) echo "::error::/site.webmanifest served as [$(mime /site.webmanifest)], expected application/manifest+json"; exit 1;;
+          esac
           kill "$(cat /tmp/serve.pid)"
       - uses: actions/upload-artifact@v4
         with:

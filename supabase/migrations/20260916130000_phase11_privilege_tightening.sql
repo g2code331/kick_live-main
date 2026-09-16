@@ -184,14 +184,16 @@ comment on function public.kicklive_set_user_role(uuid, text) is
   'The only supported way to change a role. Admin-only or database-session-only, audited, refuses to demote the '
   'last admin. A browser/API session never qualifies: kicklive_is_dashboard_session() reads the PostgREST JWT GUCs.';
 
--- Revoke from the broad `public` pseudo-role AND the client roles in one statement, then re-grant the two roles
--- that are actually allowed. Revoking from `public` alone does NOT remove the `anon`/`authenticated` aclitems that
--- Supabase's default privileges create, so a lone `from public` would leave a signed-in fan able to execute the
--- role writer — which is exactly what tests/unit/sql-shape.test.ts asserts against. A combined
--- `from public, anon, authenticated` is safe even when one of those grantees has no explicit ACL entry yet:
--- Postgres treats revoking a privilege that was never granted as a no-op, not an error (verified against the same
--- PGlite engine the suite runs on). This mirrors the phase-1 pattern (`from public, anon`).
-revoke all on function public.kicklive_set_user_role(uuid, text) from public, anon, authenticated;
+-- Revoke the broad `public` pseudo-role first, then name anon: a single statement listing both aborts the whole
+-- statement (and therefore the grant below it) if the function's ACL has no `anon` entry yet, which is exactly what
+-- happens on a project that has never run the revoke — Postgres answers `function … does not exist` for a revoke on
+-- a (function, grantee) pair that was never granted. Two statements, each idempotent on its own.
+revoke all on function public.kicklive_set_user_role(uuid, text) from public;
+revoke all on function public.kicklive_set_user_role(uuid, text) from anon;
+-- `authenticated` is revoked too, even though the next line grants it straight back: `revoke … from public`
+-- does not remove the aclitem Supabase's default privileges created for the role itself, and this file grants
+-- execute to `authenticated`, so a stale entry here would be a grant no line in this file accounts for.
+revoke all on function public.kicklive_set_user_role(uuid, text) from authenticated;
 grant execute on function public.kicklive_set_user_role(uuid, text) to authenticated, service_role;
 
 -- ── 4 · the privilege half, only if it is actually missing ─────────────────────────────────────────────────

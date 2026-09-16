@@ -69,13 +69,21 @@ linux:
     # key added here must be added there too (branding `check` mode fails otherwise).
     entry:
       StartupNotify: "true"
+      # Placeholder, NOT a value: electron-builder writes desktop.entry into the .desktop verbatim
+      # and expands no macros there, so on its own this ships the literal "${version}". The real
+      # version is injected by scripts/package-linux.mjs via
+      # `-c.linux.desktop.entry.X-KickLive-Version=<VERSION>`. Keep the macro here — `branding
+      # check` asserts the packager declares the key, and this file stays the config of record.
       X-KickLive-Version: "${version}"
       X-KickLive-Feed: "https://github.com/g2code331/kick_live-main/releases"
 
 deb:
   packageName: kicklive
-  # electron-builder 26 renamed the Debian "Section:" control field to `packageCategory` (the old
-  # `section` key is rejected by the config schema — `configuration.deb should be one of these`).
+  # electron-builder 26 renamed this: it is `packageCategory` now (it becomes fpm's --category,
+  # which is the deb control `Section` field that verify-packaging's C1e asserts equals "web").
+  # Spelling it `section` makes the whole config fail schema validation — `DebOptions` sets
+  # additionalProperties:false, and electron-builder reports it as the unhelpful
+  # "configuration.deb should be one of these: null".
   packageCategory: web
   priority: optional
   compression: xz

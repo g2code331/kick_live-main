@@ -200,39 +200,52 @@ describe("migrations · the shapes Postgres forgives and then punishes", () => {
     // `raise exception 'a % uses b'` with one argument is fine; with a stray `%` and no argument it is
     // `too few parameters specified for RAISE`, raised when the body is compiled. Same fix class as the regex:
     // a literal that has to be written as `%%`, or the placeholder removed.
+    //
+    // The format string is ONE literal, and SQL builds it the way it builds any other literal: adjacent
+    // `'a' 'b'` run together into `ab`, over as many lines as the author likes. Counting only the first
+    // literal of such a run sees that literal's `%`s and then misses the arguments entirely, because they
+    // sit after the LAST literal — which reported a valid four-line RAISE as "4 specifier(s) and 0
+    // argument(s)". `%%` is an escaped literal percent, so it is not a placeholder either.
     for (const [file, text] of Object.entries(SOURCE)) {
-      for (const m of text.matchAll(/\braise\s+(?:exception|warning|notice|info|log|debug1|debug2|debug3|debug4|debug5|fatal)\s+(?=')/gi)) {
-        // Postgres concatenates adjacent string literals — including across newlines — into one format
-        // string, so a RAISE message may be written as several quoted fragments before the `,` argument
-        // list or the `USING`/`;` terminator. Walk from the first quote collecting every fragment (and the
-        // whitespace between them) so the specifier count is taken over the WHOLE message, and the argument
-        // list is read from what follows the last fragment. Counting only the first fragment is a false
-        // positive on a long multi-line message whose `%` args sit after the continuation lines.
-        const start = (m.index ?? 0) + m[0].length;
-        let i = start;
-        let combined = "";
+      for (const m of text.matchAll(/\braise\s+(?:exception|warning|notice|info|log|debug1|debug2|debug3|debug4|debug5|fatal)\s+/gi)) {
+        let cursor = (m.index ?? 0) + m[0]!.length;
+        const literals: string[] = [];
+        let undecidable = false;
+        // Collect the whole run of adjacent literals, walking `||` between the parts.
         for (;;) {
-          const frag = /^'((?:[^']|'')*)'/.exec(text.slice(i));
-          if (!frag) break;
-          combined += frag[1];
-          i += frag[0].length;
-          const gap = /^\s*/.exec(text.slice(i))![0];
-          if (text[i + gap.length] === "'") {
-            i += gap.length;
+          cursor += /^\s*/.exec(text.slice(cursor))![0]!.length;
+          const literal = /^'((?:[^']|'')*)'/.exec(text.slice(cursor));
+          if (literal) {
+            literals.push(literal[1]!);
+            cursor += literal[0]!.length;
             continue;
           }
-          break;
+          if (!/^\|\|/.test(text.slice(cursor))) break;
+          cursor += 2;
+          const joined = /^\s*'((?:[^']|'')*)'/.exec(text.slice(cursor));
+          if (!joined) {
+            // `raise … 'a %' || v_tail` — the tail is an expression, so there is no static count.
+            undecidable = true;
+            break;
+          }
+          literals.push(joined[1]!);
+          cursor += joined[0]!.length;
         }
-        const specifiers = (combined.match(/(?:^|[^%])%[sILNO]?/g) ?? []).length;
+        if (undecidable || literals.length === 0) continue;
+        // `%%` is a literal percent; every other `%` (optionally typed `%s`/`%I`/`%L`) takes an argument.
+        const body = literals.join("");
+        let specifiers = 0;
+        for (let i = 0; i < body.length; i++) {
+          if (body[i] !== "%") continue;
+          if (body[i + 1] === "%") i++;
+          else if (/[sILNO]/.test(body[i + 1] ?? "")) i++;
+          else specifiers++;
+        }
         if (specifiers === 0) continue;
-        const rest = text.slice(i);
-        const argList = /^\s*,/.test(rest)
-          ? rest
-              .slice(rest.indexOf(",") + 1)
-              .split(/;|\busing\b/i)[0]!
-              .trim()
-          : "";
-        const args = argList && argList.length > 0 ? argList.split(",").filter((a) => a.trim().length > 0).length : 0;
+        const rest = text.slice(cursor);
+        // `raise … '…%', a, b using errcode = '…';` — the arguments run from the comma to the semicolon.
+        const listed = /^\s*,([\s\S]*?);/.exec(rest)?.[1] ?? "";
+        const args = listed.trim().length > 0 ? listed.split(",").filter((a) => a.trim().length > 0).length : 0;
         assert.ok(
           args >= specifiers,
           `${file}: a RAISE format has ${String(specifiers)} specifier(s) and ${String(args)} argument(s) — Postgres raises "too few parameters specified for RAISE" when the body compiles`,
@@ -248,12 +261,11 @@ describe("migrations · the shapes Postgres forgives and then punishes", () => {
       const arrays = new Set<string>();
       for (const m of text.matchAll(/\b(v_\w+)\s+(?:[\w.]+\s*)?text\[\]/g)) arrays.add(m[1]!.toLowerCase());
       for (const m of text.matchAll(/\b(v_\w+)\s*(?::=|:=)\s*\1\s*\|\|\s*'[^']*'/g)) {
-        // Only a text[] misbehaves here — `v := v || 'x'` on a plain `text` is ordinary string
-        // concatenation and correct. Restrict the failure to variables actually declared `text[]`, or a
-        // scalar accumulator like phase-12's `v_bad text := ''` is a false positive.
-        if (arrays.has(m[1]!.toLowerCase())) {
-          assert.fail(`${file}: ${m[1]} is appended to with || 'literal'; for a text[] that means "malformed array literal" — use array_append(${m[1]}, …)`);
-        }
+        // `v_notes := v_notes || '…'` on a plain `text` is ordinary concatenation and is correct; the rule is
+        // about `text[]`, where the bare literal is read as a second array. Without this guard the pattern
+        // below failed a migration whose `v_bad text := ''` was being built up with `|| ' profiles-TRUNCATE'`.
+        if (!arrays.has(m[1]!.toLowerCase())) continue;
+        assert.fail(`${file}: ${m[1]} is appended to with || 'literal'; for a text[] that means "malformed array literal" — use array_append(${m[1]}, …)`);
       }
       for (const m of text.matchAll(/\b(v_\w+)\s*\|\|\s*'/g)) {
         if (arrays.has(m[1]!.toLowerCase())) {
@@ -497,19 +509,12 @@ describe("privilege assertions in the migrations read the catalog, not the super
       const text = fs.readFileSync(path.join(MIGRATIONS_DIR, f), "utf8");
       for (const m of text.matchAll(/if not public\.kicklive_has_grant\([\s\S]{0,400}?\) then/g)) {
         const tail = text.slice(m.index, m.index + m[0].length + 260);
-        // The direct form is `if not granted then raise exception …`. The accumulate form — used where a phase
-        // wants to report EVERY missing grant in one message rather than abort on the first — is
-        // `if not granted then v_x := v_x || ' name'; end if;` followed later by `raise exception '…:%', v_x`.
-        // Both end in a raise, so both are real assertions; only a bare `v_x := kicklive_has_grant(…)` with no
-        // branch and no raise (the degradation this guards against) is not.
-        let ok = /raise exception/.test(tail);
-        if (!ok) {
-          const acc = /then\s+(v_\w+)\s*:=\s*\1\s*\|\|/.exec(tail);
-          if (acc) {
-            ok = new RegExp(`raise\\s+exception[\\s\\S]*\\b${acc[1]!}\\b`).test(text);
-          }
-        }
-        assert.ok(ok, `${f}: a positive assertion with no raise is not an assertion`);
+        if (/raise exception/.test(tail)) continue; // raises there and then
+        // …or it feeds a variable the block raises on once every finding is collected — the step-22 shape, which
+        // reports the whole list in one exception instead of only the first. That has teeth too. What has none is
+        // an assertion whose result is assigned and never tested, which is the failure mode this rule is for.
+        const collected = /\bthen\s+(v_\w+)\s*:=/.exec(tail);
+        assert.ok(collected !== null && new RegExp(`if\\s+${collected[1]}\\s*<>\\s*''[\\s\\S]{0,200}?raise exception`).test(text), `${f}: a positive assertion with no raise is not an assertion`);
       }
     }
   });
@@ -530,9 +535,19 @@ describe("privilege assertions in the migrations read the catalog, not the super
       raw.split("\n").forEach((line, i) => {
         const m = /^(?:\s*)?revoke all on function (?:public\.)?([\w]+)\s*(?:\([^;]*\))? from public;$/.exec(line.trim());
         if (!m || m[1] === "kicklive_has_grant") return;
-        const roles = granted.get(m[1]!.toLowerCase());
+        const fn = m[1]!.toLowerCase();
+        const roles = granted.get(fn);
         if (!roles) return;
-        const unremoved = ["anon", "authenticated"].filter((r) => roles.has(r));
+        // A companion statement per role satisfies the rule exactly as one comma-separated statement does: what
+        // matters is that each client role's own aclitem is removed, not that it all happens in one statement.
+        // Files split them on purpose — a single statement naming several grantees is one unit, and these files
+        // report it aborting wholesale when one of those grantees has no ACL entry yet.
+        const revokedFrom = new Set<string>();
+        for (const r of raw.matchAll(/revoke all on function (?:public\.)?([\w]+)\s*(?:\([^;]*\))?\s+from\s+([^;]+);/gi)) {
+          if (r[1]!.toLowerCase() !== fn) continue;
+          for (const role of r[2]!.matchAll(/[a-z_]+/g)) revokedFrom.add(role[0]!.toLowerCase());
+        }
+        const unremoved = ["anon", "authenticated"].filter((r) => roles.has(r) && !revokedFrom.has(r));
         if (unremoved.length) missing.push(`${f}:${i + 1} ${m[1]} — granted to ${unremoved.join("/")} but revoked only from PUBLIC`);
       });
     }

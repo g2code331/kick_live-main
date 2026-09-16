@@ -18,21 +18,22 @@ begin;
 
 -- ── 1 · what the API roles hold right now: every table where authenticated or anon can TRUNCATE
 --        (run this same select after the revoke and the two result sets should differ by exactly these rows).
---        The probe reads the real ACL through public.kicklive_has_grant (never has_table_privilege, which a
---        superuser SQL-editor session answers "true" for regardless of the grant — the reason phase 1 built the
---        helper). It is fed c.oid::regclass::text rather than a hand-formatted name: the planner is free to
---        evaluate a WHERE function before the nspname filter narrows the scan, and a name like
---        format('public.%I', 'users') built from an unrelated row could resolve against a non-existent relation
---        and error. An oid round-trips through regclass to its own, always-resolvable name, so it is filter-safe.
+--        The probe asks public.kicklive_has_grant — the ACL reader phase 1 installed — rather than
+--        has_table_privilege(), which answers true for the superuser the Supabase editor runs as, so every
+--        negative assertion in this file would pass while proving nothing. The object goes in as
+--        c.oid::regclass::text, which is resolved from the row's own oid and never from a formatted guess, and
+--        every call sits inside a CASE on the schema: the planner may evaluate a select-list function before the
+--        nspname filter has narrowed the scan, and the helper raises on a name it cannot resolve, so the CASE is
+--        what keeps a row from another schema out of it.
 select c.relname as object,
-       public.kicklive_has_grant('authenticated', c.oid::regclass::text, 'D') as auth_truncate,
-       public.kicklive_has_grant('anon', c.oid::regclass::text, 'D') as anon_truncate
+       case when n.nspname = 'public' then public.kicklive_has_grant('authenticated', c.oid::regclass::text, 'D') else false end as auth_truncate,
+       case when n.nspname = 'public' then public.kicklive_has_grant('anon',          c.oid::regclass::text, 'D') else false end as anon_truncate
 from pg_class c
 join pg_namespace n on n.oid = c.relnamespace
 where n.nspname = 'public'
   and c.relkind = 'r'
-  and (public.kicklive_has_grant('authenticated', c.oid::regclass::text, 'D')
-    or public.kicklive_has_grant('anon', c.oid::regclass::text, 'D'))
+  and (case when n.nspname = 'public' then public.kicklive_has_grant('authenticated', c.oid::regclass::text, 'D') else false end
+    or case when n.nspname = 'public' then public.kicklive_has_grant('anon',          c.oid::regclass::text, 'D') else false end)
 order by c.relname;
 
 -- ── 2 · revoke TRUNCATE from every existing table in the schema, from both API roles.
@@ -61,14 +62,14 @@ begin
   -- 4a · any table where an API role can still TRUNCATE, after the revoke
   for r in
     select c.relname,
-           public.kicklive_has_grant('authenticated', c.oid::regclass::text, 'D') as a,
-           public.kicklive_has_grant('anon', c.oid::regclass::text, 'D') as n
+           case when nsp.nspname = 'public' then public.kicklive_has_grant('authenticated', c.oid::regclass::text, 'D') else false end as a,
+           case when nsp.nspname = 'public' then public.kicklive_has_grant('anon',          c.oid::regclass::text, 'D') else false end as n
     from pg_class c
     join pg_namespace nsp on nsp.oid = c.relnamespace
     where nsp.nspname = 'public'
       and c.relkind = 'r'
-      and (public.kicklive_has_grant('authenticated', c.oid::regclass::text, 'D')
-        or public.kicklive_has_grant('anon', c.oid::regclass::text, 'D'))
+      and (case when nsp.nspname = 'public' then public.kicklive_has_grant('authenticated', c.oid::regclass::text, 'D') else false end
+        or case when nsp.nspname = 'public' then public.kicklive_has_grant('anon',          c.oid::regclass::text, 'D') else false end)
     order by c.relname
   loop
     v_left := v_left || ' ' || r.relname || case when r.a and r.n then '(auth,anon)'
@@ -86,8 +87,8 @@ begin
   if not public.kicklive_has_grant('authenticated', 'public.notification_preferences', 'a') then v_broke := v_broke || ' notification_preferences-INSERT'; end if;
   if not public.kicklive_has_grant('authenticated', 'public.notification_preferences', 'w') then v_broke := v_broke || ' notification_preferences-UPDATE'; end if;
   -- profiles SELECT is NOT checked at the table level: phase 10 deliberately revoked the table-wide SELECT grant
-  -- and left authenticated only the column grants it needs, so a table-wide SELECT read is false by design. The
-  -- column grant is what survives — asked below with the p_column argument — and phase 13 does not touch it.
+  -- and left authenticated only the column grants it needs, so has_table_privilege(...,'SELECT') is false by
+  -- design. The column grant is what survives, and phase 13 does not touch it.
   if not public.kicklive_has_grant('authenticated', 'public.profiles', 'r', 'id')       then v_broke := v_broke || ' profiles-id-SELECT'; end if;
 
   if v_broke <> '' then
