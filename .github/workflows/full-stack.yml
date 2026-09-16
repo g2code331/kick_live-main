@@ -102,6 +102,12 @@ jobs:
     needs: [config, test]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    # `environment: staging` is REQUIRED, not decorative: CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID
+    # live as *environment* secrets on `staging`, and GitHub only injects an environment's secrets into
+    # a job that declares that environment. Without this line `secrets.CLOUDFLARE_*` resolve to empty
+    # and the step below fails with "required for provisioning" even though the secrets are set — which
+    # is exactly what happened, while the `migrate` job (which does declare it) got its secrets fine.
+    environment: staging
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -259,6 +265,9 @@ jobs:
     if: always() && needs.deploy-staging.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    # Needed so `vars.STAGING_WEB_URL` (an environment variable on `staging`) resolves; without it the
+    # Pages probe below always takes the "URL not set" skip path instead of actually probing the deploy.
+    environment: staging
     steps:
       - uses: actions/checkout@v4
       - name: The deployed frontend keeps the same contract as the local server
