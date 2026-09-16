@@ -75,7 +75,10 @@ jobs:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
       - name: Assert the built bundle is servable (404s stay 404s, JS stays JS)
-        run: node scripts/verify-packaging.mjs
+        # --web-only: this job ran `build:web:<mode>` and nothing else, so there is no renderer/dist
+        # and no build/electron. Plain `verify-packaging` demands both (tier A1), so it failed here
+        # on every run while passing in the desktop job that builds them.
+        run: node scripts/verify-packaging.mjs --web-only
       - id: ver
         name: Version of what is being deployed
         run: |
