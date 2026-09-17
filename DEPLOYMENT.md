@@ -10,7 +10,7 @@ browser ──▶ Cloudflare Pages  (static bundle: dist/web + the SPA fallback 
 ```
 
 Vercel is no longer part of the production architecture (retired 2026-09-12; `vercel.json` and `.vercel/`
-are deleted, and `public/functions/[[catchall]].js` + `public/_routes.json` + `public/_headers` now carry
+are deleted, and `public/_worker.js` (Pages advanced mode) + `public/_headers` now carry
 the rewrite/cache contract the old `vercel.json` encoded).
 
 ## One-time per environment

@@ -48,31 +48,36 @@ function checkHooks() {
 }
 
 function checkPagesContract() {
-  // The web host is Cloudflare Pages, and the SPA-fallback/cache contract lives in three files under
-  // public/ that Vite ships inside the bundle: a functions catch-all (dotted misses are real 404s,
-  // extensionless routes get the shell), _routes.json (which requests the function sees), and _headers
-  // (cache). They deploy silently wrong if edited, so the only check is here, pre-build. This replaces
-  // vercel.json's rewrite rule — the same contract, expressed in the two files Pages reads.
+  // The web host is Cloudflare Pages, in ADVANCED mode: a single `_worker.js` at the deploy root owns
+  // routing, plus `_headers` (cache). Vite ships both from public/ into dist/web. Why not a functions/
+  // directory: `wrangler pages deploy dist/web` does NOT compile a nested functions/ folder (Cloudflare
+  // requires it at the PROJECT root, not the output dir), so a dist/web/functions/ ships as a dead static
+  // file and Pages' default SPA not-found handling answers a missing /assets/*.js with index.html at 200 —
+  // the PWA-pinning bug. A deploy-root _worker.js is always executed. These deploy silently wrong if edited,
+  // so the only check is here, pre-build.
   const problems = [];
-  if (fs.existsSync(path.join(REPO_ROOT, "vercel.json")))
-    problems.push("vercel.json is back: the web host is Cloudflare Pages; the contract lives in public/functions/, public/_routes.json and public/_headers");
+  if (fs.existsSync(path.join(REPO_ROOT, "vercel.json"))) problems.push("vercel.json is back: the web host is Cloudflare Pages; the contract lives in public/_worker.js and public/_headers");
   if (fs.existsSync(path.join(REPO_ROOT, "public", "_redirects")))
     problems.push(
-      "public/_redirects is forbidden: a blanket `/* /index.html 200` answers missing hashed assets with HTML-200, which is the exact failure pages/functions documents. The shell fallback belongs in public/functions/.",
+      "public/_redirects is forbidden: a blanket `/* /index.html 200` answers missing hashed assets with HTML-200, which is the exact failure pages/functions documents. The shell fallback belongs in public/_worker.js.",
     );
-  const fn = path.join(REPO_ROOT, "public", "functions", "[[catchall]].js");
-  if (!fs.existsSync(fn)) problems.push("public/functions/[[catchall]].js is missing: every deep link (/team/4) will 404 instead of booting the SPA");
+  if (fs.existsSync(path.join(REPO_ROOT, "public", "functions")))
+    problems.push(
+      "public/functions/ is back: `wrangler pages deploy dist/web` does not compile a functions/ directory nested in the output dir, so it ships as a dead static file and Pages falls back to HTML-200 on missing assets. Use the deploy-root public/_worker.js (advanced mode).",
+    );
+  const fn = path.join(REPO_ROOT, "public", "_worker.js");
+  if (!fs.existsSync(fn)) problems.push("public/_worker.js is missing: without the advanced-mode Worker every deep link (/team/4) 404s and missing assets return HTML-200");
   else {
     const src = fs.readFileSync(fn, "utf8");
-    if (!/ASSETS\.fetch/.test(src)) problems.push("the catch-all must read the shell from env.ASSETS (the static asset the build just uploaded), not from a URL fetch");
-    if (!src.includes(String.raw`\.[A-Za-z0-9]+$`)) problems.push("the catch-all must keep extension-bearing misses as 404 (PWA pinning guard) while falling back for routes");
+    if (!/export default/.test(src)) problems.push("public/_worker.js must be a module Worker with a default export (advanced mode)");
+    if (!/ASSETS\.fetch/.test(src)) problems.push("the Worker must read assets/shell from env.ASSETS (the static content the build just uploaded), not from a URL fetch");
+    if (!src.includes(String.raw`\.[A-Za-z0-9]+$`)) problems.push("the Worker must keep extension-bearing misses as 404 (PWA pinning guard) while falling back for routes");
   }
   const routes = path.join(REPO_ROOT, "public", "_routes.json");
-  if (!fs.existsSync(routes)) problems.push("public/_routes.json is missing: without it the function runs in front of every hashed asset, paying a Worker invocation per immutable file");
-  else {
+  // _routes.json is ignored in advanced mode; if kept, it must at least be valid and non-contradictory.
+  if (fs.existsSync(routes)) {
     const cfg = JSON.parse(fs.readFileSync(routes, "utf8"));
-    if (!(cfg.exclude ?? []).includes("/assets/*")) problems.push("public/_routes.json must exclude /assets/* — hashed files are static content, not routes");
-    if (!(cfg.include ?? []).includes("/*")) problems.push("public/_routes.json must include /* so extensionless routes reach the fallback");
+    if (!(cfg.include ?? []).includes("/*")) problems.push("public/_routes.json exists but does not include /* — remove it or make it include /*");
   }
   const headers = path.join(REPO_ROOT, "public", "_headers");
   if (!fs.existsSync(headers)) problems.push("public/_headers is missing: hashed assets would not be immutable and sw.js would be cached past its own update");
@@ -327,7 +332,7 @@ export async function main() {
   else results.push({ label: "hook script conventions", ok: true, code: 0, out: hooks.notes.join("\n") });
 
   for (const [label, problems] of [
-    ["Pages contract (public/_redirects + _headers)", checkPagesContract()],
+    ["Pages contract (public/_worker.js + _headers)", checkPagesContract()],
     [".gitattributes", checkGitattributes()],
     ["package-lock sanity", checkNoStaleLockfileVersion()],
     ["update manifest templates", checkManifestSamples()],

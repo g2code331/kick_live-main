@@ -232,7 +232,7 @@ Still no Postgres, no Cloudflare credentials and no browser here, so `npm run ch
 `npm run test:unit` **615 pass / 0 fail** · `npm run test:integration` **99 pass / 0 fail** · `npm run typecheck` **0 errors**
 · `npm run format:check` **clean** · `npm run verify` **18/18** (it typechecks the Worker now) · `npm run worker:routes -- --check` **101/101** ·
 `npm run sql:bundle:check` **SETUP.sql is current (10 sections)** · `npm run gates` **22 pass / 0 fail / 4 skip** ·
-`npm run build:web` ships `dist/web/{functions/[[catchall]].js,_routes.json,_headers}` · `npx wrangler deploy --dry-run` **exit 0
+`npm run build:web` ships `dist/web/{_worker.js,_headers}` · `npx wrangler deploy --dry-run` **exit 0
 for both `staging` and `production`**, bindings resolve, correct `SUPABASE_PROJECT_REF` per environment.
 
 One structural note the tests now encode: `ci/workflows/` (four files, Vercel-free) is the source of truth and
@@ -504,7 +504,7 @@ kicklive-media-staging`, `kicklive-media`) — but R2 must be enabled on the acc
   [`docs/ENVIRONMENT_SETUP.md`](docs/ENVIRONMENT_SETUP.md), including the names that must match each other across
   files (`NOTIFICATION_QUEUE_NAME` vs the `[[env.*.queues]]` blocks, and the KV id after you create it).
 - `READY` — documented order: one SQL paste (`supabase/SETUP.sql`) → Worker (`wrangler deploy --env staging|production`) → web
-  (`npm run build:web` → Cloudflare Pages, `public/functions/[[catchall]].js` + `_routes.json` + `_headers` for the SPA fallback and
+  (`npm run build:web` → Cloudflare Pages, `public/_worker.js` (advanced mode) + `_headers` for the SPA fallback and
   cache contract, same zone so `/api` is same-origin) → smoke (`GET /api/health`, the Monitoring panel, one upload, one push).
   `DEPLOYMENT.md`, `DEPLOYMENT_GUIDE.md` and `DEPLOYMENT_CHECKLIST.md` describe this repository, and
   [`docs/SETUP_WALKTHROUGH.md`](docs/SETUP_WALKTHROUGH.md) is the numbered order of operations for a fresh account (a test pins that

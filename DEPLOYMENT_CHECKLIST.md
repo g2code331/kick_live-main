@@ -71,8 +71,8 @@ The project's SQL editor gets **one paste**: `supabase/SETUP.sql` (generated fro
 
 ## If something looks wrong
 
-- [ ] Deep link 404s on Pages → the SPA fallback files must ship in `dist/web` (`public/functions/`,
-      `public/_routes.json`); `npm run verify` checks the contract pre-build
+- [ ] Deep link 404s on Pages → the advanced-mode Worker must ship in `dist/web` (`public/_worker.js`,
+      `public/_headers`); `npm run verify` checks the contract pre-build
 - [ ] App boots against the wrong data → the `VITE_SUPABASE_URL`/`SUPABASE_ANON_KEY` pair in that GitHub
       environment belongs to the other project; the boot guard says so in the console
 - [ ] Queue/cron paths throw "missing secret" → STEP 1's secret list, per environment

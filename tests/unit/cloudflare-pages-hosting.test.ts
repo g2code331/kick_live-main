@@ -25,15 +25,23 @@ describe("the web host is Cloudflare Pages, not Vercel", () => {
   });
 
   it("the Pages contract files exist, with the semantics that matter", () => {
+    // Advanced mode: a single `_worker.js` at the deploy root owns routing. `wrangler pages deploy dist/web`
+    // does NOT compile a nested `functions/` directory (Cloudflare requires it at the PROJECT root, not the
+    // output dir), so a `dist/web/functions/` shipped as a dead static file and Pages' default SPA not-found
+    // handling answered a missing `/assets/*.js` with index.html at 200 — the PWA-pinning bug the probe caught.
+    assert.ok(!exists("public/functions"), "the functions/ directory is not compiled from inside the output dir; the deploy root _worker.js owns routing");
+
+    const fn = read("public/_worker.js");
+    assert.match(fn, /export default\s*\{/, "advanced mode requires a module Worker with a default export");
+    assert.match(fn, /async fetch\(/, "the Worker's entry is fetch()");
+    assert.match(fn, /ASSETS\.fetch/, "every response comes from the deployed bundle's own static storage");
+    assert.ok(fn.includes(String.raw`\.[A-Za-z0-9]+$`), "a dotted path answered with the HTML shell must become a real 404 (the PWA-pinning rule)");
+    assert.match(fn, /text\/html/, "the miss is detected by the shell's content type, since ASSETS.fetch returns 200+HTML for a miss, not a 404");
+
+    // _routes.json is ignored in advanced mode but kept valid so a future revert cannot ship a broken file.
     const routes = JSON.parse(read("public/_routes.json")) as { version: number; include: string[]; exclude: string[] };
     assert.equal(routes.version, 1, "_routes.json keeps its version field or Pages ignores it");
-    assert.ok(routes.include.includes("/*"), "routes must reach the fallback");
-    assert.ok(routes.exclude.includes("/assets/*"), "/assets/* must bypass the function: immutable content served by Pages itself, misses answered 404 by Pages, never wrapped in HTML");
-
-    const fn = read("public/functions/[[catchall]].js");
-    assert.match(fn, /export function onRequest|export async function onRequest/, "the catch-all must be a Pages Functions handler");
-    assert.match(fn, /ASSETS\.fetch/, "the shell comes from the deployed bundle's own static storage");
-    assert.ok(fn.includes(String.raw`\.[A-Za-z0-9]+$`), "dotted misses must stay 404 (the PWA-pinning rule)");
+    assert.ok(routes.include.includes("/*"), "routes must reach the Worker");
 
     const headers = read("public/_headers");
     assert.match(headers, /\/assets\/\*\s*\n\s*Cache-Control: public, max-age=31536000, immutable/, "hashed assets are immutable");

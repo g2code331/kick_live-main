@@ -123,7 +123,7 @@ fallback. The three rules the spec demands, and how they are enforced:
    returns `404` + `X-KickLive-Reason: missing-asset` and a `text/plain` body. Only extensionless
    navigation routes fall back to `index.html`, and those carry `X-KickLive-App-Shell: 1` so you can
    tell a shell-served page from a real file in the logs. Cloudflare Pages implements the same rule with
-   `public/functions/[[catchall]].js` + `public/_routes.json` (extensionless → shell, dotted misses → 404, `/assets/*` never enters the function).
+   `public/_worker.js` (Pages advanced mode: extensionless → shell, dotted misses → 404, real assets served straight from env.ASSETS).
 3. **MIME types.** `.js/.mjs → text/javascript; charset=utf-8` (ES modules are _refused_ by the
    browser without a JS type), `.webmanifest → application/manifest+json`, `.wasm →
 application/wasm`, `.svg → image/svg+xml`, unknown → `application/octet-stream` (never HTML),
@@ -481,7 +481,7 @@ slipped through it because prettier _did_ run, on the wrong input.
 | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | window paints the diagnostic page                      | `~/.config/kicklive/logs/main-YYYYMMDD.log`, grep `[kicklive:renderer]`; `EXHAUSTED` means both sources failed → check `asarUnpack` and `renderer/dist` in the asar: `npx asar list release/linux-unpacked/resources/app.asar \| head` |
 | "Failed to load module script" in the renderer console | the asset was served without a JS MIME type — `curl -sI …/assets/x.js \| grep -i content-type`                                                                                                                                         |
-| deep link 404s on the deployed web build               | host-level SPA fallback missing (`public/functions/[[catchall]].js` + `_routes.json` are the contract; a different host needs the same dotted-path exclusion)                                                                          |
+| deep link 404s on the deployed web build               | host-level SPA fallback missing (`public/_worker.js` is the contract; a different host needs the same dotted-path 404 rule)                                                                                                            |
 | `dpkg -i` fails with "unmet dependencies"              | t64 renames: compare `dpkg-deb -f release/kicklive_*.deb Depends` with `packaging/../electron-builder.yml`                                                                                                                             |
 | `dpkg -i` warns about `chrome-sandbox`                 | the setuid helper: after-install only sets it when unprivileged userns is unavailable; run `unshare --user true` to see which branch you are in                                                                                        |
 | header control stuck on `unknown`                      | feed unreachable or misconfigured: `curl -fsSL <manifest-url>`; `data-feed-configured="false"` in the DOM means the URL never got resolved                                                                                             |
