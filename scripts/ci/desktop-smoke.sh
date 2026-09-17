@@ -42,6 +42,13 @@ require_line() {
   else
     echo "  MISSING: ${what} (pattern ${pattern} not in ${log})" >&2
     tail -n 30 "$log" | sed 's/^/      | /' >&2
+    # GitHub Actions annotations are retrievable via the API even when the job-log blob is not. Name the
+    # missing assertion AND the log's tail there, so a red smoke run says why without the uploaded artifact.
+    if [ -n "${GITHUB_ACTIONS:-}" ]; then
+      local tail_enc
+      tail_enc=$(tail -n 12 "$log" | tr '\n' '~')
+      printf '::error::desktop-smoke MISSING: %s (pattern %s not in %s). tail: %s\n' "$what" "$pattern" "$log" "$tail_enc"
+    fi
     status=1
   fi
 }
@@ -51,6 +58,7 @@ forbid_line() {
   if grep -qE "$pattern" "$log"; then
     echo "  UNEXPECTED: ${what}" >&2
     grep -nE "$pattern" "$log" | head -5 | sed 's/^/      | /' >&2
+    [ -n "${GITHUB_ACTIONS:-}" ] && printf '::error::desktop-smoke UNEXPECTED: %s (pattern %s present in %s)\n' "$what" "$pattern" "$log"
     status=1
   else
     echo "  ok: no ${what}"
@@ -66,6 +74,7 @@ if run_case normal env -u KICKLIVE_SMOKE_BAD_LOAD; then
   forbid_line release/smoke-normal.log 'SMOKE_FALLBACK_OK' 'the fallback must not be used on the happy path'
 else
   echo "desktop-smoke: normal run exited $SMOKE_EXIT (expected 0)" >&2
+  [ -n "${GITHUB_ACTIONS:-}" ] && printf '::error::desktop-smoke normal run exited %s (expected 0). tail: %s\n' "$SMOKE_EXIT" "$(tail -n 12 release/smoke-normal.log 2>/dev/null | tr '\n' '~')"
   [ "$SMOKE_EXIT" = "0" ] || status=1
 fi
 
@@ -79,6 +88,7 @@ if run_case broken env KICKLIVE_SMOKE_BAD_LOAD=1 KICKLIVE_NO_HTTP_FALLBACK=0; th
   forbid_line release/smoke-broken.log 'EXHAUSTED' 'falling back must not end in exhaustion'
 else
   echo "desktop-smoke: broken-path run exited $SMOKE_EXIT (expected 0 via fallback)" >&2
+  [ -n "${GITHUB_ACTIONS:-}" ] && printf '::error::desktop-smoke broken-path run exited %s (expected 0 via fallback). tail: %s\n' "$SMOKE_EXIT" "$(tail -n 12 release/smoke-broken.log 2>/dev/null | tr '\n' '~')"
   [ "$SMOKE_EXIT" = "0" ] || status=1
 fi
 

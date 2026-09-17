@@ -154,9 +154,30 @@ jobs:
             echo "::error::wrangler pages deploy exited $rc for project '$project' (branch '$branch'). Common causes: the API token lacks the 'Cloudflare Pages: Edit' permission, the token/account do not match, or the Pages project '$project' does not exist in this account. The wrangler output above has the specifics."
             exit "$rc"
           fi
-          # Pages prints one or two *.pages.dev URLs; the last is this deployment's own.
-          url=$(grep -oE 'https://[a-z0-9.-]*pages\.dev[^ ]*' /tmp/wrangler-deploy.log | tail -1)
+          # The job log blob is unreadable from outside the runner, but ::error:: annotations are not, so
+          # surface wrangler's tail + confirm _worker.js shipped. Advanced mode only runs if wrangler
+          # reports "Compiled Worker" / attaches the Worker; if it silently uploaded _worker.js as a static
+          # asset instead, the SPA contract breaks exactly as the probe reports (no shell, asset 404s).
+          tail_out=$(tail -n 15 /tmp/wrangler-deploy.log | tr '\n' '~')
+          echo "::warning::wrangler deploy tail: ${tail_out}"
+          if grep -qiE "Compiled Worker|Worker.*bundle|_worker\.js" /tmp/wrangler-deploy.log; then
+            echo "::warning::wrangler acknowledged the advanced-mode _worker.js"
+          else
+            echo "::warning::wrangler did NOT mention _worker.js — advanced mode may not have activated"
+          fi
+          # Prefer the DEPLOYMENT-SPECIFIC url (https://<hash>.<project>.pages.dev): it is immutable and is
+          # THIS deploy, immune to the dashboard Git integration racing the branch alias on the same push.
+          url=$(grep -oE "https://[a-z0-9]+\.${project}\.pages\.dev" /tmp/wrangler-deploy.log | tail -1)
+          # Fall back to any pages.dev URL wrangler printed (older output shapes).
+          [ -n "$url" ] || url=$(grep -oE 'https://[a-z0-9.-]*pages\.dev[^ ]*' /tmp/wrangler-deploy.log | tail -1)
           [ -n "$url" ] || { echo "::error::could not parse a Pages URL from the deploy output"; exit 1; }
+          echo "::warning::probing deployment url: $url"
+          # Pages needs a moment to make a fresh deployment servable; give it up to ~30s before the probe.
+          for i in 1 2 3 4 5 6; do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' "$url/" || echo 000)
+            [ "$code" = "200" ] && break
+            echo "waiting for $url to become servable (got $code)…"; sleep 5
+          done
           echo "deployed=$url" >> "$GITHUB_ENV"
           echo "### Web deploy ($target → $project)" >> "$GITHUB_STEP_SUMMARY"
           echo "- bundle version: \`${{ needs.build.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
