@@ -121,23 +121,16 @@ function buildPlan(): LoadPlan {
   const broken = ENV["KICKLIVE_SMOKE_BAD_LOAD"] === "1" ? brandPath("definitely-not-here", "index.html") : undefined;
   const allowHttp = ENV["KICKLIVE_NO_HTTP_FALLBACK"] !== "1";
   const plan = buildLoadPlan({
-    rendererIndexPath: broken ?? rendererIndexPath(roots),
+    rendererIndexPath: rendererIndexPath(roots),
     httpOrigin: allowHttp ? `${EMBEDDED_SENTINEL}/` : undefined,
     attemptsPerSource: Number(ENV["KICKLIVE_LOAD_ATTEMPTS"] ?? 4),
-    brokenPath: undefined,
+    brokenPath: broken,
   });
-  if (broken) {
-    // Keep the real renderer reachable as the ladder's second source, so "broken load path"
-    // exercises the ladder *and* ends in a painted window.
-    plan.sources.splice(1, 0, {
-      kind: "file",
-      target: `file://${rendererIndexPath(roots)}`,
-      label: "secondary-file",
-      attempts: 2,
-      backoffMs: [100],
-      isFallback: true,
-    });
-  }
+  // NOTE: on the broken-smoke path we deliberately do NOT splice the real renderer file:// in as a
+  // secondary source. Doing so short-circuited the ladder onto file:// and never exercised the
+  // embedded loopback server — which is exactly what the smoke harness verifies must take over and
+  // paint (scripts/ci/desktop-smoke.sh: FALLBACK_ACTIVE/SMOKE_FALLBACK_OK source=http://127.0.0.1:).
+  // The ladder is therefore: broken primary (file://) -> embedded-server (http) -> offline-diagnostic.
   return plan;
 }
 
