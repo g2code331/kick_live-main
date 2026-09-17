@@ -10,7 +10,10 @@ set -uo pipefail
 cd "$(dirname "$0")/../.." || exit 1
 mkdir -p release
 BIN="release/linux-unpacked/kicklive"
-XVFB="xvfb-run -a --server-args=-screen 0 1280x800x24"
+# An ARRAY, not a string: `--server-args` takes ONE value, `-screen 0 1280x800x24`. As a plain string,
+# unquoted `$XVFB` word-splits it into `--server-args=-screen`, `0`, `1280x800x24`, so xvfb-run treats
+# `0` as the command to run and dies with `xvfb-run: 0: not found`. The array keeps the value one token.
+XVFB=(xvfb-run -a "--server-args=-screen 0 1280x800x24")
 status=0
 
 if [ ! -x "$BIN" ]; then
@@ -27,7 +30,7 @@ run_case() {
   # under xvfb we run --no-sandbox only because CI containers cannot chown the helper.
   env KICKLIVE_SMOKE=1 KICKLIVE_VERBOSE=1 KICKLIVE_LOG_FILE=0 KICKLIVE_LOAD_ATTEMPTS=4 \
     "$@" \
-    timeout 180 $XVFB "$BIN" --no-sandbox --disable-gpu --disable-dev-shm-usage \
+    timeout 180 "${XVFB[@]}" "$BIN" --no-sandbox --disable-gpu --disable-dev-shm-usage \
     --enable-logging=stderr >"$log" 2>&1
   local code=$?
   echo "  exit=${code}"
