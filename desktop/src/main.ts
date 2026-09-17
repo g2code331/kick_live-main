@@ -96,6 +96,9 @@ async function navigate(win: BrowserWindow, source: LoadAttempt): Promise<void> 
     return;
   }
   if (source.kind === "http") {
+    // source.target is already resolved to a concrete origin by runLoadPlan's `resolve` hook (see
+    // buildPlan's caller): for the embedded fallback it is http://127.0.0.1:<port>/, never the
+    // embedded://renderer/ sentinel. Guard the sentinel anyway in case a caller skips the hook.
     const origin = source.target.startsWith(EMBEDDED_SENTINEL) ? await ensureHttpFallback() : new URL(source.target).origin;
     await win.loadURL(`${origin}/`);
     return;
@@ -142,6 +145,15 @@ async function loadRenderer(win: BrowserWindow): Promise<LoadResult> {
     log: (line) => logger.line(line),
     sleep: (ms) => (SMOKE ? sleep(Math.min(ms, 25)) : sleep(ms)),
     load: (source) => navigate(win, source),
+    // Turn the embedded fallback's lazy sentinel into the concrete loopback origin *before* the
+    // ladder logs FALLBACK_ACTIVE / LOADED, so those lines (and the LoadResult) carry
+    // http://127.0.0.1:<port>/ — the URL the app really loads and the smoke harness greps for.
+    resolve: async (source) => {
+      if (source.kind === "http" && source.target.startsWith(EMBEDDED_SENTINEL)) {
+        return `${await ensureHttpFallback()}/`;
+      }
+      return source.target;
+    },
   });
   lastLoad = result;
   if (!result.ok) {

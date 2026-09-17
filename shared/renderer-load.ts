@@ -125,6 +125,14 @@ export type LoadDeps = {
   load: (attempt: LoadAttempt) => Promise<void>;
   log: (line: string) => void;
   sleep: (ms: number) => Promise<void>;
+  /**
+   * Optional: turn a source's *plan* target into the target that will actually be navigated, so the
+   * logs and the LoadResult report the real URL rather than a lazy placeholder. The embedded HTTP
+   * fallback is planned as the sentinel `embedded://renderer/` because its loopback port is only
+   * chosen when the server starts; this hook starts it and returns `http://127.0.0.1:<port>/`, which
+   * is what FALLBACK_ACTIVE / LOADED / the smoke harness expect to see. Defaults to identity.
+   */
+  resolve?: (attempt: LoadAttempt) => Promise<string> | string;
 };
 
 export type LoadResult = {
@@ -151,18 +159,34 @@ export async function runLoadPlan(plan: LoadPlan, deps: LoadDeps): Promise<LoadR
   let usedFallback = false;
 
   for (const [i, source] of plan.sources.entries()) {
+    // Resolve the *plan* target (which may be a lazy sentinel like `embedded://renderer/`) into the
+    // target that will really be navigated (`http://127.0.0.1:<port>/`), so every log line and the
+    // LoadResult carry the concrete URL. Do it BEFORE FALLBACK_ACTIVE so that line names the real
+    // origin. If resolving fails (e.g. the embedded server cannot start), treat it as a load failure
+    // for this source and fall through to the next one rather than crashing the ladder.
+    let resolvedTarget = source.target;
+    let resolveError: string | null = null;
+    if (deps.resolve) {
+      try {
+        resolvedTarget = await deps.resolve(source);
+      } catch (err) {
+        resolveError = err instanceof Error ? err.message : String(err);
+      }
+    }
+    const resolvedSource: LoadAttempt = { ...source, target: resolvedTarget };
     if (i > 0 && source.isFallback) {
       usedFallback = true;
-      deps.log(formatLog(`FALLBACK_ACTIVE source=${source.target} attempt=${attemptNumber + 1}/${total}`));
+      deps.log(formatLog(`FALLBACK_ACTIVE source=${resolvedTarget} attempt=${attemptNumber + 1}/${total}`));
     }
     for (let n = 1; n <= source.attempts; n++) {
       attemptNumber += 1;
       try {
-        await deps.load(source);
-        deps.log(formatLog(`LOADED source=${source.target} attempt=${attemptNumber}/${total}`));
+        if (resolveError) throw new Error(resolveError);
+        await deps.load(resolvedSource);
+        deps.log(formatLog(`LOADED source=${resolvedTarget} attempt=${attemptNumber}/${total}`));
         return {
           ok: true,
-          source: source.target,
+          source: resolvedTarget,
           label: source.label,
           attemptNumber,
           totalAttempts: total,
@@ -175,7 +199,7 @@ export async function runLoadPlan(plan: LoadPlan, deps: LoadDeps): Promise<LoadR
         lastError = err instanceof Error ? err.message : String(err);
         const isLastAttemptOfSource = n === source.attempts;
         const nextDelay = isLastAttemptOfSource ? 0 : delayFor(n, source.backoffMs);
-        deps.log(formatLog(`LOAD_FAILED attempt=${attemptNumber}/${total} source=${source.target} error="${lastError}" retryInMs=${nextDelay}`));
+        deps.log(formatLog(`LOAD_FAILED attempt=${attemptNumber}/${total} source=${resolvedTarget} error="${lastError}" retryInMs=${nextDelay}`));
         if (!isLastAttemptOfSource) {
           deps.log(formatLog(`RETRY attempt=${attemptNumber + 1}/${total} inMs=${nextDelay}`));
           await deps.sleep(nextDelay);
