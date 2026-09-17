@@ -357,10 +357,21 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
   smokeDone = true;
   logger.line(`SMOKE_START version=${APP_VERSION} shell=desktop platform=${process.platform}-${process.arch} title=${JSON.stringify(title())}`);
   try {
-    const probe = (await Promise.race([
-      win.webContents.executeJavaScript(SMOKE_PROBE, true) as Promise<SmokeProbeResult>,
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), SMOKE_TIMEOUT_MS)),
-    ])) as SmokeProbeResult | null;
+    // React mounts asynchronously: the renderer is an ES module (`index-<hash>.js`) that runs AFTER
+    // `ready-to-show` fires, so a single probe at load time sees an empty `#root` (rootChildren=0). Poll
+    // the DOM until React has painted (root has children AND non-trivial markup) or the timeout elapses,
+    // rather than racing the mount. The final probe is judged either way, so a genuinely broken render
+    // still fails — this only stops a false negative from firing one tick too early.
+    const deadline = Date.now() + SMOKE_TIMEOUT_MS;
+    let probe: SmokeProbeResult | null = null;
+    while (Date.now() < deadline) {
+      probe = (await Promise.race([
+        win.webContents.executeJavaScript(SMOKE_PROBE, true) as Promise<SmokeProbeResult>,
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), Math.max(0, deadline - Date.now()))),
+      ])) as SmokeProbeResult | null;
+      if (probe && probe.rootChildren >= 1 && probe.rootHtmlLength > 32) break;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
     if (!probe) {
       logger.line("SMOKE_RESULT failed reason=probe-timeout");
       app.exit(4);
