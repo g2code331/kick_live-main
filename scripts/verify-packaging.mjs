@@ -180,9 +180,19 @@ function tierA2(version, webDist) {
   return true;
 }
 
-/** A4 — every hook script in the repo parses (`bash -n`) and starts with a bash shebang. */
+/** A4 — every hook script WE SHIP parses (`bash -n`) and starts with a bash shebang. */
 function tierA4() {
-  const shellFiles = walk(REPO_ROOT, (f) => f.endsWith(".sh") && !f.includes(`${path.sep}node_modules${path.sep}`) && !f.includes(`${path.sep}.git${path.sep}`));
+  // Only our own scripts: the packaging hooks the .deb runs, and the CI shell entrypoints. The walk must
+  // NOT descend into generated/vendored trees — electron-builder downloads fpm+pleaserun into `.cache/`,
+  // whose gem ships Mustache TEMPLATES named `*.sh` (e.g. sysv/default/init.sh with `{{#prestart}}…if…`)
+  // that are not valid bash. `bash -n` on those is a guaranteed false FAIL that only appears after a real
+  // packaging run has populated the cache, which is exactly the "85 pass, 1 fail" this check produced.
+  const IGNORED_DIRS = new Set(["node_modules", ".git", ".cache", ".local", "dist", "build", "release", "coverage"]);
+  const isUnderIgnoredDir = (f) =>
+    relPath(REPO_ROOT, f)
+      .split(path.sep)
+      .some((seg) => IGNORED_DIRS.has(seg));
+  const shellFiles = walk(REPO_ROOT, (f) => f.endsWith(".sh") && !isUnderIgnoredDir(f));
   const bash = which("bash") ?? "/bin/bash";
   for (const file of shellFiles) {
     const rel = relPath(REPO_ROOT, file);

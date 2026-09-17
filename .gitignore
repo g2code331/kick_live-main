@@ -45,6 +45,11 @@ replit.nix
 # sources in it, and prettier/lint sweeps over a dev box's leftover bundles is not a signal about anything.
 .wrangler/
 
+# electron-builder's download cache (Electron binaries, fpm, 7zip, appimage). The CI workflow caches it
+# at .cache/electron and .cache/electron-builder. It vendors third-party gem templates named `*.sh` that
+# are Mustache, not bash, so it must never be committed or walked by our own shell-syntax checks.
+.cache/
+
 # ── Capacitor (Android/iOS native shells) ────────────────────────────────────
 # The native projects (android/, ios/) ARE committed — they are the app shell CI builds. But three
 # classes of generated content inside them are not, because `npx cap sync` recreates them from dist/web
