@@ -129,13 +129,16 @@ jobs:
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"
           # release.yml may still be creating the release; retry so a race does not fail the upload.
-          for i in 1 2 3 4 5 6; do
+          # The release is gated behind release.yml's Windows NSIS build (~5+ min), and this mobile
+          # job finishes in ~4 min, so the window must comfortably exceed the release's publish time:
+          # 30 * 20s = 10 min. Six attempts (2 min) lost the race every time.
+          for i in $(seq 1 30); do
             if gh release upload "$tag" "${{ steps.stage.outputs.apk }}" --clobber --repo "$GITHUB_REPOSITORY"; then
               echo "APK attached to $tag"; exit 0
             fi
-            echo "release $tag not ready yet (attempt $i); waiting…"; sleep 20
+            echo "release $tag not ready yet (attempt $i/30); waiting…"; sleep 20
           done
-          echo "::error::could not attach the APK to $tag after 6 attempts" >&2
+          echo "::error::could not attach the APK to $tag after 30 attempts (10 min)" >&2
           exit 1
 
   ios:
@@ -197,11 +200,13 @@ jobs:
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"
-          for i in 1 2 3 4 5 6; do
+          # See the Android leg: the release is gated behind release.yml's Windows NSIS build, so wait
+          # up to 10 min (30 * 20s) for it to exist before giving up. Six attempts (2 min) lost the race.
+          for i in $(seq 1 30); do
             if gh release upload "$tag" "${{ steps.stage.outputs.zip }}" --clobber --repo "$GITHUB_REPOSITORY"; then
               echo "iOS app attached to $tag"; exit 0
             fi
-            echo "release $tag not ready yet (attempt $i); waiting…"; sleep 20
+            echo "release $tag not ready yet (attempt $i/30); waiting…"; sleep 20
           done
-          echo "::error::could not attach the iOS app to $tag after 6 attempts" >&2
+          echo "::error::could not attach the iOS app to $tag after 30 attempts (10 min)" >&2
           exit 1
