@@ -118,6 +118,7 @@ export const AUDIT_ACTIONS: Record<string, { action: string; entityType: string;
   "POST /sponsorship/admin/maintenance": { action: "sponsorship.maintenance", entityType: "system" },
   // notifications — Phase 5, staff side
   "POST /admin/notifications/broadcast": { action: "notifications.broadcast", entityType: "notification_jobs" },
+  "POST /admin/notifications/direct": { action: "notifications.direct", entityType: "notification_jobs" },
   // observability — Phase 9
   "POST /observability/admin/maintenance": { action: "observability.maintenance", entityType: "system" },
   "POST /observability/admin/probe": { action: "observability.health_probe", entityType: "system" },

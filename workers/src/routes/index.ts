@@ -37,6 +37,7 @@ import {
 } from "./live.ts";
 import {
   handleNotificationBroadcast,
+  handleNotificationDirect,
   handleNotificationConfig,
   handleNotificationDiagnostics,
   handleNotificationDeviceDelete,
@@ -170,6 +171,7 @@ export const HANDLERS: Record<string, RouteHandler> = {
   "GET /notifications/config": handleNotificationConfig,
   "GET /notifications/diagnostics": handleNotificationDiagnostics,
   "POST /admin/notifications/broadcast": handleNotificationBroadcast,
+  "POST /admin/notifications/direct": handleNotificationDirect,
 
   // ── media plane on R2 (Phase 6) ────────────────────────────────────────────
   "POST /media/uploads": handleMediaUpload,

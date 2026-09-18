@@ -10,15 +10,15 @@ problems at scale, which is exactly what a scale that has not arrived yet cannot
 
 | total sites | reads | writes | rpc | `select('*')` | unbounded | files | tables | pollers |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 210 | 114 | 96 | 14 | 30 | 36 | 32 | 25 | 2 |
+| 213 | 115 | 98 | 14 | 30 | 37 | 32 | 25 | 2 |
 
 ## By table
 
 | table | reads | writes | unbounded reads | whole-row reads (not single-row) |
 | --- | --- | --- | --- | --- |
 | `matches` | 31 | 31 | 7 | 7 |
-| `teams` | 18 | 10 | 8 | 0 |
-| `players` | 16 | 5 | 6 | 7 |
+| `teams` | 19 | 10 | 9 | 0 |
+| `players` | 16 | 7 | 6 | 7 |
 | `match_events` | 8 | 10 | 6 | 6 |
 | `match_commentary` | 9 | 7 | 5 | 5 |
 | `competitions` | 9 | 4 | 2 | 2 |
@@ -50,7 +50,7 @@ problems at scale, which is exactly what a scale that has not arrived yet cannot
 | `src/pages/portals/TeamOwnerPortal.tsx` | 13 | 9 | 10 | 4 | `matches` `players` `team_news` `teams` |
 | `src/pages/portals/admin/MatchControlFull.tsx` | 4 | 13 | 0 | 0 | `match_commentary` `match_events` `match_statistics` `matches` |
 | `src/pages/portals/admin/MatchControlPro.tsx` | 5 | 9 | 2 | 2 | `match_commentary` `match_events` `match_statistics` `matches` `players` |
-| `src/pages/portals/AdminPortal.tsx` | 8 | 4 | 1 | 1 | `activity_logs` `competitions` `matches` `media` `rpc:kicklive_profile_contacts` `teams` |
+| `src/pages/portals/AdminPortal.tsx` | 9 | 4 | 2 | 1 | `activity_logs` `competitions` `matches` `media` `rpc:kicklive_profile_contacts` `teams` |
 | `src/pages/portals/admin/MatchControlDashboard.tsx` | 4 | 8 | 1 | 1 | `match_commentary` `match_events` `match_statistics` `matches` |
 | `src/pages/portals/admin/TeamDashboard.tsx` | 5 | 6 | 4 | 0 | `matches` `rpc:kicklive_profile_contacts` `teams` |
 | `src/lib/DataLoader.ts` | 11 | 0 | 0 | 0 | `competitions` `matches` `media` `players` `profiles` `teams` |
@@ -66,10 +66,10 @@ problems at scale, which is exactly what a scale that has not arrived yet cannot
 | `src/pages/portals/admin/CompetitionWizard.tsx` | 1 | 2 | 0 | 0 | `competitions` `matches` `teams` |
 | `src/pages/portals/admin/MatchCreator.tsx` | 2 | 1 | 0 | 0 | `competitions` `matches` `teams` |
 | `src/pages/portals/admin/TableStatistics.tsx` | 3 | 0 | 2 | 1 | `competitions` `matches` `teams` |
+| `src/pages/portals/admin/TeamSquadDashboard.tsx` | 1 | 2 | 0 | 0 | `players` |
+| `src/pages/portals/shared/PlayerCreator.tsx` | 1 | 2 | 1 | 0 | `players` `teams` |
 | `src/pages/portals/admin/FixturesViewer.tsx` | 0 | 2 | 0 | 0 | `matches` |
 | `src/pages/portals/admin/MatchControlOrganized.tsx` | 2 | 0 | 2 | 2 | `competitions` `matches` |
-| `src/pages/portals/admin/TeamSquadDashboard.tsx` | 1 | 1 | 0 | 0 | `players` |
-| `src/pages/portals/shared/PlayerCreator.tsx` | 1 | 1 | 1 | 0 | `players` `teams` |
 | `src/contexts/AuthContext.tsx` | 1 | 1 | 0 | 0 | `profiles` `rpc:kicklive_profile_self` |
 | `src/pages/portals/admin/CompetitionEditor.tsx` | 0 | 1 | 0 | 0 | `competitions` |
 | `src/pages/portals/admin/MatchControlComplete.tsx` | 0 | 1 | 0 | 0 | `matches` |
@@ -91,7 +91,8 @@ documented in `docs/PRODUCTION_ARCHITECTURE.md` §17, not page polling.
 
 ## Unbounded reads
 
-- `src/pages/portals/AdminPortal.tsx:57` — `teams` — id
+- `src/pages/portals/AdminPortal.tsx:47` — `teams` — id
+- `src/pages/portals/AdminPortal.tsx:59` — `teams` — id
 - `src/pages/portals/TeamOwnerPortal.tsx:321` — `matches` — id, home_team_id, away_team_id, home_score, away_score, status, start_time, minute, homeTe
 - `src/pages/portals/TeamOwnerPortal.tsx:542` — `players` — *
 - `src/pages/portals/TeamOwnerPortal.tsx:715` — `matches` — id, home_team_id, away_team_id, home_score, away_score, status, start_time, minute, homeTe
@@ -101,7 +102,7 @@ documented in `docs/PRODUCTION_ARCHITECTURE.md` §17, not page polling.
 - `src/pages/portals/TeamOwnerPortal.tsx:942` — `players` — *
 - `src/pages/portals/TeamOwnerPortal.tsx:943` — `matches` — home_team_id, away_team_id, home_score, away_score, status
 - `src/pages/portals/TeamOwnerPortal.tsx:1070` — `players` — *
-- `src/pages/portals/TeamOwnerPortal.tsx:1340` — `team_news` — *
+- `src/pages/portals/TeamOwnerPortal.tsx:1352` — `team_news` — *
 - `src/pages/portals/admin/MatchControl.tsx:126` — `match_commentary` — *
 - `src/pages/portals/admin/MatchControlDashboard.tsx:111` — `match_events` — *, player:players(name), team:teams(short_name)
 - `src/pages/portals/admin/MatchControlNew.tsx:112` — `match_events` — *
@@ -118,11 +119,11 @@ documented in `docs/PRODUCTION_ARCHITECTURE.md` §17, not page polling.
 - `src/pages/portals/admin/SeasonManagement.tsx:30` — `seasons` — *
 - `src/pages/portals/admin/TableStatistics.tsx:19` — `competitions` — *
 - `src/pages/portals/admin/TableStatistics.tsx:144` — `teams` — id, name, short_name, primary_color, secondary_color
-- `src/pages/portals/admin/TeamDashboard.tsx:61` — `teams` — id, name, short_name, city, venue, coach, primary_color, secondary_color, status, owner_id
-- `src/pages/portals/admin/TeamDashboard.tsx:66` — `teams` — id, name, short_name, city, venue, coach, primary_color, secondary_color, status, owner_id
-- `src/pages/portals/admin/TeamDashboard.tsx:71` — `teams` — id, name, short_name, city, venue, coach, primary_color, secondary_color, status, owner_id
-- `src/pages/portals/admin/TeamDashboard.tsx:97` — `teams` — id, name, short_name, city, primary_color, secondary_color, created_at
-- `src/pages/portals/shared/PlayerCreator.tsx:24` — `teams` — id, name
+- `src/pages/portals/admin/TeamDashboard.tsx:84` — `teams` — id, name, short_name, city, venue, coach, primary_color, secondary_color, status, owner_id
+- `src/pages/portals/admin/TeamDashboard.tsx:89` — `teams` — id, name, short_name, city, venue, coach, primary_color, secondary_color, status, owner_id
+- `src/pages/portals/admin/TeamDashboard.tsx:94` — `teams` — id, name, short_name, city, venue, coach, primary_color, secondary_color, status, owner_id
+- `src/pages/portals/admin/TeamDashboard.tsx:120` — `teams` — id, name, short_name, city, primary_color, secondary_color, created_at
+- `src/pages/portals/shared/PlayerCreator.tsx:29` — `teams` — id, name
 - `src/lib/MatchAutomation.ts:70` — `matches` — *
 - `src/lib/MatchAutomation.ts:157` — `match_events` — *
 - `src/lib/MatchAutomation.ts:256` — `match_events` — *

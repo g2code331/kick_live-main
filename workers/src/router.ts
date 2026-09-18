@@ -40,7 +40,7 @@ export interface RouteDef {
    * handler sets `cache-control` itself and `finalise` leaves it alone (per-object media policy).
    */
   readonly cache: CacheClass;
-  readonly phase: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+  readonly phase: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 14;
   readonly summary: string;
   /** What the handler has to enforce beyond the capability, so it is not "discovered" later. */
   readonly invariants?: string;
@@ -500,6 +500,18 @@ export const ROUTES: readonly RouteDef[] = [
     summary: "Fan-out push/notification to an audience; the only route allowed to write many rows per call.",
     invariants:
       "Audience size is capped and the send itself runs in a Queue, never in the request; `is_admin()` is re-checked inside the SQL function; over the cap the call is refused, not truncated; confirm: true is required above 1000.",
+  },
+  {
+    method: "POST",
+    pattern: "/admin/notifications/direct",
+    capability: "notifications.broadcast",
+    cache: "none",
+    rateLimit: "admin-blast",
+    phase: 14,
+    implemented: true,
+    summary: "Targeted send to a role (all managers/media/admins) or a single account; same wall as broadcast.",
+    invariants:
+      "Same cap/confirmation/queue rules as broadcast; the target narrows the phase-5 audience so a recipient's preference is still honoured; `is_admin()` re-checked inside the SQL function.",
   },
   // ── administration ────────────────────────────────────────────────────────
   {

@@ -29,6 +29,7 @@ import type { Principal } from "../middleware/auth.ts";
 const DEVICE_KEYS = ["token", "provider", "platform", "appId"] as const;
 const PREFERENCE_KEYS = ["enabled", "categories"] as const;
 const BROADCAST_KEYS = ["title", "body", "kind", "confirm"] as const;
+const DIRECT_KEYS = ["title", "body", "kind", "confirm", "audience", "role", "userId"] as const;
 const INBOX_QUERY_KEYS = ["limit", "before"] as const;
 
 /** A Postgres `code` in an RPC's jsonb answer is a business refusal; anything else is an outage. */
@@ -267,6 +268,47 @@ export async function handleNotificationBroadcast(ctx: HandlerContext): Promise<
 // field name, once in the function as the authority — and the parity test in
 // `tests/unit/phase5-notifications.test.ts` is what keeps the two honest.
 const BROADCAST_KIND_NAMES = ["announcement", "system", "news", "competition_update", "team_update"] as const;
+
+// The roles a targeted send may address. Mirrors the profiles.role vocabulary the SQL function validates.
+const TARGET_ROLE_NAMES = ["fan", "team_manager", "media", "admin"] as const;
+
+/**
+ * `POST /api/admin/notifications/direct` — a narrower send than broadcast: to one role (all managers, all
+ * media, all admins) or to a single account. Admin-gated by the same capability, re-checked inside the SQL
+ * function, counted through the exact rule delivery uses, capped, and queued — never sent in the request.
+ */
+export async function handleNotificationDirect(ctx: HandlerContext): Promise<Response> {
+  const fields = await readJsonBody(ctx.request, DIRECT_KEYS);
+  fields.assertOnlyDeclared();
+  const title = fields.prose("title", { required: true, max: 120 });
+  const body = fields.prose("body", { required: true, max: 480 });
+  const kind = fields.enumValue("kind", BROADCAST_KIND_NAMES, { required: true, label: "announcement, system, news, competition_update or team_update" });
+  const audience = fields.enumValue("audience", ["role", "user"] as const, { required: true, label: "role or user" });
+  const confirm = fields.boolean("confirm", { default: false });
+  const role = audience === "role" ? fields.enumValue("role", TARGET_ROLE_NAMES, { required: true, label: "fan, team_manager, media or admin" }) : null;
+  const userId = audience === "user" ? fields.uuid("userId", { required: true }) : null;
+  fields.throwIfInvalid();
+
+  const copyProblem = validateCopy(title ?? "", body ?? "");
+  if (copyProblem) throw new ApiError("VALIDATION_FAILED", 400, copyProblem);
+
+  const res = await rpc(ctx, "kicklive_send_targeted_notification", {
+    p_title: title,
+    p_body: body,
+    p_kind: kind,
+    p_target_type: audience,
+    p_target_role: role,
+    p_target_user: userId,
+    p_confirm: confirm ?? false,
+    p_created_by: ctx.principal.userId || null,
+  });
+  const jobId = res["jobId"] ?? res["job_id"] ?? null;
+  const audienceCount = res["audience"] ?? null;
+  if (ctx.env.NOTIFICATION_QUEUE && jobId !== null) {
+    await ctx.env.NOTIFICATION_QUEUE.send({ jobId: Number(jobId) });
+  }
+  return ok({ jobId, audience: audienceCount, status: "queued", note: "The send runs in the queue; delivery outcomes land in notification_deliveries." }, { status: 202, requestId: ctx.requestId });
+}
 
 /**
  * `GET /api/notifications/diagnostics` — admin-only, and deliberately not a list of jobs. It answers "is the

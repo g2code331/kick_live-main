@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { 
   Shield, Users, Calendar, Trophy, Newspaper, Settings, Target,
-  LogOut, TrendingUp, Activity, Plus, Menu, X, FileText
+  LogOut, TrendingUp, Activity, Plus, Menu, X, FileText, Bell
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
@@ -15,10 +15,11 @@ import SponsorshipManager from './admin/SponsorshipManager';
 import SystemMonitoring from './admin/SystemMonitoring';
 import TeamDashboard from './admin/TeamDashboard';
 import TableStatistics from './admin/TableStatistics';
+import NotificationSender from './admin/NotificationSender';
 import MultiMatchQueue from './admin/MultiMatchQueue';
 import { assetUrl } from '../../lib/media/assets';
 
-type AdminTab = 'overview' | 'users' | 'matches' | 'teams' | 'media' | 'competitions' | 'sponsorship' | 'monitoring' | 'tables' | 'settings';
+type AdminTab = 'overview' | 'users' | 'matches' | 'teams' | 'media' | 'competitions' | 'sponsorship' | 'monitoring' | 'tables' | 'notifications' | 'settings';
 
 export default function AdminPortal({ onNavigate }: { onNavigate: (page: string) => void }) {
   const { profile, signOut } = useAuth();
@@ -103,6 +104,7 @@ export default function AdminPortal({ onNavigate }: { onNavigate: (page: string)
     { id: 'sponsorship', label: 'Sponsorship', icon: <Trophy size={16} />, badge: 0 },
     { id: 'monitoring', label: 'Monitoring', icon: <Activity size={16} />, badge: 0 },
     { id: 'tables', label: 'Tables', icon: <Target size={16} />, badge: 0 },
+    { id: 'notifications', label: 'Notify', icon: <Bell size={16} />, badge: 0 },
     { id: 'settings', label: 'Settings', icon: <Settings size={16} />, badge: 0 },
   ];
 
@@ -466,6 +468,7 @@ export default function AdminPortal({ onNavigate }: { onNavigate: (page: string)
           {activeTab === 'monitoring' && <SystemMonitoring />}
           {activeTab === 'teams' && <TeamDashboard onReview={() => void refreshPendingCount()} />}
           {activeTab === 'tables' && <TableStatistics />}
+          {activeTab === 'notifications' && <NotificationSender onBack={() => setActiveTab('overview')} />}
           {activeTab === 'settings' && <AppSettingsDashboard onBack={() => setActiveTab('overview')} />}
 
         </main>
