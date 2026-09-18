@@ -49,6 +49,7 @@ import {
   handleNotificationPreferencesRead,
   handleNotificationPreferencesWrite,
 } from "./notifications.ts";
+import { handleMessageThreads, handleMessageThread, handleMessageSend, handleMessageStart, handleMessageStatus, handleMessageUnread } from "./messages.ts";
 import {
   handleMediaAssetDelete,
   handleMediaAssetRead,
@@ -172,6 +173,14 @@ export const HANDLERS: Record<string, RouteHandler> = {
   "GET /notifications/diagnostics": handleNotificationDiagnostics,
   "POST /admin/notifications/broadcast": handleNotificationBroadcast,
   "POST /admin/notifications/direct": handleNotificationDirect,
+
+  // ── messaging (Phase 15) ────────────────────────────────────────────────────
+  "GET /messages/threads": handleMessageThreads,
+  "GET /messages/threads/:id": handleMessageThread,
+  "POST /messages/send": handleMessageSend,
+  "POST /messages/start": handleMessageStart,
+  "POST /messages/threads/:id/status": handleMessageStatus,
+  "GET /messages/unread": handleMessageUnread,
 
   // ── media plane on R2 (Phase 6) ────────────────────────────────────────────
   "POST /media/uploads": handleMediaUpload,

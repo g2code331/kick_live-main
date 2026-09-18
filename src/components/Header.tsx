@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Bell, Search, LogIn, User, Shield, X, Trophy, Calendar } from 'lucide-react';
+import { Bell, Search, LogIn, User, Shield, X, Trophy, Calendar, MessageSquare } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { readOnce } from '../lib/data';
 import { globalSearch, recentResults } from '../lib/data/queries.ts';
+import { unreadCount } from '../lib/data/messages.ts';
 import { assetUrl } from "../lib/app-shell.ts";
 import UpdateControl from "../components/UpdateControl.tsx";
 
@@ -22,6 +23,27 @@ export default function Header() {
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifications, setNotifications] = useState<any[]>([]);
   const notifRef = useRef<HTMLDivElement>(null);
+
+  // Unread messages badge. Refreshed when signed in and on every navigation (each route change re-runs this
+  // effect via location.pathname), so the count follows the user around without a background timer — the
+  // query ratchet forbids adding a self-refetching poller, and a per-navigation read is the cheaper honest
+  // answer anyway.
+  const [unreadMsgs, setUnreadMsgs] = useState(0);
+  useEffect(() => {
+    if (!user) {
+      setUnreadMsgs(0);
+      return;
+    }
+    let cancelled = false;
+    void unreadCount()
+      .then((res) => {
+        if (!cancelled && res.ok) setUnreadMsgs(res.data.count ?? 0);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [user, location.pathname]);
 
   // Refresh button state
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -238,6 +260,24 @@ export default function Header() {
             >
               <Shield size={16} />
               <span className="hidden sm:inline">Admin</span>
+            </button>
+          )}
+
+          {/* Messages (signed-in only) */}
+          {user && (
+            <button
+              onClick={() => navigate('/messages')}
+              className="relative flex items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.04] text-white/70 font-bold text-sm hover:bg-white/10 hover:text-white transition-all"
+              aria-label="Messages"
+              title="Messages"
+            >
+              <MessageSquare size={16} />
+              <span className="hidden sm:inline">Messages</span>
+              {unreadMsgs > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-brand-green text-black text-[10px] font-black flex items-center justify-center">
+                  {unreadMsgs > 9 ? '9+' : unreadMsgs}
+                </span>
+              )}
             </button>
           )}
 

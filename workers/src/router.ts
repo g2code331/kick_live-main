@@ -40,7 +40,7 @@ export interface RouteDef {
    * handler sets `cache-control` itself and `finalise` leaves it alone (per-object media policy).
    */
   readonly cache: CacheClass;
-  readonly phase: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 14;
+  readonly phase: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 14 | 15;
   readonly summary: string;
   /** What the handler has to enforce beyond the capability, so it is not "discovered" later. */
   readonly invariants?: string;
@@ -512,6 +512,73 @@ export const ROUTES: readonly RouteDef[] = [
     summary: "Targeted send to a role (all managers/media/admins) or a single account; same wall as broadcast.",
     invariants:
       "Same cap/confirmation/queue rules as broadcast; the target narrows the phase-5 audience so a recipient's preference is still honoured; `is_admin()` re-checked inside the SQL function.",
+  },
+  // ── messaging (Phase 15) ────────────────────────────────────────────────────
+  {
+    method: "GET",
+    pattern: "/messages/threads",
+    capability: "messaging.use",
+    cache: "none",
+    rateLimit: "authenticated",
+    phase: 15,
+    implemented: true,
+    summary: "The caller's conversation list; staff see the whole desk.",
+    invariants: "Owner sees their own threads, staff (is_admin_or_media) see all; the SQL function derives both from auth.uid().",
+  },
+  {
+    method: "GET",
+    pattern: "/messages/threads/:id",
+    capability: "messaging.use",
+    cache: "none",
+    rateLimit: "authenticated",
+    phase: 15,
+    implemented: true,
+    summary: "One thread's messages; marks it read for the caller's side.",
+    invariants: "Access re-checked in SQL (owner or staff); reading updates only the reader's side clock.",
+  },
+  {
+    method: "POST",
+    pattern: "/messages/send",
+    capability: "messaging.use",
+    cache: "none",
+    rateLimit: "authenticated",
+    phase: 15,
+    implemented: true,
+    summary: "Send into a thread, or open one (non-staff) when threadId is null.",
+    invariants: "The sender is auth.uid(), never a body field; a closed thread refuses; staff must name an existing thread.",
+  },
+  {
+    method: "POST",
+    pattern: "/messages/start",
+    capability: "messaging.staff",
+    cache: "none",
+    rateLimit: "authenticated",
+    phase: 15,
+    implemented: true,
+    summary: "Staff-only: open a thread addressed to a chosen account.",
+    invariants: "`is_admin_or_media()` re-checked in SQL; the target account must exist.",
+  },
+  {
+    method: "POST",
+    pattern: "/messages/threads/:id/status",
+    capability: "messaging.use",
+    cache: "none",
+    rateLimit: "authenticated",
+    phase: 15,
+    implemented: true,
+    summary: "Close or reopen a thread. Owner or staff.",
+    invariants: "Access re-checked in SQL (owner or staff).",
+  },
+  {
+    method: "GET",
+    pattern: "/messages/unread",
+    capability: "messaging.use",
+    cache: "none",
+    rateLimit: "authenticated",
+    phase: 15,
+    implemented: true,
+    summary: "Unread conversation count for the badge; side-effect free.",
+    invariants: "Counts from the caller's side clock; a signed-out caller answers 0 rather than raising.",
   },
   // ── administration ────────────────────────────────────────────────────────
   {
