@@ -126,6 +126,27 @@ export async function saveNotificationPreferences(
   });
 }
 
+export interface InboxPage {
+  items: NotificationItem[];
+  unread: number;
+}
+
+/** The caller's notification inbox: their own rows plus broadcasts, newest/most-important first. */
+export async function loadInbox(limit = 20): Promise<InboxPage> {
+  const res = await api.get<InboxPage>('/notifications/inbox', { query: { limit } });
+  return res.ok ? { items: res.data.items ?? [], unread: res.data.unread ?? 0 } : { items: [], unread: 0 };
+}
+
+/** Mark one notification read. */
+export function markNotificationRead(id: number): Promise<ApiResult<unknown>> {
+  return api.post(`/notifications/inbox/${id}/read`, {});
+}
+
+/** Mark every notification read. */
+export function markAllNotificationsRead(): Promise<ApiResult<unknown>> {
+  return api.post('/notifications/inbox/read-all', {});
+}
+
 /** A device row, as the API returns it: never a token, because a settings screen has no reason to read one. */
 export interface NotificationDevice {
   id: string;

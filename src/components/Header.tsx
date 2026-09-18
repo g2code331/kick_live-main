@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { readOnce } from '../lib/data';
 import { globalSearch, recentResults } from '../lib/data/queries.ts';
 import { unreadCount } from '../lib/data/messages.ts';
+import { loadInbox, markNotificationRead, markAllNotificationsRead, type NotificationItem } from '../lib/data/notifications.ts';
 import { assetUrl } from "../lib/app-shell.ts";
 import UpdateControl from "../components/UpdateControl.tsx";
 
@@ -19,9 +20,12 @@ export default function Header() {
   const [searchOpen, setSearchOpen] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
 
-  // Notification state
+  // Notification state. Signed-in users get their real inbox (goals, staff replies, announcements the
+  // phase-5/16/17 pipeline materialised); signed-out visitors keep the recent-results fallback.
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifications, setNotifications] = useState<any[]>([]);
+  const [inboxItems, setInboxItems] = useState<NotificationItem[]>([]);
+  const [inboxUnread, setInboxUnread] = useState(0);
   const notifRef = useRef<HTMLDivElement>(null);
 
   // Unread messages badge. Refreshed when signed in and on every navigation (each route change re-runs this
@@ -89,22 +93,74 @@ export default function Header() {
     };
   }, [searchQuery]);
 
-  // Recent results, for the bell. Read once per open — the entry outlives the panel, so re-opening it in
-  // the same session is free, and `matches` invalidates it when a match finalizes.
+  // The bell's contents, filled on open. Signed in → the real inbox; signed out → recent results.
+  // Read once per open, so re-opening in the same session is cheap.
   useEffect(() => {
     if (!notifOpen) return;
     let cancelled = false;
-    void readOnce(recentResults, { hours: 24, limit: 8 })
-      .then((rows: any[] | null) => {
-        if (!cancelled) setNotifications(rows ?? []);
-      })
-      .catch(() => {
-        if (!cancelled) setNotifications([]);
-      });
+    if (user) {
+      void loadInbox(15)
+        .then((page) => {
+          if (cancelled) return;
+          setInboxItems(page.items);
+          setInboxUnread(page.unread);
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setInboxItems([]);
+            setInboxUnread(0);
+          }
+        });
+    } else {
+      void readOnce(recentResults, { hours: 24, limit: 8 })
+        .then((rows: any[] | null) => {
+          if (!cancelled) setNotifications(rows ?? []);
+        })
+        .catch(() => {
+          if (!cancelled) setNotifications([]);
+        });
+    }
     return () => {
       cancelled = true;
     };
-  }, [notifOpen]);
+  }, [notifOpen, user]);
+
+  // Keep the bell's unread dot honest without opening the panel: refresh the count on navigation while
+  // signed in (same rationale as the messages badge — no background poller, the query ratchet forbids one).
+  useEffect(() => {
+    if (!user) {
+      setInboxUnread(0);
+      return;
+    }
+    let cancelled = false;
+    void loadInbox(1)
+      .then((page) => {
+        if (!cancelled) setInboxUnread(page.unread);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [user, location.pathname]);
+
+  const handleMarkAllRead = async () => {
+    setInboxItems((items) => items.map((n) => ({ ...n, readAt: n.readAt ?? new Date().toISOString() })));
+    setInboxUnread(0);
+    await markAllNotificationsRead().catch(() => {});
+  };
+
+  const openInboxItem = (n: NotificationItem) => {
+    if (!n.readAt) {
+      setInboxItems((items) => items.map((it) => (it.id === n.id ? { ...it, readAt: new Date().toISOString() } : it)));
+      setInboxUnread((c) => Math.max(0, c - 1));
+      void markNotificationRead(n.id).catch(() => {});
+    }
+    setNotifOpen(false);
+    // Route to the most specific destination the notification carries.
+    const link = typeof n.metadata?.['link'] === 'string' ? (n.metadata['link'] as string) : null;
+    if (link) navigate(link);
+    else if (n.matchId) navigate(`/match/${n.matchId}`);
+  };
 
   const handleNotifToggle = () => {
     // Opening the panel is the refresh: the effect on `notifOpen` reads through the cache, so this costs a
@@ -214,39 +270,76 @@ export default function Header() {
           <div ref={notifRef} className="relative">
             <button onClick={handleNotifToggle} className="p-2 hover:bg-white/5 rounded-full relative">
               <Bell size={16} className={notifOpen ? 'text-brand-green' : 'text-white/60'} />
-              {notifications.length > 0 && (
+              {(user ? inboxUnread > 0 : notifications.length > 0) && (
                 <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-brand-green rounded-full"></span>
               )}
             </button>
 
             {notifOpen && (
               <div className="absolute top-full mt-2 right-0 w-80 glass rounded-2xl border border-white/10 shadow-2xl overflow-hidden z-[200]">
-                <div className="flex items-center justify-between px-5 py-3 border-b border-white/5">
-                  <p className="font-black uppercase text-xs tracking-widest">Match Results</p>
-                  <span className="text-[10px] text-white/30">Last 24 hours</span>
-                </div>
-                {notifications.length === 0 ? (
-                  <div className="p-8 text-center">
-                    <Bell size={32} className="mx-auto text-white/10 mb-3" />
-                    <p className="text-white/30 text-xs font-bold uppercase">No recent results</p>
-                  </div>
+                {user ? (
+                  <>
+                    <div className="flex items-center justify-between px-5 py-3 border-b border-white/5">
+                      <p className="font-black uppercase text-xs tracking-widest">Notifications</p>
+                      {inboxUnread > 0 && (
+                        <button onClick={() => void handleMarkAllRead()} className="text-[10px] font-bold text-brand-green hover:underline">
+                          Mark all read
+                        </button>
+                      )}
+                    </div>
+                    {inboxItems.length === 0 ? (
+                      <div className="p-8 text-center">
+                        <Bell size={32} className="mx-auto text-white/10 mb-3" />
+                        <p className="text-white/30 text-xs font-bold uppercase">You're all caught up</p>
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-white/5 max-h-80 overflow-y-auto">
+                        {inboxItems.map(n => (
+                          <button
+                            key={n.id}
+                            onClick={() => openInboxItem(n)}
+                            className={`w-full flex items-start gap-3 px-5 py-3 hover:bg-white/5 transition-colors text-left ${n.readAt ? '' : 'bg-brand-green/[0.04]'}`}
+                          >
+                            {!n.readAt && <span className="mt-1.5 w-2 h-2 rounded-full bg-brand-green shrink-0" />}
+                            <div className={`flex-1 min-w-0 ${n.readAt ? 'pl-5' : ''}`}>
+                              <p className="text-xs font-bold truncate">{n.title}</p>
+                              <p className="text-[11px] text-white/40 line-clamp-2">{n.body}</p>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
                 ) : (
-                  <div className="divide-y divide-white/5 max-h-72 overflow-y-auto">
-                    {notifications.map(n => (
-                      <button
-                        key={n.id}
-                        onClick={() => { navigate(`/match/${n.id}`); setNotifOpen(false); }}
-                        className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white/5 transition-colors text-left"
-                      >
-                        <Trophy size={14} className="text-brand-green shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-bold truncate">{n.homeTeam?.short_name} vs {n.awayTeam?.short_name}</p>
-                          <p className="text-[10px] text-white/30 uppercase font-bold">Full Time</p>
-                        </div>
-                        <span className="text-sm font-black text-brand-green">{n.home_score} – {n.away_score}</span>
-                      </button>
-                    ))}
-                  </div>
+                  <>
+                    <div className="flex items-center justify-between px-5 py-3 border-b border-white/5">
+                      <p className="font-black uppercase text-xs tracking-widest">Match Results</p>
+                      <span className="text-[10px] text-white/30">Last 24 hours</span>
+                    </div>
+                    {notifications.length === 0 ? (
+                      <div className="p-8 text-center">
+                        <Bell size={32} className="mx-auto text-white/10 mb-3" />
+                        <p className="text-white/30 text-xs font-bold uppercase">No recent results</p>
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-white/5 max-h-72 overflow-y-auto">
+                        {notifications.map(n => (
+                          <button
+                            key={n.id}
+                            onClick={() => { navigate(`/match/${n.id}`); setNotifOpen(false); }}
+                            className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white/5 transition-colors text-left"
+                          >
+                            <Trophy size={14} className="text-brand-green shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-bold truncate">{n.homeTeam?.short_name} vs {n.awayTeam?.short_name}</p>
+                              <p className="text-[10px] text-white/30 uppercase font-bold">Full Time</p>
+                            </div>
+                            <span className="text-sm font-black text-brand-green">{n.home_score} – {n.away_score}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             )}
