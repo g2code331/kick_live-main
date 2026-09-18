@@ -51,7 +51,15 @@ export function webChannel(): Channel {
 }
 
 export function webManifestUrl(): string {
-  return resolveManifestUrl({ env: import.meta.env as unknown as Record<string, string | undefined>, channel: webChannel() });
+  const env = import.meta.env as unknown as Record<string, string | undefined>;
+  // An explicit override (env) always wins — that is how a self-hosted deployment repoints the feed.
+  const explicit = env["KICKLIVE_UPDATE_MANIFEST_URL"] ?? env["VITE_UPDATE_MANIFEST_URL"] ?? "";
+  if (explicit.trim()) return resolveManifestUrl({ env, channel: webChannel() });
+  // Default for the browser: the same-origin Worker proxy (public/_worker.js). A direct fetch of the
+  // GitHub release asset is blocked by CORS (its S3 redirect target sends no Access-Control-Allow-Origin),
+  // so the PWA must read the manifest from its own origin. Desktop keeps the GitHub URL (no CORS there).
+  const channel = webChannel();
+  return channel === "stable" ? "/updates/manifest" : `/updates/manifest?channel=${channel}`;
 }
 
 export function isDesktopShell(): boolean {
