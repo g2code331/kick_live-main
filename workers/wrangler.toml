@@ -184,8 +184,15 @@ APP_ENV = "staging"
 SUPABASE_URL = "https://opvkvbabryuipzwcanrv.supabase.co"
 SUPABASE_PROJECT_REF = "opvkvbabryuipzwcanrv"
 SUPABASE_ANON_KEY = "sb_publishable_PywK8NqUvS4KfLv0TktpVg_LUaXXBm6"
-# The staging SPA origin, plus the Arena/preview hosts used during review, each spelled exactly.
-ALLOWED_ORIGINS = "https://staging.kicklive.football"
+# The staging SPA origins, each spelled exactly: the custom domain AND the raw Pages host, because the
+# staging build is served from `kicklive-web-staging.pages.dev` (no zone route to /api there), so the SPA
+# calls the Worker cross-origin at WEB_API_ORIGIN below and that page origin must be allowed here.
+ALLOWED_ORIGINS = "https://staging.kicklive.football,https://kicklive-web-staging.pages.dev"
+# The deployed staging Worker's absolute origin. Baked into the staging web bundle as VITE_API_BASE_URL by
+# scripts/build-web-env.mjs so the pages.dev host reaches the API directly (the custom domain does not need
+# it — it routes /api same-origin). CONFIRM the account subdomain matches `wrangler deploy`'s printed URL;
+# if it differs, change it here and run `npm run web:env` before deploying.
+WEB_API_ORIGIN = "https://kicklive-api-staging.g2code332.workers.dev"
 # Named environments do not inherit [vars], and MEDIA_MAX_BYTES lives here only so the ceiling is
 # explicit: without this line the environment runs the built-in default (25 MiB) and wrangler warns
 # on every deploy. Change media sizes per environment, not at the top, or the change lands in dev only.
