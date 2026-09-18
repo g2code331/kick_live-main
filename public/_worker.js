@@ -68,6 +68,44 @@ async function serveUpdateManifest(request) {
   }
 }
 
+/**
+ * Same-origin `/api/*` proxy, active ONLY when `env.API_ORIGIN` is set on the Pages project.
+ *
+ * On the custom domain the API and the SPA share a zone, so `kicklive.football/api/*` is routed to the
+ * Worker by a zone route and the app's same-origin `/api` calls just work. The raw `<project>.pages.dev`
+ * host has no such route, so `/api/observability/*` used to fall through to `env.ASSETS.fetch` and come
+ * back as the index.html shell (HTML, 200) — which the client correctly rejects as an "unexpected body
+ * shape" (DEPENDENCY_FAILED), painting every admin panel red. Setting `API_ORIGIN` to the deployed API
+ * Worker's absolute origin (e.g. https://kicklive-api-staging.<subdomain>.workers.dev) lets this host
+ * relay `/api/*` there, same-origin to the browser, with WebSocket upgrades passed straight through.
+ *
+ * It is a var and not hard-wired because the production custom domain does not need it (and must not
+ * double-hop), and each Pages project points at its own API environment.
+ */
+async function proxyApi(request, env) {
+  const origin = (env.API_ORIGIN || "").replace(/\/+$/, "");
+  const incoming = new URL(request.url);
+  const target = origin + incoming.pathname + incoming.search;
+
+  // A WebSocket upgrade (GET /api/live/matches/:id) cannot be re-created from a plain Request clone: forward
+  // the original request object so Cloudflare carries the Upgrade handshake and the returned socket through.
+  if (request.headers.get("upgrade")?.toLowerCase() === "websocket") {
+    return fetch(new Request(target, request));
+  }
+
+  const headers = new Headers(request.headers);
+  // Let the upstream Worker see the browser-facing origin/host so CORS + absolute-URL building stay correct.
+  headers.set("x-forwarded-host", incoming.host);
+  headers.set("x-forwarded-proto", incoming.protocol.replace(":", ""));
+  const init = {
+    method: request.method,
+    headers,
+    redirect: "manual",
+    body: request.method === "GET" || request.method === "HEAD" ? undefined : request.body,
+  };
+  return fetch(target, init);
+}
+
 export default {
   async fetch(request, env) {
     const path = new URL(request.url).pathname;
@@ -76,6 +114,12 @@ export default {
     // release asset directly (S3 sends no CORS header), so the Worker relays it here.
     if (path === "/updates/manifest" || path === "/updates/manifest.json") {
       return serveUpdateManifest(request);
+    }
+
+    // `/api/*` → the API Worker, but only on hosts that carry no zone route of their own (see proxyApi).
+    // Without API_ORIGIN this branch is skipped and `/api` behaves as before (custom-domain zone route).
+    if ((path === "/api" || path.startsWith("/api/")) && env.API_ORIGIN) {
+      return proxyApi(request, env);
     }
 
     const hasExtension = /\.[A-Za-z0-9]+$/.test(path) && path !== "/";

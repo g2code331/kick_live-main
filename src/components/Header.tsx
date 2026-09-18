@@ -103,7 +103,8 @@ export default function Header() {
 
   return (
     <header className="sticky top-0 z-50 glass border-b border-white/10">
-      <div className="container mx-auto px-4 py-3 relative flex items-center justify-between">
+      {/* Fixed bar height: the wordmark grows inside this box, but the header itself never changes height. */}
+      <div className="container mx-auto px-4 h-[4.75rem] relative flex items-center justify-between">
         {/* Wordmark, doubling as the refresh control (no spin, no glow) */}
         <button
           onClick={handleRefresh}
@@ -114,7 +115,7 @@ export default function Header() {
           <img
             src={assetUrl("brand/wordmark-312.png")}
             alt="KickLive"
-            className="relative h-9 sm:h-11 md:h-[3.25rem] w-auto object-contain transition-opacity duration-300 group-hover:opacity-80 group-active:opacity-60"
+            className="relative h-11 sm:h-14 md:h-[4.25rem] w-auto object-contain transition-opacity duration-300 group-hover:opacity-80 group-active:opacity-60"
           />
           {/* Modern refresh affordance: a thin indeterminate bar, only while refreshing */}
           <span
