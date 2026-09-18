@@ -16,6 +16,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
 /**
  * `required` means: without it the artifact is wrong, not just unpatched. `optional` means a job
@@ -68,7 +69,11 @@ const SECRETS = [
   // is the thing that was supposed to stop it. See docs/R2_MEDIA_ARCHITECTURE.md §2.
 ];
 
-const REPO_ROOT_FOR_SCAN = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+// fileURLToPath, NOT new URL(...).pathname: on Windows the raw pathname is `/C:/a/b/scripts` — a
+// leading slash plus a drive letter — which fs cannot resolve, so reading .env.production/.staging
+// threw and both VITE_SUPABASE_* fell back to MISSING, failing ONLY the windows release leg (Linux
+// jobs got a valid POSIX pathname and passed). fileURLToPath does the platform-correct conversion.
+const REPO_ROOT_FOR_SCAN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const args = process.argv.slice(2);
 const asJson = args.includes("--json");
