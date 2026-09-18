@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { User, Save, Loader2 } from 'lucide-react';
+import { User, Save, Loader2, CheckCircle2 } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
 import AdminPageShell from '../admin/AdminPageShell';
+import EntityImageUploader from '../../../components/EntityImageUploader';
 
 interface PlayerCreatorProps {
   /** Return to the previous screen (replaces the old modal onClose). */
@@ -12,6 +13,9 @@ interface PlayerCreatorProps {
 export default function PlayerCreator({ onBack, teamId }: PlayerCreatorProps) {
   const [loading, setLoading] = useState(false);
   const [teams, setTeams] = useState<any[]>([]);
+  // After a successful insert we keep the new player so a photo can be attached (uploads need the row id).
+  const [createdPlayer, setCreatedPlayer] = useState<{ id: number; name: string } | null>(null);
+  const [photoUrl, setPhotoUrl] = useState('');
   const [formData, setFormData] = useState({
     name: '',
     position: 'Forward',
@@ -32,7 +36,7 @@ export default function PlayerCreator({ onBack, teamId }: PlayerCreatorProps) {
     e.preventDefault();
     setLoading(true);
     try {
-      const { error } = await supabase.from('players').insert([{
+      const { data, error } = await supabase.from('players').insert([{
         name: formData.name,
         position: formData.position,
         number: parseInt(formData.number as string),
@@ -40,17 +44,62 @@ export default function PlayerCreator({ onBack, teamId }: PlayerCreatorProps) {
         nationality: formData.nationality,
         goals: 0,
         assists: 0
-      }]);
+      }]).select('id, name').single();
 
       if (error) throw error;
-      alert('Player created successfully!');
-      onBack();
+      // Move to the "add a photo" step instead of leaving immediately — a new player can now get a picture.
+      if (data) setCreatedPlayer({ id: data.id as number, name: data.name as string });
     } catch (err: any) {
       alert('Error: ' + err.message);
     } finally {
       setLoading(false);
     }
   };
+
+  const savePhoto = async () => {
+    if (!createdPlayer || !photoUrl) { onBack(); return; }
+    await supabase.from('players').update({ photo_url: photoUrl }).eq('id', createdPlayer.id);
+    onBack();
+  };
+
+  // Step 2 — the player exists; offer a photo before returning to the squad.
+  if (createdPlayer) {
+    return (
+      <AdminPageShell
+        title={<><span className="text-brand-green">{createdPlayer.name}</span> added</>}
+        subtitle="Add a photo (optional)"
+        icon={<CheckCircle2 size={22} />}
+        onBack={onBack}
+        backLabel="Skip"
+      >
+        <div className="glass rounded-[2rem] border border-white/10 p-6 lg:p-8 max-w-xl space-y-6">
+          <div className="flex items-center gap-3 text-brand-green">
+            <CheckCircle2 size={20} />
+            <p className="font-black uppercase text-sm tracking-widest">Player registered</p>
+          </div>
+          <EntityImageUploader
+            kind="players"
+            entityId={createdPlayer.id}
+            currentUrl={photoUrl}
+            label="Player Photo"
+            shape="circle"
+            placeholder={createdPlayer.name?.[0] || '?'}
+            onUploaded={(url) => setPhotoUrl(url)}
+            onError={(m) => alert(m)}
+          />
+          <div className="flex gap-3 pt-2">
+            <button onClick={onBack} className="flex-1 py-3 rounded-xl bg-white/5 font-black uppercase text-sm tracking-widest hover:bg-white/10">
+              Skip
+            </button>
+            <button onClick={savePhoto} disabled={!photoUrl}
+              className="flex-1 py-3 rounded-xl gradient-green text-black font-black uppercase text-sm tracking-widest flex items-center justify-center gap-2 disabled:opacity-50">
+              <Save size={16} /> Save Photo
+            </button>
+          </div>
+        </div>
+      </AdminPageShell>
+    );
+  }
 
   return (
     <AdminPageShell

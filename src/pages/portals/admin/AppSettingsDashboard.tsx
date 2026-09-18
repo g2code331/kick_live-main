@@ -7,6 +7,7 @@ import AdminPageShell from './AdminPageShell';
 import SeasonManagement from './SeasonManagement';
 import type { AdminSettings } from '../../../lib/admin-settings';
 import { DEFAULT_ADMIN_SETTINGS, loadAdminSettings, saveAdminSettings } from '../../../lib/admin-settings';
+import { applyTheme } from '../../../lib/theme';
 
 interface AppSettingsDashboardProps {
   /** Return to the tab the user came from (replaces the old modal onClose). */
@@ -64,6 +65,14 @@ export default function AppSettingsDashboard({ onBack }: AppSettingsDashboardPro
   useEffect(() => {
     setSaved(loadAdminSettings());
   }, []);
+
+  // Live preview: presentation settings (theme/compact/animations) apply to the whole app the instant
+  // they change here, so the toggle is visibly real. If the admin leaves without pressing Apply, the
+  // cleanup restores whatever is actually persisted, so a preview never silently sticks.
+  useEffect(() => {
+    applyTheme(settings);
+    return () => applyTheme(loadAdminSettings());
+  }, [settings]);
 
   const dirty = JSON.stringify(settings) !== JSON.stringify(saved);
 
@@ -215,7 +224,7 @@ export default function AppSettingsDashboard({ onBack }: AppSettingsDashboardPro
                   <Moon size={14} /> Dark
                 </button>
               </div>
-              <p className="text-[10px] text-white/20 mt-3">Dark is the shipped theme; light is a preview.</p>
+              <p className="text-[10px] text-white/20 mt-3">Applies across the app instantly; press Apply to keep it.</p>
             </div>
 
             <div className="glass rounded-[2rem] p-6 lg:p-8 border border-white/5">

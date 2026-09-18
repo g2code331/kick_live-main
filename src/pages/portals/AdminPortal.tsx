@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { 
   Shield, Users, Calendar, Trophy, Newspaper, Settings, Target,
   LogOut, TrendingUp, Activity, Plus, Menu, X, FileText
@@ -39,6 +39,14 @@ export default function AdminPortal({ onNavigate }: { onNavigate: (page: string)
   const [subScreen, setSubScreen] = useState<null | 'wizard' | 'editor' | 'fixtures' | 'media'>(null);
   const [selectedCompetition, setSelectedCompetition] = useState<any>(null);
 
+  // Re-checkable on demand: the pending-team count feeds both the sidebar badge and the overview banner,
+  // so a stale value after an approve/reject leaves a phantom "awaiting approval" notice (bug #4). It is
+  // refreshed here whenever the overview is shown and by TeamDashboard's onReview callback after a decision.
+  const refreshPendingCount = useCallback(async () => {
+    const pending = await supabase.from('teams').select('id', { count: 'exact', head: true }).eq('status', 'pending');
+    setPendingTeamsCount(pending.count || 0);
+  }, []);
+
   useEffect(() => {
     async function loadAdminData() {
       try {
@@ -71,6 +79,12 @@ export default function AdminPortal({ onNavigate }: { onNavigate: (page: string)
     }
     loadAdminData();
   }, []);
+
+  // Whenever the admin lands back on the overview, re-verify the pending count so the banner cannot
+  // outlive the queue it describes.
+  useEffect(() => {
+    if (activeTab === 'overview') void refreshPendingCount();
+  }, [activeTab, refreshPendingCount]);
 
   const handleSignOut = async () => {
     await signOut();
@@ -450,7 +464,7 @@ export default function AdminPortal({ onNavigate }: { onNavigate: (page: string)
           {activeTab === 'users' && <UserManagement />}
           {activeTab === 'sponsorship' && <SponsorshipManager />}
           {activeTab === 'monitoring' && <SystemMonitoring />}
-          {activeTab === 'teams' && <TeamDashboard />}
+          {activeTab === 'teams' && <TeamDashboard onReview={() => void refreshPendingCount()} />}
           {activeTab === 'tables' && <TableStatistics />}
           {activeTab === 'settings' && <AppSettingsDashboard onBack={() => setActiveTab('overview')} />}
 

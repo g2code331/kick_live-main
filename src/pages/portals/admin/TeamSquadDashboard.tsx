@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, Users, Plus, Edit, Trash2, Search, Filter, Activity, Trophy, Star } from 'lucide-react';
+import { ArrowLeft, Users, Plus, Edit, Trash2, Search, Filter, Activity, Trophy, Star, Save, Loader2 } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
 import PlayerCreator from '../shared/PlayerCreator';
+import EntityImageUploader from '../../../components/EntityImageUploader';
+import { assetUrl } from '../../../lib/media/assets';
 
 interface TeamSquadDashboardProps {
   team: any;
@@ -16,6 +18,8 @@ export default function TeamSquadDashboard({ team, onBack }: TeamSquadDashboardP
   const [showPlayerCreator, setShowPlayerCreator] = useState(false);
   const [selectedPlayer, setSelectedPlayer] = useState<any>(null);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [editForm, setEditForm] = useState<any>(null);
+  const [savingPlayer, setSavingPlayer] = useState(false);
 
   useEffect(() => {
     loadPlayers();
@@ -27,7 +31,7 @@ export default function TeamSquadDashboard({ team, onBack }: TeamSquadDashboardP
       // Only fetch necessary columns, limit to 100 players
       const { data } = await supabase
         .from('players')
-        .select('id, name, number, position, nationality, goals, assists, created_at, team_id')
+        .select('id, name, number, position, nationality, goals, assists, created_at, team_id, photo_url')
         .eq('team_id', team.id)
         .order('number')
         .limit(100);
@@ -53,7 +57,39 @@ export default function TeamSquadDashboard({ team, onBack }: TeamSquadDashboardP
 
   const handleEditPlayer = (player: any) => {
     setSelectedPlayer(player);
+    setEditForm({
+      name: player.name || '',
+      number: player.number ?? '',
+      position: player.position || '',
+      nationality: player.nationality || '',
+      goals: player.goals ?? 0,
+      assists: player.assists ?? 0,
+      photo_url: player.photo_url || '',
+    });
     setShowEditModal(true);
+  };
+
+  const handleSavePlayer = async () => {
+    if (!selectedPlayer || !editForm) return;
+    setSavingPlayer(true);
+    try {
+      const { error } = await supabase.from('players').update({
+        name: editForm.name,
+        number: parseInt(String(editForm.number)) || 0,
+        position: editForm.position,
+        nationality: editForm.nationality,
+        goals: parseInt(String(editForm.goals)) || 0,
+        assists: parseInt(String(editForm.assists)) || 0,
+        photo_url: editForm.photo_url || null,
+      }).eq('id', selectedPlayer.id);
+      if (error) throw error;
+      setShowEditModal(false);
+      loadPlayers();
+    } catch (err: any) {
+      alert('Error: ' + err.message);
+    } finally {
+      setSavingPlayer(false);
+    }
   };
 
   const filteredPlayers = players.filter(player => {
@@ -201,8 +237,15 @@ export default function TeamSquadDashboard({ team, onBack }: TeamSquadDashboardP
               <div key={player.id} className="glass rounded-[2rem] p-6 border border-white/10 hover:border-brand-green/30 transition-all group">
                 <div className="flex items-start justify-between mb-6">
                   <div className="flex items-center gap-4">
-                    <div className="w-20 h-20 rounded-2xl bg-white/5 flex items-center justify-center text-4xl font-black italic">
-                      {player.number}
+                    <div className="w-20 h-20 rounded-2xl bg-white/5 flex items-center justify-center text-4xl font-black italic overflow-hidden relative shrink-0">
+                      {player.photo_url ? (
+                        <>
+                          <img src={assetUrl(player.photo_url) ?? player.photo_url} alt="" className="w-full h-full object-cover" />
+                          <span className="absolute bottom-0 right-0 px-1.5 py-0.5 bg-black/70 text-white text-xs font-black rounded-tl-lg">{player.number}</span>
+                        </>
+                      ) : (
+                        player.number
+                      )}
                     </div>
                     <div>
                       <h3 className="text-xl font-black italic uppercase">{player.name}</h3>
@@ -259,8 +302,8 @@ export default function TeamSquadDashboard({ team, onBack }: TeamSquadDashboardP
         )}
       </div>
 
-      {/* Edit Player — full-screen overlay-free panel */}
-      {showEditModal && selectedPlayer && (
+      {/* Edit Player — full-screen page (no overlay card) */}
+      {showEditModal && selectedPlayer && editForm && (
         <div className="fixed inset-0 z-[60] bg-[#0B0E13] overflow-y-auto">
           <div className="max-w-2xl mx-auto">
             <div className="p-6 border-b border-white/10 flex items-center justify-between sticky top-0 bg-[#0B0E13] z-10">
@@ -269,14 +312,29 @@ export default function TeamSquadDashboard({ team, onBack }: TeamSquadDashboardP
                 <h2 className="text-xl font-black uppercase">Edit Player</h2>
               </div>
             </div>
-            
-            <div className="p-6 space-y-4">
+
+            <div className="p-6 space-y-5">
+              {/* Player photo */}
+              <div className="glass rounded-2xl p-4 border border-white/5">
+                <EntityImageUploader
+                  kind="players"
+                  entityId={selectedPlayer.id}
+                  currentUrl={editForm.photo_url}
+                  label="Player Photo"
+                  shape="circle"
+                  placeholder={editForm.name?.[0] || '?'}
+                  onUploaded={(url) => setEditForm((prev: any) => ({ ...prev, photo_url: url }))}
+                  onError={(m) => alert(m)}
+                />
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-[10px] font-black uppercase text-white/40 mb-2 block">Player Name</label>
                   <input
                     type="text"
-                    defaultValue={selectedPlayer.name}
+                    value={editForm.name}
+                    onChange={e => setEditForm({ ...editForm, name: e.target.value })}
                     className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-brand-green/50"
                   />
                 </div>
@@ -284,7 +342,8 @@ export default function TeamSquadDashboard({ team, onBack }: TeamSquadDashboardP
                   <label className="text-[10px] font-black uppercase text-white/40 mb-2 block">Jersey Number</label>
                   <input
                     type="number"
-                    defaultValue={selectedPlayer.number}
+                    value={editForm.number}
+                    onChange={e => setEditForm({ ...editForm, number: e.target.value })}
                     className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-brand-green/50"
                   />
                 </div>
@@ -293,17 +352,20 @@ export default function TeamSquadDashboard({ team, onBack }: TeamSquadDashboardP
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-[10px] font-black uppercase text-white/40 mb-2 block">Position</label>
-                  <input
-                    type="text"
-                    defaultValue={selectedPlayer.position}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-brand-green/50"
-                  />
+                  <select
+                    value={editForm.position}
+                    onChange={e => setEditForm({ ...editForm, position: e.target.value })}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-brand-green/50 appearance-none"
+                  >
+                    {['Goalkeeper', 'Defender', 'Midfielder', 'Forward'].map(p => <option key={p}>{p}</option>)}
+                  </select>
                 </div>
                 <div>
                   <label className="text-[10px] font-black uppercase text-white/40 mb-2 block">Nationality</label>
                   <input
                     type="text"
-                    defaultValue={selectedPlayer.nationality}
+                    value={editForm.nationality}
+                    onChange={e => setEditForm({ ...editForm, nationality: e.target.value })}
                     className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-brand-green/50"
                   />
                 </div>
@@ -314,7 +376,8 @@ export default function TeamSquadDashboard({ team, onBack }: TeamSquadDashboardP
                   <label className="text-[10px] font-black uppercase text-white/40 mb-2 block">Goals</label>
                   <input
                     type="number"
-                    defaultValue={selectedPlayer.goals || 0}
+                    value={editForm.goals}
+                    onChange={e => setEditForm({ ...editForm, goals: e.target.value })}
                     className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-brand-green/50"
                   />
                 </div>
@@ -322,7 +385,8 @@ export default function TeamSquadDashboard({ team, onBack }: TeamSquadDashboardP
                   <label className="text-[10px] font-black uppercase text-white/40 mb-2 block">Assists</label>
                   <input
                     type="number"
-                    defaultValue={selectedPlayer.assists || 0}
+                    value={editForm.assists}
+                    onChange={e => setEditForm({ ...editForm, assists: e.target.value })}
                     className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-brand-green/50"
                   />
                 </div>
@@ -337,13 +401,11 @@ export default function TeamSquadDashboard({ team, onBack }: TeamSquadDashboardP
                 Cancel
               </button>
               <button
-                onClick={() => {
-                  alert('Edit functionality coming soon!');
-                  setShowEditModal(false);
-                }}
-                className="flex-1 py-3 rounded-xl gradient-green text-black font-black uppercase tracking-widest flex items-center justify-center gap-2"
+                onClick={handleSavePlayer}
+                disabled={savingPlayer}
+                className="flex-1 py-3 rounded-xl gradient-green text-black font-black uppercase tracking-widest flex items-center justify-center gap-2 disabled:opacity-50"
               >
-                <Edit size={16} /> Save Changes
+                {savingPlayer ? <Loader2 size={16} className="animate-spin" /> : <><Save size={16} /> Save Changes</>}
               </button>
             </div>
           </div>

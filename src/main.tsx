@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import "./index.css";
 
 import { APP_VERSION, SHELL } from "./lib/app-shell.ts";
+import { startThemeSync } from "./lib/theme.ts";
 
 /**
  * Stamp the build identity into the document before rendering.
@@ -86,6 +87,7 @@ async function boot(): Promise<void> {
 }
 
 stampDocumentIdentity();
+startThemeSync();
 registerServiceWorker();
 console.info(`[kicklive] boot shell=${SHELL} version=${APP_VERSION}`);
 void boot();

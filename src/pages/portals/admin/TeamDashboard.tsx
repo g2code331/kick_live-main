@@ -7,6 +7,28 @@ import {
 import AdminPageShell from './AdminPageShell';
 import { supabase } from '../../../lib/supabase';
 import TeamSquadDashboard from './TeamSquadDashboard';
+import EntityImageUploader from '../../../components/EntityImageUploader';
+import { assetUrl } from '../../../lib/media/assets';
+
+/**
+ * The club crest as it appears in a list: the uploaded `logo_url` if there is one, otherwise the club's
+ * colour gradient with its initial — so every team shows *something*, and a team with an image shows it.
+ */
+function TeamCrest({ team, size = 56, className = '', muted = false }: { team: any; size?: number; className?: string; muted?: boolean }) {
+  const url = assetUrl(team.logo_url) ?? (team.logo_url || null);
+  const box = `rounded-2xl shrink-0 border border-white/10 overflow-hidden ${muted ? 'opacity-50' : ''} ${className}`;
+  if (url) {
+    return <img src={url} alt="" className={`${box} object-cover`} style={{ width: size, height: size }} />;
+  }
+  return (
+    <div
+      className={`${box} flex items-center justify-center font-black italic`}
+      style={{ width: size, height: size, fontSize: size * 0.4, background: `linear-gradient(135deg, ${team.primary_color || '#39FF14'}, ${team.secondary_color || '#000'})` }}
+    >
+      {team.short_name?.[0] || '?'}
+    </div>
+  );
+}
 
 // ─── Inline toast ─────────────────────────────────────────────────────────────
 function useMsg() {
@@ -34,7 +56,7 @@ function InlineMsg({ msg }: { msg: { type: string; text: string } | null }) {
 
 type SubTab = 'active' | 'pending' | 'rejected';
 
-export default function TeamDashboard() {
+export default function TeamDashboard({ onReview }: { onReview?: () => void } = {}) {
   const [teams, setTeams] = useState<any[]>([]);
   const [pendingTeams, setPendingTeams] = useState<any[]>([]);
   const [rejectedTeams, setRejectedTeams] = useState<any[]>([]);
@@ -48,7 +70,7 @@ export default function TeamDashboard() {
   const [selectedTeam, setSelectedTeam] = useState<any>(null);
   const [editForm, setEditForm] = useState({
     name: '', short_name: '', city: '', venue: '', coach: '',
-    primary_color: '#39FF14', secondary_color: '#000000'
+    primary_color: '#39FF14', secondary_color: '#000000', logo_url: ''
   });
   const [showSquadDashboard, setShowSquadDashboard] = useState(false);
   const [showMatchesModal, setShowMatchesModal] = useState(false);
@@ -60,17 +82,17 @@ export default function TeamDashboard() {
   const [allTeams, pending, rejected] = await Promise.all([
     supabase
       .from('teams')
-      .select('id, name, short_name, city, venue, coach, primary_color, secondary_color, status, owner_id, created_at')
+      .select('id, name, short_name, city, venue, coach, primary_color, secondary_color, status, owner_id, created_at, logo_url')
       .eq('status', 'active')
       .order('name'),
     supabase
       .from('teams')
-      .select('id, name, short_name, city, venue, coach, primary_color, secondary_color, status, owner_id, created_at')
+      .select('id, name, short_name, city, venue, coach, primary_color, secondary_color, status, owner_id, created_at, logo_url')
       .eq('status', 'pending')
       .order('created_at', { ascending: false }),
     supabase
       .from('teams')
-      .select('id, name, short_name, city, venue, coach, primary_color, secondary_color, status, owner_id, created_at')
+      .select('id, name, short_name, city, venue, coach, primary_color, secondary_color, status, owner_id, created_at, logo_url')
       .eq('status', 'rejected')
       .order('created_at', { ascending: false }),
   ]);
@@ -124,6 +146,7 @@ export default function TeamDashboard() {
       if (err) throw err;
       success(`✓ "${team.name}" approved — team manager now has full access.`);
       fetchTeams();
+      onReview?.();
     } catch (err: any) { error('Approve failed: ' + err.message); }
     finally { setApproving(null); }
   };
@@ -135,6 +158,7 @@ export default function TeamDashboard() {
       if (err) throw err;
       success(`"${team.name}" rejected.`);
       fetchTeams();
+      onReview?.();
     } catch (err: any) { error('Reject failed: ' + err.message); }
     finally { setApproving(null); }
   };
@@ -146,6 +170,7 @@ export default function TeamDashboard() {
       if (err) throw err;
       success(`"${team.name}" moved back to Pending Approval for review.`);
       fetchTeams();
+      onReview?.();
     } catch (err: any) { error('Restore failed: ' + err.message); }
     finally { setRestoring(null); }
   };
@@ -158,6 +183,7 @@ export default function TeamDashboard() {
       city: team.city || '', venue: team.venue || '', coach: team.coach || '',
       primary_color: team.primary_color || '#39FF14',
       secondary_color: team.secondary_color || '#000000',
+      logo_url: team.logo_url || '',
     });
     setShowEditModal(true);
   };
@@ -207,14 +233,33 @@ export default function TeamDashboard() {
           <div className="p-6 lg:p-8 space-y-4">
             {/* Live preview */}
             <div className="glass rounded-xl p-4 border border-white/5 flex items-center gap-3 mb-2">
-              <div className="w-12 h-12 rounded-xl flex items-center justify-center text-xl font-black"
-                style={{ background: `linear-gradient(135deg, ${editForm.primary_color}, ${editForm.secondary_color})` }}>
-                {editForm.short_name?.[0] || '?'}
-              </div>
+              {editForm.logo_url ? (
+                <img src={assetUrl(editForm.logo_url) ?? editForm.logo_url} alt="" className="w-12 h-12 rounded-xl object-cover border border-white/10" />
+              ) : (
+                <div className="w-12 h-12 rounded-xl flex items-center justify-center text-xl font-black"
+                  style={{ background: `linear-gradient(135deg, ${editForm.primary_color}, ${editForm.secondary_color})` }}>
+                  {editForm.short_name?.[0] || '?'}
+                </div>
+              )}
               <div>
                 <p className="font-black uppercase">{editForm.name || 'Team Name'}</p>
                 <p className="text-white/40 text-xs">{editForm.city || '—'}{editForm.venue ? ` • ${editForm.venue}` : ''}</p>
               </div>
+            </div>
+
+            {/* Club crest uploader */}
+            <div className="glass rounded-xl p-4 border border-white/5">
+              <EntityImageUploader
+                kind="teams"
+                entityId={selectedTeam.id}
+                currentUrl={editForm.logo_url}
+                label="Club Crest"
+                shape="square"
+                placeholder={editForm.short_name?.[0] || '?'}
+                onUploaded={(url) => setEditForm((prev) => ({ ...prev, logo_url: url }))}
+                onError={(m) => error(m)}
+              />
+              <p className="text-[10px] text-white/30 mt-3">Saved to the team when you press Save Changes.</p>
             </div>
             <div className="grid grid-cols-2 gap-4">
               {([
@@ -445,12 +490,7 @@ export default function TeamDashboard() {
 
                       <div className="p-6 flex flex-col sm:flex-row items-start sm:items-center gap-5">
                         {/* Badge */}
-                        <div
-                          className="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl font-black italic shadow-xl shrink-0 border-2 border-white/10"
-                          style={{ background: `linear-gradient(135deg, ${team.primary_color || '#39FF14'}, ${team.secondary_color || '#000'})` }}
-                        >
-                          {team.short_name?.[0] || '?'}
-                        </div>
+                        <TeamCrest team={team} size={64} className="shadow-xl" />
 
                         {/* Info */}
                         <div className="flex-1 min-w-0">
@@ -533,12 +573,7 @@ export default function TeamDashboard() {
                     <div key={team.id} className="glass rounded-[2rem] p-6 border border-white/5 hover:border-brand-green/30 transition-all">
                       {/* Header */}
                       <div className="flex items-center gap-4 mb-5">
-                        <div
-                          className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl font-black italic shadow-lg border border-white/10 shrink-0"
-                          style={{ background: `linear-gradient(135deg, ${team.primary_color || '#39FF14'}, ${team.secondary_color || '#000'})` }}
-                        >
-                          {team.short_name?.[0]}
-                        </div>
+                        <TeamCrest team={team} size={56} className="shadow-lg" />
                         <div className="min-w-0 flex-1">
                           <h3 className="font-black italic uppercase tracking-tighter truncate">{team.name}</h3>
                           <p className="text-[10px] text-white/40 uppercase font-black tracking-widest">{team.city || 'Unknown'}</p>
@@ -626,12 +661,7 @@ export default function TeamDashboard() {
                       <div className="h-1 w-full bg-gradient-to-r from-red-500 to-red-400" />
 
                       <div className="p-6 flex flex-col sm:flex-row items-start sm:items-center gap-5">
-                        <div
-                          className="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl font-black italic shadow-xl shrink-0 border-2 border-white/10 opacity-50"
-                          style={{ background: `linear-gradient(135deg, ${team.primary_color || '#39FF14'}, ${team.secondary_color || '#000'})` }}
-                        >
-                          {team.short_name?.[0] || '?'}
-                        </div>
+                        <TeamCrest team={team} size={64} className="shadow-xl" muted />
 
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap mb-1">
