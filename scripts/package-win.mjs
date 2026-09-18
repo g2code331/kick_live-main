@@ -77,6 +77,15 @@ export async function main() {
       );
     }
     console.error(tail(out, 20));
+    // Surface the failure tail as a GitHub Actions annotation. The sandbox that maintains this repo
+    // cannot download step logs or the windows-package-log artifact (Azure blob egress is blocked),
+    // but ::error:: annotations ARE readable via `gh api .../check-runs/<id>/annotations`. Newlines
+    // are encoded as '~' (the desktop-smoke.sh convention) and decoded on read. Without this a
+    // Windows packaging failure is an opaque "exit code 1" that cannot be diagnosed remotely.
+    if (process.env.GITHUB_ACTIONS) {
+      const enc = tail(out, 30).replace(/\r?\n/g, "~");
+      process.stdout.write(`::error::package-win: electron-builder ${has("dir") ? "dir" : "nsis"} failed (exit ${String(res.code)}). tail: ${enc}\n`);
+    }
     return res.code || 1;
   }
 
@@ -96,6 +105,7 @@ export async function main() {
   }
   if (rows.length === 0) {
     console.error("package-win: no .exe installer found in release/ after the build");
+    if (process.env.GITHUB_ACTIONS) process.stdout.write("::error::package-win: build reported success but no .exe installer landed in release/\n");
     return 1;
   }
   const manifest = {
