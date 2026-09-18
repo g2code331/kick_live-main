@@ -27,7 +27,7 @@
 -- ============================================================================
 
 -- >>> BEGIN section 1: KICKLIVE_FINAL_SCHEMA.sql >>>
-SELECT '1 / 15: KICKLIVE_FINAL_SCHEMA.sql' AS kicklive_sql_section;
+SELECT '1 / 16: KICKLIVE_FINAL_SCHEMA.sql' AS kicklive_sql_section;
 
 -- ============================================================================
 -- AUTHORITATIVE BASE SCHEMA
@@ -933,7 +933,7 @@ NOTIFY pgrst, 'reload schema';
 -- <<< END section 1: KICKLIVE_FINAL_SCHEMA.sql <<<
 
 -- >>> BEGIN section 2: supabase/migrations/20260909120000_phase1_security_hardening.sql >>>
-SELECT '2 / 15: supabase/migrations/20260909120000_phase1_security_hardening.sql' AS kicklive_sql_section;
+SELECT '2 / 16: supabase/migrations/20260909120000_phase1_security_hardening.sql' AS kicklive_sql_section;
 
 -- ============================================================================
 --  Kick Live — Phase 1 production hardening
@@ -1935,7 +1935,7 @@ notify pgrst, 'reload schema';
 -- <<< END section 2: supabase/migrations/20260909120000_phase1_security_hardening.sql <<<
 
 -- >>> BEGIN section 3: supabase/migrations/20260909210000_phase3_live_match_engine.sql >>>
-SELECT '3 / 15: supabase/migrations/20260909210000_phase3_live_match_engine.sql' AS kicklive_sql_section;
+SELECT '3 / 16: supabase/migrations/20260909210000_phase3_live_match_engine.sql' AS kicklive_sql_section;
 
 -- ============================================================================
 --  Kick Live — Phase 3: the live match engine
@@ -3843,7 +3843,7 @@ notify pgrst, 'reload schema';
 -- <<< END section 3: supabase/migrations/20260909210000_phase3_live_match_engine.sql <<<
 
 -- >>> BEGIN section 4: supabase/migrations/20260910120000_phase4_read_aggregates.sql >>>
-SELECT '4 / 15: supabase/migrations/20260910120000_phase4_read_aggregates.sql' AS kicklive_sql_section;
+SELECT '4 / 16: supabase/migrations/20260910120000_phase4_read_aggregates.sql' AS kicklive_sql_section;
 
 -- ============================================================================
 --  KICKLIVE · Phase 4 — read aggregates
@@ -4165,7 +4165,7 @@ commit;
 -- <<< END section 4: supabase/migrations/20260910120000_phase4_read_aggregates.sql <<<
 
 -- >>> BEGIN section 5: supabase/migrations/20260911120000_phase5_notifications.sql >>>
-SELECT '5 / 15: supabase/migrations/20260911120000_phase5_notifications.sql' AS kicklive_sql_section;
+SELECT '5 / 16: supabase/migrations/20260911120000_phase5_notifications.sql' AS kicklive_sql_section;
 
 -- ============================================================================
 --  KICKLIVE · Phase 5 — notification system
@@ -5681,7 +5681,7 @@ commit;
 -- <<< END section 5: supabase/migrations/20260911120000_phase5_notifications.sql <<<
 
 -- >>> BEGIN section 6: supabase/migrations/20260912120000_phase6_r2_media.sql >>>
-SELECT '6 / 15: supabase/migrations/20260912120000_phase6_r2_media.sql' AS kicklive_sql_section;
+SELECT '6 / 16: supabase/migrations/20260912120000_phase6_r2_media.sql' AS kicklive_sql_section;
 
 -- ============================================================================
 -- Kick Live — Phase 6 migration: media registry for R2 storage
@@ -6891,7 +6891,7 @@ notify pgrst, 'reload schema';
 -- <<< END section 6: supabase/migrations/20260912120000_phase6_r2_media.sql <<<
 
 -- >>> BEGIN section 7: supabase/migrations/20260913120000_phase7_advertising.sql >>>
-SELECT '7 / 15: supabase/migrations/20260913120000_phase7_advertising.sql' AS kicklive_sql_section;
+SELECT '7 / 16: supabase/migrations/20260913120000_phase7_advertising.sql' AS kicklive_sql_section;
 
 -- ═══════════════════════════════════════════════════════════════════════════
 --  Kick Live · Phase 7 migration 1/1 — advertising and sponsorship infrastructure
@@ -9642,7 +9642,7 @@ notify pgrst, 'reload schema';
 -- <<< END section 7: supabase/migrations/20260913120000_phase7_advertising.sql <<<
 
 -- >>> BEGIN section 8: supabase/migrations/20260914120000_phase8_sponsorship.sql >>>
-SELECT '8 / 15: supabase/migrations/20260914120000_phase8_sponsorship.sql' AS kicklive_sql_section;
+SELECT '8 / 16: supabase/migrations/20260914120000_phase8_sponsorship.sql' AS kicklive_sql_section;
 
 -- ============================================================================
 -- KICK LIVE · Phase 8 · sponsorship
@@ -11787,7 +11787,7 @@ commit;
 -- <<< END section 8: supabase/migrations/20260914120000_phase8_sponsorship.sql <<<
 
 -- >>> BEGIN section 9: supabase/migrations/20260915120000_phase9_observability.sql >>>
-SELECT '9 / 15: supabase/migrations/20260915120000_phase9_observability.sql' AS kicklive_sql_section;
+SELECT '9 / 16: supabase/migrations/20260915120000_phase9_observability.sql' AS kicklive_sql_section;
 
 -- ============================================================================
 -- Phase 9 — analytics, monitoring and observability
@@ -13923,7 +13923,7 @@ $verify$;
 -- <<< END section 9: supabase/migrations/20260915120000_phase9_observability.sql <<<
 
 -- >>> BEGIN section 10: supabase/migrations/20260916120000_phase10_privilege_tightening.sql >>>
-SELECT '10 / 15: supabase/migrations/20260916120000_phase10_privilege_tightening.sql' AS kicklive_sql_section;
+SELECT '10 / 16: supabase/migrations/20260916120000_phase10_privilege_tightening.sql' AS kicklive_sql_section;
 
 -- =============================================================================
 -- Phase 10 · privilege tightening — profile contact fields
@@ -14273,7 +14273,7 @@ $verify$;
 -- <<< END section 10: supabase/migrations/20260916120000_phase10_privilege_tightening.sql <<<
 
 -- >>> BEGIN section 11: supabase/migrations/20260916130000_phase11_privilege_tightening.sql >>>
-SELECT '11 / 15: supabase/migrations/20260916130000_phase11_privilege_tightening.sql' AS kicklive_sql_section;
+SELECT '11 / 16: supabase/migrations/20260916130000_phase11_privilege_tightening.sql' AS kicklive_sql_section;
 
 -- ============================================================================
 -- STEP 20 · "a dashboard session" was defined as "a superuser session", and on Supabase it is not one
@@ -14555,7 +14555,7 @@ notify pgrst, 'reload schema';   -- PostgREST must see the two new/changed funct
 -- <<< END section 11: supabase/migrations/20260916130000_phase11_privilege_tightening.sql <<<
 
 -- >>> BEGIN section 12: supabase/migrations/20260916220000_phase12_profile_table_grants.sql >>>
-SELECT '12 / 15: supabase/migrations/20260916220000_phase12_profile_table_grants.sql' AS kicklive_sql_section;
+SELECT '12 / 16: supabase/migrations/20260916220000_phase12_profile_table_grants.sql' AS kicklive_sql_section;
 
 -- STEP 21 · the privilege layer the phases never touched: TRUNCATE / DELETE / INSERT
 -- Two tables: public.profiles (every account) and public.activity_logs (the audit trail — production's own
@@ -14635,7 +14635,7 @@ notify pgrst, 'reload schema';
 -- <<< END section 12: supabase/migrations/20260916220000_phase12_profile_table_grants.sql <<<
 
 -- >>> BEGIN section 13: supabase/migrations/20260916230000_phase13_truncate_lockdown.sql >>>
-SELECT '13 / 15: supabase/migrations/20260916230000_phase13_truncate_lockdown.sql' AS kicklive_sql_section;
+SELECT '13 / 16: supabase/migrations/20260916230000_phase13_truncate_lockdown.sql' AS kicklive_sql_section;
 
 -- STEP 22 · the one privilege that survived every narrowing: TRUNCATE, schema-wide
 -- Phases 1–12 revoked TRUNCATE on exactly two tables (profiles, activity_logs) because those were the two the
@@ -14754,7 +14754,7 @@ notify pgrst, 'reload schema';
 -- <<< END section 13: supabase/migrations/20260916230000_phase13_truncate_lockdown.sql <<<
 
 -- >>> BEGIN section 14: supabase/migrations/20260917120000_phase14_targeted_notifications.sql >>>
-SELECT '14 / 15: supabase/migrations/20260917120000_phase14_targeted_notifications.sql' AS kicklive_sql_section;
+SELECT '14 / 16: supabase/migrations/20260917120000_phase14_targeted_notifications.sql' AS kicklive_sql_section;
 
 -- ─────────────────────────────────────────────────────────────────────────────────────────────────
 -- Phase 14 · Targeted admin notifications (by role, or to one account)
@@ -14783,6 +14783,36 @@ SELECT '14 / 15: supabase/migrations/20260917120000_phase14_targeted_notificatio
 --
 -- Source of truth is this migration; regenerate the bundle with `npm run sql:bundle`. Do not hand-edit
 -- supabase/SETUP.sql.
+
+-- ── 0. widen the has-target constraint so a non-match job is legal ────────────────────────────────────
+--
+-- Phase 5's `notification_jobs_has_target` reads:
+--   check (match_id is not null or competition_id is not null or team_id is not null or kind = 'announcement')
+-- Its intent was "a job with no audience selector is not a thing a trigger should be able to create". But it
+-- expressed that as "has an id, OR is an announcement", which is too narrow: a broadcast of kind `news`,
+-- `team_update`, `competition_update` or `system` has no id and is not an announcement, so phase 5's own
+-- `kicklive_broadcast_notification` would violate this constraint for four of its five allowed kinds — and
+-- so would every targeted send this phase adds. (The bug went unseen because the only broadcast exercised so
+-- far was an announcement.)
+--
+-- The fix keeps the intent and states it correctly: a job is legal when it names an id (the trigger path),
+-- OR it carries an explicit audience selector in metadata — a `broadcast` marker (phase 5) or a `target`
+-- (phase 14). A trigger-created event job has neither and still must name an id, so nothing about the event
+-- path changes.
+do $constraint$
+begin
+  alter table public.notification_jobs drop constraint if exists notification_jobs_has_target;
+  alter table public.notification_jobs add constraint notification_jobs_has_target
+    check (
+      match_id is not null
+      or competition_id is not null
+      or team_id is not null
+      or kind = 'announcement'
+      or (metadata ? 'broadcast')
+      or (metadata ? 'target')
+    );
+end
+$constraint$;
 
 -- ── 1. job-aware audience resolver ───────────────────────────────────────────────────────────────────
 --
@@ -15024,7 +15054,21 @@ begin
     raise exception 'phase14 verification failed: a targeted-notification function is granted to a client role';
   end if;
 
-  raise notice 'phase14 verification: ok — job-aware audience added, recipients/materialise repointed (no-op for untargeted jobs), targeted-send RPC added, all service-role only';
+  -- 14.5 the widened has-target constraint accepts a targeted/broadcast job. Proven by writing one with no
+  --      id and a metadata target, then rolling it back — a live insert is the only honest check that the
+  --      CHECK expression means what the RPC needs, and a schema-only review would have missed the original
+  --      bug entirely.
+  begin
+    insert into public.notification_jobs (dedupe_key, kind, title, body, metadata)
+    values ('phase14-verify:' || gen_random_uuid()::text, 'news', 'verify', 'verify',
+            jsonb_build_object('target', jsonb_build_object('type', 'role', 'role', 'media')));
+    -- Undo it: verification must leave no rows behind.
+    delete from public.notification_jobs where dedupe_key like 'phase14-verify:%';
+  exception when check_violation then
+    raise exception 'phase14 verification failed: a targeted (id-less) notification job is still rejected by notification_jobs_has_target — the constraint widening did not take';
+  end;
+
+  raise notice 'phase14 verification: ok — has-target constraint widened for id-less broadcast/targeted jobs, job-aware audience added, recipients/materialise repointed (no-op for untargeted jobs), targeted-send RPC added, all service-role only';
 end
 $verify$;
 
@@ -15035,7 +15079,7 @@ notify pgrst, 'reload schema';
 -- <<< END section 14: supabase/migrations/20260917120000_phase14_targeted_notifications.sql <<<
 
 -- >>> BEGIN section 15: supabase/migrations/20260918120000_phase15_messaging.sql >>>
-SELECT '15 / 15: supabase/migrations/20260918120000_phase15_messaging.sql' AS kicklive_sql_section;
+SELECT '15 / 16: supabase/migrations/20260918120000_phase15_messaging.sql' AS kicklive_sql_section;
 
 -- ─────────────────────────────────────────────────────────────────────────────────────────────────
 -- Phase 15 · Direct messaging (user ↔ staff inbox)
@@ -15520,3 +15564,129 @@ notify pgrst, 'reload schema';
 ;
 
 -- <<< END section 15: supabase/migrations/20260918120000_phase15_messaging.sql <<<
+
+-- >>> BEGIN section 16: supabase/migrations/20260919120000_phase16_message_notifications.sql >>>
+SELECT '16 / 16: supabase/migrations/20260919120000_phase16_message_notifications.sql' AS kicklive_sql_section;
+
+-- ─────────────────────────────────────────────────────────────────────────────────────────────────
+-- Phase 16 · Notify a thread owner when staff reply
+-- ─────────────────────────────────────────────────────────────────────────────────────────────────
+--
+-- Ties phase 15 (messaging) to phase 5/14 (notifications). When a STAFF member sends a message, the thread
+-- owner is not looking at the staff desk and should get a push/inbox notification. The reverse direction
+-- (a user writing in) is already covered by the desk's own unread badge and has no single staff recipient,
+-- so it is deliberately not notified here.
+--
+-- Mechanism, reusing what already exists rather than adding a new notification kind:
+--   • kind = 'system' (defaults to enabled in kicklive_preference_defaults, and is the honest category for
+--     "the platform has something for you");
+--   • the phase-14 metadata target `{"type":"user","userId":<owner>}`, so the job-aware audience
+--     (kicklive_notification_audience_job) narrows the system audience to exactly the owner — and still
+--     honours their preference, so a user who muted `system` is not messaged;
+--   • the phase-14-widened has-target constraint accepts an id-less job because metadata carries a target.
+--
+-- The job is created in the same transaction as the message (an AFTER INSERT trigger), so a reply and its
+-- notification are one fact; the `*/5` sweep delivers it, exactly like a match-event job. No Worker code is
+-- involved in creating it.
+--
+-- Source of truth is this migration; regenerate the bundle with `npm run sql:bundle`. Do not hand-edit
+-- supabase/SETUP.sql.
+
+create or replace function public.kicklive_notification_job_for_message()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_thread   public.message_threads;
+  v_sender   text;
+  v_preview  text;
+begin
+  -- Only a staff message notifies, and only the thread owner. A user's own message to the desk is not a
+  -- push (there is no single staff recipient, and the desk badge already shows it).
+  if not new.sender_is_staff then
+    return new;
+  end if;
+
+  select * into v_thread from public.message_threads where id = new.thread_id;
+  if not found then
+    return new;
+  end if;
+
+  -- Sender's display name, best effort. A deleted sender still gets a sensible label.
+  select coalesce(p.username, 'Support') into v_sender from public.profiles p where p.id = new.sender_id;
+  v_sender := coalesce(v_sender, 'Support');
+
+  v_preview := left(new.body, 140);
+
+  insert into public.notification_jobs (dedupe_key, kind, title, body, metadata, recipient_count, created_by)
+  values (
+    -- One job per message, keyed on the message id so a re-fired trigger cannot double-send.
+    format('message:%s', new.id),
+    'system',
+    'New message from ' || v_sender,
+    coalesce(nullif(v_thread.subject, ''), v_preview),
+    jsonb_build_object(
+      'target', jsonb_build_object('type', 'user', 'userId', v_thread.user_id::text),
+      'source', 'message',
+      'threadId', new.thread_id,
+      'messageId', new.id,
+      'link', '/messages'
+    ),
+    1,
+    new.sender_id
+  )
+  on conflict (dedupe_key) do nothing;
+
+  return new;
+end;
+$$;
+
+comment on function public.kicklive_notification_job_for_message() is
+  'Phase 16: AFTER INSERT on messages — a staff reply queues a system notification targeted at the thread owner (phase-14 user target). A user message does not notify.';
+
+-- AFTER INSERT: the return value is ignored, but NEW is returned so a future change to BEFORE ROW cannot
+-- silently discard the message row.
+drop trigger if exists kicklive_message_notification on public.messages;
+create trigger kicklive_message_notification
+  after insert on public.messages
+  for each row execute function public.kicklive_notification_job_for_message();
+
+-- Service-role only, like every other job-writing function.
+do $grants$
+begin
+  execute 'revoke all on function public.kicklive_notification_job_for_message() from public, anon, authenticated';
+end
+$grants$;
+
+-- ── verification (reports; hard-raises only on a live correctness failure) ────────────────────────────
+do $verify$
+declare
+  v_count integer;
+begin
+  -- 16.1 the function exists and is DEFINER with a pinned search_path.
+  select count(*) into v_count from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'public' and p.proname = 'kicklive_notification_job_for_message'
+     and p.prosecdef
+     and coalesce(array_to_string(p.proconfig, ','), '') like '%search_path=%';
+  if v_count <> 1 then
+    raise exception 'phase16 verification failed: kicklive_notification_job_for_message is missing or not a DEFINER with a pinned search_path';
+  end if;
+
+  -- 16.2 the trigger is attached to the messages table.
+  select count(*) into v_count from pg_trigger t join pg_class c on c.oid = t.tgrelid
+   where t.tgname = 'kicklive_message_notification' and c.relname = 'messages' and not t.tgisinternal;
+  if v_count <> 1 then
+    raise exception 'phase16 verification failed: the messages notification trigger is not attached';
+  end if;
+
+  raise notice 'phase16 verification: ok — staff replies queue a system notification targeted at the thread owner, delivered by the existing sweep';
+end
+$verify$;
+
+-- PostgREST caches the catalogue: keep the reload in step with the other phases.
+notify pgrst, 'reload schema';
+;
+
+-- <<< END section 16: supabase/migrations/20260919120000_phase16_message_notifications.sql <<<

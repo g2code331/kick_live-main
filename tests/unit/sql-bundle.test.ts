@@ -39,7 +39,7 @@ describe("the one-file SQL bundle", () => {
     }
     // Pinned on purpose: the operator-facing number is the point. Whoever is handed the paste is told how
     // many files the bundle holds, and adding a migration is exactly the moment to revisit that sentence.
-    assert.equal(sources.length, 15, "the count is the fact an operator needs: base + fourteen");
+    assert.equal(sources.length, 16, "the count is the fact an operator needs: base + fifteen");
   });
 
   it("announces each section, so the SQL editor's first result row names the failing step", () => {

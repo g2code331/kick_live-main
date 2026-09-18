@@ -26,6 +26,36 @@
 -- Source of truth is this migration; regenerate the bundle with `npm run sql:bundle`. Do not hand-edit
 -- supabase/SETUP.sql.
 
+-- ── 0. widen the has-target constraint so a non-match job is legal ────────────────────────────────────
+--
+-- Phase 5's `notification_jobs_has_target` reads:
+--   check (match_id is not null or competition_id is not null or team_id is not null or kind = 'announcement')
+-- Its intent was "a job with no audience selector is not a thing a trigger should be able to create". But it
+-- expressed that as "has an id, OR is an announcement", which is too narrow: a broadcast of kind `news`,
+-- `team_update`, `competition_update` or `system` has no id and is not an announcement, so phase 5's own
+-- `kicklive_broadcast_notification` would violate this constraint for four of its five allowed kinds — and
+-- so would every targeted send this phase adds. (The bug went unseen because the only broadcast exercised so
+-- far was an announcement.)
+--
+-- The fix keeps the intent and states it correctly: a job is legal when it names an id (the trigger path),
+-- OR it carries an explicit audience selector in metadata — a `broadcast` marker (phase 5) or a `target`
+-- (phase 14). A trigger-created event job has neither and still must name an id, so nothing about the event
+-- path changes.
+do $constraint$
+begin
+  alter table public.notification_jobs drop constraint if exists notification_jobs_has_target;
+  alter table public.notification_jobs add constraint notification_jobs_has_target
+    check (
+      match_id is not null
+      or competition_id is not null
+      or team_id is not null
+      or kind = 'announcement'
+      or (metadata ? 'broadcast')
+      or (metadata ? 'target')
+    );
+end
+$constraint$;
+
 -- ── 1. job-aware audience resolver ───────────────────────────────────────────────────────────────────
 --
 -- Reads the job's kind/scope AND its metadata target, and returns the preference-filtered users the job
@@ -266,7 +296,21 @@ begin
     raise exception 'phase14 verification failed: a targeted-notification function is granted to a client role';
   end if;
 
-  raise notice 'phase14 verification: ok — job-aware audience added, recipients/materialise repointed (no-op for untargeted jobs), targeted-send RPC added, all service-role only';
+  -- 14.5 the widened has-target constraint accepts a targeted/broadcast job. Proven by writing one with no
+  --      id and a metadata target, then rolling it back — a live insert is the only honest check that the
+  --      CHECK expression means what the RPC needs, and a schema-only review would have missed the original
+  --      bug entirely.
+  begin
+    insert into public.notification_jobs (dedupe_key, kind, title, body, metadata)
+    values ('phase14-verify:' || gen_random_uuid()::text, 'news', 'verify', 'verify',
+            jsonb_build_object('target', jsonb_build_object('type', 'role', 'role', 'media')));
+    -- Undo it: verification must leave no rows behind.
+    delete from public.notification_jobs where dedupe_key like 'phase14-verify:%';
+  exception when check_violation then
+    raise exception 'phase14 verification failed: a targeted (id-less) notification job is still rejected by notification_jobs_has_target — the constraint widening did not take';
+  end;
+
+  raise notice 'phase14 verification: ok — has-target constraint widened for id-less broadcast/targeted jobs, job-aware audience added, recipients/materialise repointed (no-op for untargeted jobs), targeted-send RPC added, all service-role only';
 end
 $verify$;
 
