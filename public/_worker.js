@@ -19,11 +19,65 @@
  *   1. a path WITH a non-HTML extension that comes back as text/html was NOT found → a real 404;
  *   2. any other response from ASSETS is the genuine article — a real asset with its own MIME (immutable
  *      /assets/*, no-store /sw.js), index.html for "/", or the app shell for an extensionless route.
+ *
+ * The one dynamic route: `/updates/manifest[.json]`. The web/PWA update check must read the SAME published
+ * manifest the desktop app reads, but that lives on GitHub Releases, whose asset download 302-redirects to
+ * objects.githubusercontent.com (S3) with NO Access-Control-Allow-Origin header — so a browser cross-origin
+ * fetch is blocked and the widget shows "Failed to fetch". A Worker is not bound by CORS, so it fetches the
+ * GitHub manifest server-side here and re-serves it same-origin with permissive CORS. `?channel=beta` selects
+ * the beta feed; anything else is the stable feed.
  */
+
+const MANIFEST_FEEDS = {
+  stable: "https://github.com/g2code331/kick_live-main/releases/latest/download/kicklive-update-stable.json",
+  beta: "https://github.com/g2code331/kick_live-main/releases/download/update-channel-beta/kicklive-update-beta.json",
+};
+
+async function serveUpdateManifest(request) {
+  const channel = new URL(request.url).searchParams.get("channel") === "beta" ? "beta" : "stable";
+  const cors = {
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "GET, OPTIONS",
+    "access-control-allow-headers": "accept, content-type",
+  };
+  if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
+  try {
+    const upstream = await fetch(MANIFEST_FEEDS[channel], {
+      redirect: "follow",
+      cf: { cacheTtl: 60, cacheEverything: true },
+      headers: { accept: "application/json", "user-agent": "KickLive-Updates/1" },
+    });
+    if (!upstream.ok) {
+      // No published release yet (404) or a transient GitHub error: report it as JSON so the client's
+      // "unreachable" branch has a real reason instead of an opaque CORS/network failure.
+      return new Response(JSON.stringify({ error: `upstream ${upstream.status}`, channel }), {
+        status: 502,
+        headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...cors },
+      });
+    }
+    const body = await upstream.text();
+    return new Response(body, {
+      status: 200,
+      headers: { "content-type": "application/json; charset=utf-8", "cache-control": "public, max-age=300", ...cors },
+    });
+  } catch (err) {
+    return new Response(JSON.stringify({ error: String((err && err.message) || err), channel }), {
+      status: 502,
+      headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...cors },
+    });
+  }
+}
 
 export default {
   async fetch(request, env) {
     const path = new URL(request.url).pathname;
+
+    // Same-origin update-manifest proxy (see the header comment): the browser cannot fetch the GitHub
+    // release asset directly (S3 sends no CORS header), so the Worker relays it here.
+    if (path === "/updates/manifest" || path === "/updates/manifest.json") {
+      return serveUpdateManifest(request);
+    }
+
     const hasExtension = /\.[A-Za-z0-9]+$/.test(path) && path !== "/";
 
     const res = await env.ASSETS.fetch(request);
