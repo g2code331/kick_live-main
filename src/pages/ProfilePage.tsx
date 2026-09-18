@@ -1,10 +1,20 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, User, Mail, Smartphone, Key, Bell, Save, LogOut, Eye, EyeOff, Camera, Calendar, Activity, Globe, CheckCircle, XCircle, LayoutDashboard } from 'lucide-react';
+import { ArrowLeft, User, Mail, Smartphone, Key, Bell, Save, LogOut, Eye, EyeOff, Camera, CheckCircle, XCircle, LayoutDashboard, Loader2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import Header from '../components/Header';
 import { writeOwnProfile } from '../lib/profile-write';
+import {
+  NOTIFICATION_KINDS,
+  KIND_LABELS,
+  loadNotificationPreferences,
+  saveNotificationPreferences,
+  withCategory,
+  preferencesDocument,
+  type NotificationPreferences,
+  type NotificationKind,
+} from '../lib/data/notifications.ts';
 
 const DASHBOARD_BY_ROLE: Record<string, { label: string; path: string }> = {
   admin: { label: 'Go to Admin Dashboard', path: '/admin' },
@@ -28,9 +38,50 @@ export default function ProfilePage() {
   const [showPw, setShowPw] = useState(false);
   const [pwSaving, setPwSaving] = useState(false);
 
+  // Notification preferences (real, per-category — mirrors the server document).
+  const [prefs, setPrefs] = useState<NotificationPreferences | null>(null);
+  const [prefsLoading, setPrefsLoading] = useState(false);
+  const [prefsSaving, setPrefsSaving] = useState(false);
+
   const showMsg = (type: 'success' | 'error', msg: string) => {
     setToast({ type, msg });
     setTimeout(() => setToast(null), 4000);
+  };
+
+  // Load preferences the first time the tab is opened.
+  useEffect(() => {
+    if (activeTab !== 'notifications' || prefs !== null || prefsLoading) return;
+    let cancelled = false;
+    setPrefsLoading(true);
+    void loadNotificationPreferences()
+      .then((doc) => {
+        if (!cancelled) setPrefs(doc);
+      })
+      .catch(() => {
+        if (!cancelled) setPrefs(preferencesDocument(null));
+      })
+      .finally(() => {
+        if (!cancelled) setPrefsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, prefs, prefsLoading]);
+
+  // Toggle one category and persist the whole document (full-document semantics on the server).
+  const toggleCategory = async (kind: NotificationKind) => {
+    if (!prefs || prefsSaving) return;
+    const next = withCategory(prefs, kind, { enabled: !prefs.categories[kind].enabled });
+    setPrefs(next); // optimistic
+    setPrefsSaving(true);
+    const res = await saveNotificationPreferences(next);
+    setPrefsSaving(false);
+    if (res.ok) {
+      setPrefs(preferencesDocument(res.data));
+    } else {
+      setPrefs(prefs); // revert
+      showMsg('error', res.message || 'Could not save that preference.');
+    }
   };
 
   const handleSaveProfile = async () => {
@@ -273,28 +324,45 @@ export default function ProfilePage() {
 
               {activeTab === 'notifications' && (
                 <div className="space-y-6 animate-in fade-in duration-300">
-                  <div>
-                    <h2 className="text-3xl font-black italic uppercase tracking-tighter mb-1">Notification <span className="text-brand-green">Prefs</span></h2>
-                    <p className="text-xs text-white/30 uppercase tracking-widest font-bold">Choose what you want to hear about</p>
-                  </div>
-                  {[
-                    { label: 'Match Results', desc: 'Final scores when matches end', icon: <Calendar size={16} />, on: true },
-                    { label: 'Live Score Updates', desc: 'Goal alerts during live matches', icon: <Activity size={16} />, on: true },
-                    { label: 'News &amp; Media', desc: 'Weekly highlights and articles', icon: <Globe size={16} />, on: false },
-                  ].map((pref, i) => (
-                    <div key={i} className="flex items-center justify-between p-4 rounded-2xl bg-white/[0.03] border border-white/5">
-                      <div className="flex items-center gap-4">
-                        <div className="w-9 h-9 rounded-xl bg-white/5 flex items-center justify-center text-white/40">{pref.icon}</div>
-                        <div>
-                          <p className="text-sm font-bold" dangerouslySetInnerHTML={{ __html: pref.label }} />
-                          <p className="text-[10px] text-white/30 font-bold uppercase">{pref.desc}</p>
-                        </div>
-                      </div>
-                      <div className={`w-11 h-6 rounded-full relative transition-colors ${pref.on ? 'bg-brand-green/30' : 'bg-white/10'}`}>
-                        <div className={`absolute top-1 w-4 h-4 rounded-full shadow transition-all ${pref.on ? 'right-1 bg-brand-green shadow-[0_0_8px_rgba(57,255,20,0.5)]' : 'left-1 bg-white/30'}`} />
-                      </div>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h2 className="text-3xl font-black italic uppercase tracking-tighter mb-1">Notification <span className="text-brand-green">Prefs</span></h2>
+                      <p className="text-xs text-white/30 uppercase tracking-widest font-bold">Choose what you want to hear about</p>
                     </div>
-                  ))}
+                    {prefsSaving && <Loader2 size={18} className="animate-spin text-brand-green" />}
+                  </div>
+
+                  {prefsLoading || !prefs ? (
+                    <div className="flex items-center justify-center py-16">
+                      <Loader2 size={22} className="animate-spin text-white/30" />
+                    </div>
+                  ) : (
+                    NOTIFICATION_KINDS.map((kind) => {
+                      const on = prefs.categories[kind].enabled;
+                      return (
+                        <button
+                          key={kind}
+                          type="button"
+                          onClick={() => void toggleCategory(kind)}
+                          disabled={prefsSaving}
+                          className="w-full flex items-center justify-between p-4 rounded-2xl bg-white/[0.03] border border-white/5 hover:border-white/15 transition-all text-left disabled:opacity-60"
+                        >
+                          <div className="flex items-center gap-4">
+                            <div className="w-9 h-9 rounded-xl bg-white/5 flex items-center justify-center text-white/40">
+                              <Bell size={16} />
+                            </div>
+                            <div>
+                              <p className="text-sm font-bold">{KIND_LABELS[kind].label}</p>
+                              <p className="text-[10px] text-white/30 font-bold uppercase">{KIND_LABELS[kind].description}</p>
+                            </div>
+                          </div>
+                          <div className={`w-11 h-6 rounded-full relative transition-colors shrink-0 ${on ? 'bg-brand-green/30' : 'bg-white/10'}`}>
+                            <div className={`absolute top-1 w-4 h-4 rounded-full shadow transition-all ${on ? 'right-1 bg-brand-green shadow-[0_0_8px_rgba(57,255,20,0.5)]' : 'left-1 bg-white/30'}`} />
+                          </div>
+                        </button>
+                      );
+                    })
+                  )}
                 </div>
               )}
             </main>

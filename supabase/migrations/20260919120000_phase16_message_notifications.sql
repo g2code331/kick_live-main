@@ -7,9 +7,10 @@
 -- (a user writing in) is already covered by the desk's own unread badge and has no single staff recipient,
 -- so it is deliberately not notified here.
 --
--- Mechanism, reusing what already exists rather than adding a new notification kind:
---   • kind = 'system' (defaults to enabled in kicklive_preference_defaults, and is the honest category for
---     "the platform has something for you");
+-- Mechanism:
+--   • kind = 'message' — its own category (added in the phase-17 migration that runs alongside this one), so
+--     a user can mute message notifications without muting the broader 'system' account category. It defaults
+--     to enabled in kicklive_preference_defaults;
 --   • the phase-14 metadata target `{"type":"user","userId":<owner>}`, so the job-aware audience
 --     (kicklive_notification_audience_job) narrows the system audience to exactly the owner — and still
 --     honours their preference, so a user who muted `system` is not messaged;
@@ -54,7 +55,7 @@ begin
   values (
     -- One job per message, keyed on the message id so a re-fired trigger cannot double-send.
     format('message:%s', new.id),
-    'system',
+    'message',
     'New message from ' || v_sender,
     coalesce(nullif(v_thread.subject, ''), v_preview),
     jsonb_build_object(

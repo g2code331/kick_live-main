@@ -93,16 +93,16 @@ documented in `docs/PRODUCTION_ARCHITECTURE.md` §17, not page polling.
 
 - `src/pages/portals/AdminPortal.tsx:47` — `teams` — id
 - `src/pages/portals/AdminPortal.tsx:59` — `teams` — id
-- `src/pages/portals/TeamOwnerPortal.tsx:321` — `matches` — id, home_team_id, away_team_id, home_score, away_score, status, start_time, minute, homeTe
-- `src/pages/portals/TeamOwnerPortal.tsx:542` — `players` — *
-- `src/pages/portals/TeamOwnerPortal.tsx:715` — `matches` — id, home_team_id, away_team_id, home_score, away_score, status, start_time, minute, homeTe
-- `src/pages/portals/TeamOwnerPortal.tsx:778` — `matches` — id, home_team_id, away_team_id, home_score, away_score, status, minute, start_time, homeTe
-- `src/pages/portals/TeamOwnerPortal.tsx:857` — `matches` — home_team_id, away_team_id, home_score, away_score, status
-- `src/pages/portals/TeamOwnerPortal.tsx:858` — `teams` — id, name, short_name, primary_color
-- `src/pages/portals/TeamOwnerPortal.tsx:942` — `players` — *
-- `src/pages/portals/TeamOwnerPortal.tsx:943` — `matches` — home_team_id, away_team_id, home_score, away_score, status
-- `src/pages/portals/TeamOwnerPortal.tsx:1070` — `players` — *
-- `src/pages/portals/TeamOwnerPortal.tsx:1352` — `team_news` — *
+- `src/pages/portals/TeamOwnerPortal.tsx:324` — `matches` — id, home_team_id, away_team_id, home_score, away_score, status, start_time, minute, homeTe
+- `src/pages/portals/TeamOwnerPortal.tsx:545` — `players` — *
+- `src/pages/portals/TeamOwnerPortal.tsx:718` — `matches` — id, home_team_id, away_team_id, home_score, away_score, status, start_time, minute, homeTe
+- `src/pages/portals/TeamOwnerPortal.tsx:781` — `matches` — id, home_team_id, away_team_id, home_score, away_score, status, minute, start_time, homeTe
+- `src/pages/portals/TeamOwnerPortal.tsx:860` — `matches` — home_team_id, away_team_id, home_score, away_score, status
+- `src/pages/portals/TeamOwnerPortal.tsx:861` — `teams` — id, name, short_name, primary_color
+- `src/pages/portals/TeamOwnerPortal.tsx:945` — `players` — *
+- `src/pages/portals/TeamOwnerPortal.tsx:946` — `matches` — home_team_id, away_team_id, home_score, away_score, status
+- `src/pages/portals/TeamOwnerPortal.tsx:1073` — `players` — *
+- `src/pages/portals/TeamOwnerPortal.tsx:1355` — `team_news` — *
 - `src/pages/portals/admin/MatchControl.tsx:126` — `match_commentary` — *
 - `src/pages/portals/admin/MatchControlDashboard.tsx:111` — `match_events` — *, player:players(name), team:teams(short_name)
 - `src/pages/portals/admin/MatchControlNew.tsx:112` — `match_events` — *

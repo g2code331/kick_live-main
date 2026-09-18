@@ -18,6 +18,9 @@
  * `channels` is an array for the same reason the column is: adding a medium is an element, not a migration.
  */
 
+import { api } from '../api/index.ts';
+import type { ApiResult } from '../api/index.ts';
+
 export const NOTIFICATION_KINDS = [
   "goal",
   "red_card",
@@ -30,6 +33,7 @@ export const NOTIFICATION_KINDS = [
   "news",
   "system",
   "announcement",
+  "message",
 ] as const;
 
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
@@ -45,6 +49,7 @@ export const PREFERENCE_DEFAULTS: Record<NotificationKind, boolean> = {
   match_start: true,
   system: true,
   announcement: true,
+  message: true,
   red_card: false,
   match_reminder: false,
   team_update: false,
@@ -69,6 +74,7 @@ export const KIND_LABELS: Record<NotificationKind, { label: string; description:
   news: { label: "News", description: "Stories, when there are any" },
   system: { label: "Account", description: "Things about your KickLive account" },
   announcement: { label: "Announcements", description: "League-wide notices" },
+  message: { label: "Messages", description: "Replies from the KickLive team" },
 };
 
 export interface NotificationPreferenceEntry {
@@ -98,6 +104,26 @@ export function preferencesDocument(partial: Partial<NotificationPreferences> | 
 export function withCategory(current: NotificationPreferences, kind: NotificationKind, patch: Partial<NotificationPreferenceEntry>): NotificationPreferences {
   const entry = current.categories[kind];
   return preferencesDocument({ ...current, categories: { ...current.categories, [kind]: { ...entry, ...patch } } });
+}
+
+/** Read the caller's own preference document (defaults filled in for any category never toggled). */
+export async function loadNotificationPreferences(): Promise<NotificationPreferences> {
+  const res: ApiResult<Partial<NotificationPreferences>> =
+    await api.get<Partial<NotificationPreferences>>('/notifications/preferences');
+  return preferencesDocument(res.ok ? res.data : null);
+}
+
+/**
+ * Save the whole preference document. Full-document semantics: an omitted category is an off switch, so we
+ * always send the complete set. Returns the server's stored document (the reconciliation path).
+ */
+export async function saveNotificationPreferences(
+  prefs: NotificationPreferences,
+): Promise<ApiResult<Partial<NotificationPreferences>>> {
+  return api.put<Partial<NotificationPreferences>>('/notifications/preferences', {
+    enabled: prefs.notificationsEnabled,
+    categories: prefs.categories,
+  });
 }
 
 /** A device row, as the API returns it: never a token, because a settings screen has no reason to read one. */
