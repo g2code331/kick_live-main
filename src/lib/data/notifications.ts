@@ -150,14 +150,49 @@ export function markAllNotificationsRead(): Promise<ApiResult<unknown>> {
 /** A device row, as the API returns it: never a token, because a settings screen has no reason to read one. */
 export interface NotificationDevice {
   id: string;
-  provider: "fcm" | "webpush";
-  platform: "android" | "ios" | "web" | "unknown";
-  app_id?: string | null;
+  provider: 'fcm' | 'webpush';
+  platform: 'android' | 'ios' | 'web' | 'unknown';
+  appId: string | null;
   active: boolean;
-  created_at: string;
-  last_seen_at?: string | null;
-  last_sent_at?: string | null;
-  has_failures?: boolean;
+  createdAt: string;
+  lastSeenAt: string | null;
+  lastSentAt: string | null;
+}
+
+/** What the settings screen needs to render itself — including whether this deployment can push at all. */
+export interface NotificationConfig {
+  kinds: NotificationKind[];
+  defaults: Record<string, boolean>;
+  limits: { maxDevices: number; titleMaxChars: number; bodyMaxChars: number; inboxPageSizeMax: number };
+  /** `mock` means no FCM project is configured; the UI must not promise a buzz it cannot deliver. */
+  transport: 'fcm' | 'mock';
+}
+
+/** Public config for the notification settings screen (categories, defaults, limits, transport). */
+export async function loadNotificationConfig(): Promise<NotificationConfig | null> {
+  const res = await api.get<NotificationConfig>('/notifications/config');
+  return res.ok ? res.data : null;
+}
+
+/** The caller's registered push devices, newest first. */
+export async function listDevices(): Promise<NotificationDevice[]> {
+  const res = await api.get<{ devices: NotificationDevice[] }>('/notifications/devices');
+  return res.ok ? (res.data.devices ?? []) : [];
+}
+
+/** Register a push token for this browser/device. */
+export function registerDevice(input: {
+  token: string;
+  platform: NotificationDevice['platform'];
+  provider?: NotificationDevice['provider'];
+  appId?: string;
+}): Promise<ApiResult<{ id: string }>> {
+  return api.post('/notifications/devices', input);
+}
+
+/** Revoke a registered device by id. */
+export function deleteDevice(id: string): Promise<ApiResult<unknown>> {
+  return api.del(`/notifications/devices/${id}`);
 }
 
 export interface NotificationItem {

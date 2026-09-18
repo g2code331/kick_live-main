@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, User, Mail, Smartphone, Key, Bell, Save, LogOut, Eye, EyeOff, Camera, CheckCircle, XCircle, LayoutDashboard, Loader2 } from 'lucide-react';
+import { ArrowLeft, User, Mail, Smartphone, Key, Bell, Save, LogOut, Eye, EyeOff, Camera, CheckCircle, XCircle, LayoutDashboard, Loader2, Trash2, ShieldAlert } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import Header from '../components/Header';
@@ -12,8 +12,13 @@ import {
   saveNotificationPreferences,
   withCategory,
   preferencesDocument,
+  loadNotificationConfig,
+  listDevices,
+  deleteDevice,
   type NotificationPreferences,
   type NotificationKind,
+  type NotificationConfig,
+  type NotificationDevice,
 } from '../lib/data/notifications.ts';
 
 const DASHBOARD_BY_ROLE: Record<string, { label: string; path: string }> = {
@@ -43,6 +48,13 @@ export default function ProfilePage() {
   const [prefsLoading, setPrefsLoading] = useState(false);
   const [prefsSaving, setPrefsSaving] = useState(false);
 
+  // Push transport + registered devices. `transport === 'mock'` means this deployment has no FCM project,
+  // so the UI tells the truth instead of promising a phone a buzz it cannot receive.
+  const [notifConfig, setNotifConfig] = useState<NotificationConfig | null>(null);
+  const [devices, setDevices] = useState<NotificationDevice[]>([]);
+  const [devicesLoading, setDevicesLoading] = useState(false);
+  const [removingDevice, setRemovingDevice] = useState<string | null>(null);
+
   const showMsg = (type: 'success' | 'error', msg: string) => {
     setToast({ type, msg });
     setTimeout(() => setToast(null), 4000);
@@ -67,6 +79,37 @@ export default function ProfilePage() {
       cancelled = true;
     };
   }, [activeTab, prefs, prefsLoading]);
+
+  // Load transport config + registered devices the first time the tab is opened.
+  useEffect(() => {
+    if (activeTab !== 'notifications' || notifConfig !== null || devicesLoading) return;
+    let cancelled = false;
+    setDevicesLoading(true);
+    void Promise.all([loadNotificationConfig(), listDevices()])
+      .then(([config, rows]) => {
+        if (cancelled) return;
+        setNotifConfig(config);
+        setDevices(rows);
+      })
+      .finally(() => {
+        if (!cancelled) setDevicesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, notifConfig, devicesLoading]);
+
+  const removeDevice = async (id: string) => {
+    setRemovingDevice(id);
+    const res = await deleteDevice(id);
+    setRemovingDevice(null);
+    if (res.ok) {
+      setDevices((list) => list.filter((d) => d.id !== id));
+      showMsg('success', 'Device removed.');
+    } else {
+      showMsg('error', res.message || 'Could not remove that device.');
+    }
+  };
 
   // Toggle one category and persist the whole document (full-document semantics on the server).
   const toggleCategory = async (kind: NotificationKind) => {
@@ -363,6 +406,67 @@ export default function ProfilePage() {
                       );
                     })
                   )}
+
+                  {/* Push devices + transport honesty */}
+                  <div className="pt-4 border-t border-white/5 space-y-4">
+                    <div>
+                      <h3 className="text-xl font-black italic uppercase tracking-tighter">Push <span className="text-brand-green">Devices</span></h3>
+                      <p className="text-xs text-white/30 uppercase tracking-widest font-bold">Where these alerts can buzz you</p>
+                    </div>
+
+                    {notifConfig?.transport === 'mock' && (
+                      <div className="flex items-start gap-3 p-4 rounded-2xl bg-amber-500/[0.06] border border-amber-500/20">
+                        <ShieldAlert size={18} className="text-amber-400 shrink-0 mt-0.5" />
+                        <div>
+                          <p className="text-sm font-bold text-amber-200">Push delivery isn't configured yet</p>
+                          <p className="text-[11px] text-white/40 mt-0.5">
+                            This deployment has no push provider set up, so alerts appear in your in-app inbox (the bell) but won't reach your phone. Your preferences above are still saved and applied.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {devicesLoading ? (
+                      <div className="flex items-center justify-center py-8">
+                        <Loader2 size={20} className="animate-spin text-white/30" />
+                      </div>
+                    ) : devices.length === 0 ? (
+                      <div className="p-6 rounded-2xl bg-white/[0.03] border border-white/5 text-center">
+                        <Smartphone size={26} className="mx-auto text-white/10 mb-2" />
+                        <p className="text-white/30 text-xs font-bold uppercase">No devices registered</p>
+                        <p className="text-[10px] text-white/20 mt-1">A device appears here after it opts in to push from the app.</p>
+                      </div>
+                    ) : (
+                      devices.map((d) => (
+                        <div key={d.id} className="w-full flex items-center justify-between p-4 rounded-2xl bg-white/[0.03] border border-white/5">
+                          <div className="flex items-center gap-4 min-w-0">
+                            <div className="w-9 h-9 rounded-xl bg-white/5 flex items-center justify-center text-white/40 shrink-0">
+                              <Smartphone size={16} />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-sm font-bold capitalize truncate">
+                                {d.platform} <span className="text-white/30 font-normal uppercase text-[10px]">· {d.provider}</span>
+                                {!d.active && <span className="ml-2 text-[10px] text-amber-400 uppercase font-bold">inactive</span>}
+                              </p>
+                              <p className="text-[10px] text-white/30 font-bold uppercase">
+                                Added {new Date(d.createdAt).toLocaleDateString()}
+                                {d.lastSeenAt ? ` · seen ${new Date(d.lastSeenAt).toLocaleDateString()}` : ''}
+                              </p>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => void removeDevice(d.id)}
+                            disabled={removingDevice === d.id}
+                            className="p-2 rounded-lg text-white/40 hover:text-red-400 hover:bg-red-500/10 transition-all disabled:opacity-50 shrink-0"
+                            aria-label="Remove device"
+                          >
+                            {removingDevice === d.id ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
               )}
             </main>
