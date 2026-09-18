@@ -57,7 +57,7 @@ export const BRAND = {
   /** Icons that must exist both in public/ (PWA) and packaging/icons/ (Linux). */
   iconSizes: [16, 24, 32, 48, 64, 96, 128, 256, 512] as const,
   masterIcon: "public/kicklive-icon.png",
-  logo: "public/kicklive-logo.png",
+  logo: "public/kicklive-wordmark.png",
   linuxCategories: "Network;Sports;Game;",
   linuxCategory: "Network;Sports;Game;",
   linuxDescription: "KickLive - premium football live scores, standings, predictions and tournament management.",

@@ -217,6 +217,51 @@ input::placeholder {
   animation: glow-pulse 2s ease-in-out infinite;
 }
 
+/*
+ * Loading language for the boot splash and the route/refresh states. The wordmark stays STILL
+ * (no spin, no glow); motion lives in a thin indeterminate progress bar and a soft breathe. This
+ * reads as modern loading affordance and, unlike a spinning logo, respects a legible mark.
+ */
+.loader-track {
+  position: relative;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+.loader-track::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, #39FF14 35%, #00D4FF 65%, transparent);
+  transform: translateX(-100%);
+  animation: loader-indeterminate 1.15s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@keyframes loader-indeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.animate-brand-breathe {
+  animation: brand-breathe 2.6s ease-in-out infinite;
+}
+@keyframes brand-breathe {
+  0%, 100% { opacity: 0.82; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loader-track::after {
+    animation: none;
+    transform: translateX(0);
+    opacity: 0.65;
+  }
+  .animate-brand-breathe {
+    animation: none;
+    opacity: 1;
+  }
+}
+
 html, body {
   touch-action: manipulation;
 }

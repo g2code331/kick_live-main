@@ -50,8 +50,13 @@ const KB = 1024;
 
 export const PAGE_BUDGET_BYTES = 96 * KB;
 
-/** What the first paint of an authenticated page pulls, by filename. */
-export const PAINT_ASSETS = ["brand/icon-192.png", "brand/wordmark-312.png", "brand/pattern-192.png", "brand/icon-32.png"];
+/**
+ * What a cold boot pulls, by filename: the splash hero (`wordmark-480`), the header wordmark that
+ * replaces it once auth resolves (`wordmark-312`), the tiled background watermark (`pattern-192`)
+ * and the tab favicon (`icon-32`). The square `icon-192` is no longer on this path — it survives
+ * only on the auth pages — so it is not counted against the first-paint budget.
+ */
+export const PAINT_ASSETS = ["brand/wordmark-480.png", "brand/wordmark-312.png", "brand/pattern-192.png", "brand/icon-32.png"];
 
 export const TARGETS = [
   {
@@ -92,7 +97,15 @@ export const TARGETS = [
     w: 312,
     bits: 6,
     maxBytes: 40 * KB,
-    why: "Header's centred wordmark: h-9 → h-[3.25rem] = 52 CSS px tall, 208 px of height at 4×",
+    why: "Header's wordmark/refresh mark: h-14 → h-20 = up to 80 CSS px tall, so 312 is a hidpi margin",
+  },
+  {
+    file: "public/brand/wordmark-480.png",
+    from: MASTER_WORDMARK,
+    w: 480,
+    bits: 6,
+    maxBytes: 72 * KB,
+    why: "Boot splash + route/refresh loading hero: drawn up to ~300 CSS px wide, so 480 keeps it crisp on hidpi",
   },
 ];
 
