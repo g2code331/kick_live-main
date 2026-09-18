@@ -40,14 +40,22 @@ export async function main() {
     }
   }
 
-  // Call the local electron-builder binary directly, never `npx --no electron-builder …`: npx parses
-  // options as npm's OWN until the first non-option argument, so `--config` gets eaten by npm (read as
-  // an npmrc path) and electron-builder is handed a stray positional — the same trap package-linux.mjs
-  // documents. On Windows the shim is electron-builder.cmd; fall back to npx only if neither exists.
-  const localBin = ["electron-builder", "electron-builder.cmd", "electron-builder.CMD"].map((n) => path.join(REPO_ROOT, "node_modules", ".bin", n)).find((p) => fs.existsSync(p));
+  // Run electron-builder's JS CLI directly with `node`, never through the node_modules/.bin shim or
+  // npx. On Windows the .bin directory holds BOTH an extensionless Unix shell script (`electron-builder`)
+  // and a `electron-builder.cmd`; spawnSync without a shell picks the extensionless script and dies with
+  // `spawnSync …\node_modules\.bin\electron-builder ENOENT` because Windows cannot execute a shell script
+  // as a program. Invoking `node <pkg>/cli.js` sidesteps the shim entirely and behaves identically on
+  // Linux and Windows. (npx is also out: it parses `--config` as npm's OWN option — an npmrc path — and
+  // hands electron-builder a stray positional, the trap package-linux.mjs documents.)
+  const builderCli = path.join(REPO_ROOT, "node_modules", "electron-builder", "cli.js");
+  if (!fs.existsSync(builderCli)) {
+    console.error(`package-win: electron-builder CLI not found at ${builderCli} — run "npm ci" first`);
+    if (process.env.GITHUB_ACTIONS) process.stdout.write("::error::package-win: node_modules/electron-builder/cli.js missing — npm ci did not install electron-builder\n");
+    return 1;
+  }
   const coreArgs = ["--config", "electron-builder.yml", "--win", "--x64", "--publish", "never", ...(has("dir") ? ["--dir"] : ["nsis"])];
-  const builder = localBin ?? "npx";
-  const builderArgs = localBin ? coreArgs : ["--no", "--", "electron-builder", ...coreArgs];
+  const builder = process.execPath; // the running node binary
+  const builderArgs = [builderCli, ...coreArgs];
   console.log(`package-win: electron-builder ${has("dir") ? "dir" : "nsis"} @ v${version}`);
   const res = run("electron-builder", builder, builderArgs, { cwd: REPO_ROOT, env: { ELECTRON_BUILDER_CACHE: process.env.ELECTRON_BUILDER_CACHE ?? "" } });
   const out = res.stdout + res.stderr;
