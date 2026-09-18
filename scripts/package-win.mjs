@@ -53,7 +53,12 @@ export async function main() {
     if (process.env.GITHUB_ACTIONS) process.stdout.write("::error::package-win: node_modules/electron-builder/cli.js missing — npm ci did not install electron-builder\n");
     return 1;
   }
-  const coreArgs = ["--config", "electron-builder.yml", "--win", "--x64", "--publish", "never", ...(has("dir") ? ["--dir"] : ["nsis"])];
+  // electron-builder takes the target as a VALUE of the `--win` array option (`--win nsis`), NOT as
+  // a trailing positional: `--win --x64 nsis` makes yargs reject `nsis` with "Unknown argument: nsis"
+  // (the same shape package-linux.mjs documents for `--linux deb AppImage`). electron-builder.yml
+  // already declares `win.target: [nsis]`, so a bare `--win` builds the NSIS installer from config;
+  // `--dir` is a boolean flag that overrides the target to an unpacked dir.
+  const coreArgs = ["--config", "electron-builder.yml", "--win", "--x64", "--publish", "never", ...(has("dir") ? ["--dir"] : [])];
   const builder = process.execPath; // the running node binary
   const builderArgs = [builderCli, ...coreArgs];
   console.log(`package-win: electron-builder ${has("dir") ? "dir" : "nsis"} @ v${version}`);
