@@ -57,29 +57,48 @@ const toneClass: Record<string, string> = {
   unknown: "bg-white/25",
 };
 
+/** The failure codes that mean "the API itself is not reachable from this host", not "this one query failed". */
+const CONNECTIVITY_CODES = new Set(["DEPENDENCY_FAILED", "NETWORK_ERROR", "TIMEOUT"]);
+
 /** One fetch-and-hold slot: a section's data, its error, and the act of reloading it. */
 function useSection<T>(load: () => Promise<ApiResult<T>>, deps: readonly unknown[] = []) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [code, setCode] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // `loaded` flips true after the first settled fetch, so the panel can tell "still loading for the first
+  // time" (show a skeleton) apart from "loaded and empty" (show the empty note) — the difference between a
+  // calm first paint and a flash of red on every entry.
+  const [loaded, setLoaded] = useState(false);
   const run = useCallback(async () => {
     setBusy(true);
     const result = await load();
     setBusy(false);
+    setLoaded(true);
     if (isApiFailure(result)) {
       // `code` and `message` are all the Worker sends in production; there is no stack to leak here either.
       setError(`${result.code} — ${result.message}`);
+      setCode(result.code);
       return;
     }
     setError(null);
+    setCode(null);
     setData(result.data as T);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
   useEffect(() => {
     void run();
   }, [run]);
-  return { data, error, busy, reload: run };
+  return { data, error, code, busy, loaded, reload: run };
 }
+
+type SectionState = {
+  readonly error: string | null;
+  readonly code: string | null;
+  readonly busy: boolean;
+  readonly loaded: boolean;
+  readonly reload: () => void;
+};
 
 export default function SystemMonitoring() {
   const [windowSeconds, setWindowSeconds] = useState<MetricWindowSeconds>(86400);
@@ -94,9 +113,19 @@ export default function SystemMonitoring() {
   const advertising = useSection<SectionMetrics>(() => readAdvertisingMetrics(windowSeconds), [windowSeconds]);
   const audit = useSection<AuditPage>(() => readAudit(25), []);
 
+  const sections = [health, alerts, metrics, live, notifications, advertising, audit];
   const reloadAll = () => {
-    for (const section of [health, alerts, metrics, live, notifications, advertising, audit]) void section.reload();
+    for (const section of sections) void section.reload();
   };
+
+  // First paint: nothing has settled yet. Show the whole grid as skeletons rather than a flash of content.
+  const firstLoad = sections.every((s) => !s.loaded);
+  // "The API is unreachable from this host" looks like every panel failing with the same connectivity code
+  // at once. When that happens, one calm banner explains it instead of six identical red error cards.
+  const settled = sections.filter((s) => s.loaded);
+  const connectivityDown =
+    settled.length >= 3 &&
+    settled.every((s) => s.code !== null && CONNECTIVITY_CODES.has(s.code));
 
   const probeNow = async () => {
     setAction("probing…");
@@ -127,7 +156,7 @@ export default function SystemMonitoring() {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 animate-in">
       <header className="flex flex-wrap items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
         <Gauge size={18} className="text-[#39FF14]" />
         <h2 className="mr-auto text-sm font-black uppercase tracking-[0.2em] text-white/80">System monitoring</h2>
@@ -156,7 +185,37 @@ export default function SystemMonitoring() {
         {action ? <p className="w-full text-[11px] text-white/50">{action}</p> : null}
       </header>
 
-      {alerts.data?.alerts && alerts.data.alerts.length > 0 ? (
+      {connectivityDown ? (
+        <section
+          className="flex flex-col gap-3 rounded-2xl border border-amber-300/25 bg-amber-300/[0.05] p-4 sm:flex-row sm:items-center"
+          aria-live="polite"
+        >
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-300/15 text-amber-200">
+            <AlertTriangle size={18} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-black uppercase tracking-widest text-amber-100">Monitoring API unreachable</p>
+            <p className="mt-1 text-xs leading-relaxed text-white/55">
+              The dashboard reached this app but not its <span className="font-mono text-white/70">/api</span> service, so
+              no panel below has live numbers. This is expected on a preview host where <span className="font-mono text-white/70">/api/*</span>{" "}
+              is not yet routed to the Worker — it is not a data loss. Retry once the API route is live.
+            </p>
+          </div>
+          <button type="button" onClick={reloadAll} className={`${btnGhost} shrink-0`}>
+            <RefreshCw size={13} /> Retry all
+          </button>
+        </section>
+      ) : null}
+
+      {firstLoad ? (
+        <div className="grid gap-4 lg:grid-cols-2" aria-hidden="true">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <PanelSkeleton key={i} />
+          ))}
+        </div>
+      ) : null}
+
+      {!firstLoad && alerts.data?.alerts && alerts.data.alerts.length > 0 ? (
         <section className="rounded-2xl border border-amber-300/30 bg-amber-300/[0.06] p-3" aria-label="Active alerts">
           <h3 className="mb-2 flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.18em] text-amber-100">
             <AlertTriangle size={13} /> {alerts.data.alerts.length} alert{alerts.data.alerts.length === 1 ? "" : "s"} in the last 15 minutes
@@ -175,8 +234,8 @@ export default function SystemMonitoring() {
         </section>
       ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Panel title="System health" icon={<Database size={13} />} section={health}>
+      <div className={`grid gap-4 lg:grid-cols-2 ${firstLoad ? "hidden" : ""}`}>
+        <Panel title="System health" icon={<Database size={13} />} section={health} muteError={connectivityDown}>
           <ComponentList health={health.data} />
           {health.data?.public?.status ? (
             <p className="mt-2 text-[11px] text-white/35">
@@ -186,25 +245,25 @@ export default function SystemMonitoring() {
           ) : null}
         </Panel>
 
-        <Panel title="API" icon={<Gauge size={13} />} section={metrics}>
+        <Panel title="API" icon={<Gauge size={13} />} section={metrics} muteError={connectivityDown}>
           <ApiSummary summary={metrics.data} />
         </Panel>
 
-        <Panel title="Live matches" icon={<Radio size={13} />} section={live}>
+        <Panel title="Live matches" icon={<Radio size={13} />} section={live} muteError={connectivityDown}>
           <LiveSummary data={live.data} />
         </Panel>
 
-        <Panel title="Notifications" icon={<Bell size={13} />} section={notifications}>
+        <Panel title="Notifications" icon={<Bell size={13} />} section={notifications} muteError={connectivityDown}>
           <CountGrid counters={notifications.data?.counters} />
           <CountGrid counters={notifications.data?.jobs} />
         </Panel>
 
-        <Panel title="Advertising" icon={<Megaphone size={13} />} section={advertising}>
+        <Panel title="Advertising" icon={<Megaphone size={13} />} section={advertising} muteError={connectivityDown}>
           <CountGrid counters={advertising.data?.operational} />
           <CampaignTable rows={advertising.data?.measurement} />
         </Panel>
 
-        <Panel title="Recent privileged actions" icon={<ScrollText size={13} />} section={audit}>
+        <Panel title="Recent privileged actions" icon={<ScrollText size={13} />} section={audit} muteError={connectivityDown}>
           <AuditList page={audit.data} />
         </Panel>
       </div>
@@ -218,24 +277,80 @@ export default function SystemMonitoring() {
   );
 }
 
-function Panel({ title, icon, section, children }: { title: string; icon: ReactNode; section: { readonly error: string | null; readonly busy: boolean; readonly reload: () => void }; children: ReactNode }) {
+function Panel({
+  title,
+  icon,
+  section,
+  muteError = false,
+  children,
+}: {
+  title: string;
+  icon: ReactNode;
+  section: SectionState;
+  muteError?: boolean;
+  children: ReactNode;
+}) {
+  // Body selection, in priority order:
+  //  - never settled + busy  → skeleton rows (calm first paint, no flash of "—" or red)
+  //  - errored + connectivity down → a one-line muted note (the banner above already explains the why)
+  //  - errored otherwise     → the panel's own error with a retry
+  //  - else                  → the real content
+  let body: ReactNode;
+  if (!section.loaded && section.busy) {
+    body = <PanelBodySkeleton />;
+  } else if (section.error && muteError) {
+    body = <p className="text-[11px] italic text-white/30">Waiting for the API — see the notice above.</p>;
+  } else if (section.error) {
+    body = (
+      <div className="space-y-2">
+        <p className="rounded-xl border border-red-400/25 bg-red-400/[0.07] px-3 py-2 text-xs text-red-100/85">{section.error}</p>
+        <button type="button" onClick={section.reload} className={btnGhost}>
+          <RefreshCw size={12} /> Retry this panel
+        </button>
+      </div>
+    );
+  } else {
+    body = children;
+  }
   return (
-    <section className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+    <section className="rounded-2xl border border-white/10 bg-white/[0.03] p-3 transition-colors">
       <h3 className="mb-2 flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.18em] text-white/60">
         {icon} {title}
-        {section.busy ? <span className="ml-auto text-[10px] font-medium normal-case tracking-normal text-white/35">loading…</span> : null}
+        {section.loaded && section.busy ? (
+          <span className="ml-auto flex items-center gap-1.5 text-[10px] font-medium normal-case tracking-normal text-white/35">
+            <RefreshCw size={11} className="animate-spin" /> refreshing
+          </span>
+        ) : null}
       </h3>
-      {section.error ? (
-        <div className="space-y-2">
-          <p className="rounded-xl border border-red-400/25 bg-red-400/[0.07] px-3 py-2 text-xs text-red-100/85">{section.error}</p>
-          <button type="button" onClick={section.reload} className={btnGhost}>
-            <RefreshCw size={12} /> Retry this panel
-          </button>
-        </div>
-      ) : (
-        children
-      )}
+      {body}
     </section>
+  );
+}
+
+/** The whole-panel placeholder shown on the very first paint, before anything has settled. */
+function PanelSkeleton() {
+  return (
+    <section className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+      <div className="mb-3 flex items-center gap-2">
+        <span className="h-3.5 w-3.5 rounded bg-white/10 animate-pulse" />
+        <span className="h-3 w-32 rounded bg-white/10 animate-pulse" />
+      </div>
+      <PanelBodySkeleton />
+    </section>
+  );
+}
+
+/** Just the body rows — reused by a per-panel refresh that has not returned yet. */
+function PanelBodySkeleton() {
+  return (
+    <div className="space-y-2">
+      {Array.from({ length: 3 }).map((_, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <span className="h-2 w-2 rounded-full bg-white/10 animate-pulse" />
+          <span className="h-3 flex-1 rounded bg-white/[0.06] animate-pulse" style={{ maxWidth: `${String(90 - i * 15)}%` }} />
+        </div>
+      ))}
+    </div>
   );
 }
 

@@ -90,6 +90,18 @@ export default function NewsPage() {
   const featured = articles.find(a => a.featured) || articles[0];
   const rest = articles.filter(a => a !== featured);
 
+  // Reading an article takes over the page (with a back button), instead of a dimmed overlay card.
+  if (selected) {
+    return (
+      <div className="relative min-h-screen pb-20">
+        <Header />
+        <div className="container mx-auto px-4 py-6 max-w-3xl">
+          <ArticlePage article={selected} onClose={() => setSelected(null)} navigate={navigate} />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="relative min-h-screen pb-20">
       <Header />
@@ -224,10 +236,6 @@ export default function NewsPage() {
         )}
       </div>
 
-      {/* ── Article Detail Modal ── */}
-      {selected && (
-        <ArticleModal article={selected} onClose={() => setSelected(null)} navigate={navigate} />
-      )}
     </div>
   );
 }
@@ -271,12 +279,17 @@ function ArticleCard({ article, onClick }: { article: any; onClick: () => void }
   );
 }
 
-// ── Article detail modal ──────────────────────────────────────────────────────
-function ArticleModal({ article, onClose, navigate }: { article: any; onClose: () => void; navigate: any }) {
+// ── Article detail page (full-page reader, not an overlay) ─────────────────────
+function ArticlePage({ article, onClose, navigate }: { article: any; onClose: () => void; navigate: any }) {
   return (
-    <div className="fixed inset-0 z-[400] flex items-start justify-center overflow-y-auto p-4 py-8">
-      <div className="absolute inset-0 bg-black/85 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-3xl glass rounded-[2.5rem] border border-white/10 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 my-auto">
+    <div className="animate-in">
+      <button
+        onClick={onClose}
+        className="mb-5 flex items-center gap-2 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-black uppercase tracking-widest transition-colors"
+      >
+        <ArrowLeft size={14} /> Back to news
+      </button>
+      <div className="w-full glass rounded-[2.5rem] border border-white/10 shadow-2xl overflow-hidden">
         {/* Hero image */}
         <div className="aspect-video overflow-hidden relative">
           <img
@@ -286,18 +299,6 @@ function ArticleModal({ article, onClose, navigate }: { article: any; onClose: (
             onError={e => { e.currentTarget.src = FALLBACK_IMG; }}
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
-          <button
-            onClick={onClose}
-            className="absolute top-4 right-4 w-10 h-10 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center hover:bg-black/80 transition-colors"
-          >
-            <X size={18} />
-          </button>
-          <button
-            onClick={onClose}
-            className="absolute top-4 left-4 flex items-center gap-2 px-3 py-2 rounded-full bg-black/60 backdrop-blur-sm text-white/70 hover:text-white text-xs font-bold transition-colors"
-          >
-            <ArrowLeft size={14} /> Back
-          </button>
           {/* Category + title overlay */}
           <div className="absolute bottom-0 left-0 right-0 p-6">
             <span className={`inline-block px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border mb-3 ${CATEGORY_COLORS[article.category] || CATEGORY_COLORS['News']}`}>

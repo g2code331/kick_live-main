@@ -1266,6 +1266,26 @@ function GalleryTab({ team, onToast }: { team: any; onToast: any }) {
     save(n);
   };
 
+  // Viewing a photo takes the whole page (with a back button), instead of a dimmed overlay lightbox.
+  if (preview) {
+    return (
+      <div className="min-h-screen -m-4 lg:-m-10 bg-[#0B0E13] flex flex-col">
+        <div className="sticky top-0 z-20 glass border-b border-white/10 px-4 lg:px-8 py-3 flex items-center gap-3">
+          <button
+            onClick={() => setPreview(null)}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-black uppercase tracking-widest transition-colors"
+          >
+            <ArrowLeft size={16} /> Back
+          </button>
+          <span className="text-xs font-black uppercase tracking-widest text-white/50">Photo</span>
+        </div>
+        <div className="flex-1 flex items-center justify-center p-4 lg:p-10">
+          <img src={preview} alt="" className="max-w-full max-h-[80vh] w-auto object-contain rounded-2xl" />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-5 max-w-5xl">
       <div className="flex items-center justify-between">
@@ -1313,14 +1333,6 @@ function GalleryTab({ team, onToast }: { team: any; onToast: any }) {
         </div>
       )}
 
-      {/* Lightbox */}
-      {preview && (
-        <div className="fixed inset-0 z-[9998] flex items-center justify-center p-4" onClick={() => setPreview(null)}>
-          <div className="absolute inset-0 bg-black/90 backdrop-blur-md" />
-          <img src={preview} alt="" className="relative max-w-3xl max-h-[80vh] w-full object-contain rounded-2xl" />
-          <button onClick={() => setPreview(null)} className="absolute top-6 right-6 w-10 h-10 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20"><X size={20} /></button>
-        </div>
-      )}
     </div>
   );
 }

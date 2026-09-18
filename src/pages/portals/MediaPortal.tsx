@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Newspaper, LogOut, TrendingUp, Eye, Clock, Plus,
-  Edit, Trash2, CheckCircle2, XCircle, Loader2, RefreshCw, X, Save,
+  Edit, Trash2, CheckCircle2, XCircle, Loader2, RefreshCw, Save,
   Upload, BarChart3, FileText, Search
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
 import MediaPublisher from './shared/MediaPublisher';
+import AdminPageShell from './admin/AdminPageShell';
 import { assetUrl } from '../../lib/media/assets';
 
 interface MediaPortalProps {
@@ -105,6 +106,41 @@ export default function MediaPortal({ onNavigate }: MediaPortalProps) {
   // Publishing takes over the whole screen with its own back button, instead of a modal overlay.
   if (publisherOpen) {
     return <MediaPublisher onBack={() => { setPublisherOpen(false); fetchArticles(); }} />;
+  }
+
+  // Editing an article is a full page, not an overlay card.
+  if (editTarget) {
+    return (
+      <EditArticlePage
+        article={editTarget}
+        onClose={() => setEditTarget(null)}
+        onSaved={() => { setEditTarget(null); fetchArticles(); success('Article updated!'); }}
+        onError={(m) => error(m)}
+      />
+    );
+  }
+
+  // Deleting an article is a full-page confirmation, not an overlay card.
+  if (deleteTarget) {
+    return (
+      <div className="min-h-screen bg-[#0B0E13] p-4 lg:p-10">
+        <AdminPageShell title="Delete Article" icon={<Trash2 size={20} />} onBack={() => setDeleteTarget(null)}>
+          <div className="max-w-md glass rounded-[2rem] border border-red-500/30 p-8 text-center">
+            <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Trash2 size={32} className="text-red-400" />
+            </div>
+            <h3 className="text-xl font-black uppercase mb-2">Delete this article?</h3>
+            <p className="text-white/40 text-sm mb-6">
+              "{deleteTarget.title}" will be permanently removed. This cannot be undone.
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setDeleteTarget(null)} className="flex-1 py-3 rounded-xl bg-white/5 font-black uppercase text-sm hover:bg-white/10">Cancel</button>
+              <button onClick={handleDelete} className="flex-1 py-3 rounded-xl bg-red-500 text-white font-black uppercase text-sm hover:bg-red-600">Delete</button>
+            </div>
+          </div>
+        </AdminPageShell>
+      </div>
+    );
   }
 
   return (
@@ -335,33 +371,6 @@ export default function MediaPortal({ onNavigate }: MediaPortalProps) {
         )}
       </main>
 
-      {/* ── Edit modal ── */}
-      {editTarget && (
-        <EditArticleModal
-          article={editTarget}
-          onClose={() => setEditTarget(null)}
-          onSaved={() => { setEditTarget(null); fetchArticles(); success('Article updated!'); }}
-          onError={(m) => error(m)}
-        />
-      )}
-
-      {/* ── Delete confirmation ── */}
-      {deleteTarget && (
-        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={() => setDeleteTarget(null)} />
-          <div className="relative w-full max-w-md glass rounded-[2.5rem] border border-red-500/30 p-8 text-center">
-            <Trash2 size={32} className="text-red-400 mx-auto mb-4" />
-            <h3 className="text-xl font-black uppercase mb-2">Delete Article?</h3>
-            <p className="text-white/40 text-sm mb-6">
-              "{deleteTarget.title}" will be permanently removed.
-            </p>
-            <div className="flex gap-3">
-              <button onClick={() => setDeleteTarget(null)} className="flex-1 py-3 rounded-xl bg-white/5 font-black uppercase text-sm hover:bg-white/10">Cancel</button>
-              <button onClick={handleDelete} className="flex-1 py-3 rounded-xl bg-red-500 text-white font-black uppercase text-sm hover:bg-red-600">Delete</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -421,7 +430,7 @@ function ArticleRow({ article, onToggle, onEdit, onDelete }: {
 }
 
 // ── Edit article modal ────────────────────────────────────────────────────────
-function EditArticleModal({ article, onClose, onSaved, onError }: {
+function EditArticlePage({ article, onClose, onSaved, onError }: {
   article: any; onClose: () => void; onSaved: () => void; onError: (m: string) => void;
 }) {
   const [form, setForm] = useState({
@@ -444,14 +453,20 @@ function EditArticleModal({ article, onClose, onSaved, onError }: {
   };
 
   return (
-    <div className="fixed inset-0 z-[300] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-2xl glass rounded-[2.5rem] border border-white/10 shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
-        <div className="p-6 border-b border-white/10 flex items-center justify-between bg-gradient-to-r from-purple-500/10 to-transparent">
-          <h2 className="text-lg font-black uppercase">Edit Article</h2>
-          <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full"><X size={18} /></button>
-        </div>
-        <div className="p-6 space-y-4 overflow-y-auto">
+    <div className="min-h-screen bg-[#0B0E13] p-4 lg:p-10">
+      <AdminPageShell
+        title="Edit Article"
+        icon={<Edit size={20} />}
+        onBack={onClose}
+        actions={
+          <button onClick={handleSave} disabled={saving}
+            className="py-2.5 px-5 rounded-xl bg-purple-500 text-white font-black uppercase text-xs tracking-widest hover:bg-purple-600 disabled:opacity-50 flex items-center justify-center gap-2">
+            {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+            Save
+          </button>
+        }
+      >
+        <div className="max-w-2xl space-y-4">
           <div>
             <label className="text-[10px] font-black uppercase tracking-widest text-white/40 mb-2 block">Title</label>
             <input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })}
@@ -479,7 +494,7 @@ function EditArticleModal({ article, onClose, onSaved, onError }: {
           </div>
           <div>
             <label className="text-[10px] font-black uppercase tracking-widest text-white/40 mb-2 block">Content</label>
-            <textarea rows={6} value={form.content} onChange={e => setForm({ ...form, content: e.target.value })}
+            <textarea rows={10} value={form.content} onChange={e => setForm({ ...form, content: e.target.value })}
               className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-purple-500/50" />
           </div>
           <div className="flex gap-6">
@@ -494,16 +509,16 @@ function EditArticleModal({ article, onClose, onSaved, onError }: {
               <span className="text-xs font-bold text-white/60">Published</span>
             </label>
           </div>
+          <div className="flex gap-3 pt-2">
+            <button onClick={onClose} className="flex-1 py-3 rounded-xl bg-white/5 font-black uppercase text-sm hover:bg-white/10">Cancel</button>
+            <button onClick={handleSave} disabled={saving}
+              className="flex-1 py-3 rounded-xl bg-purple-500 text-white font-black uppercase text-sm hover:bg-purple-600 disabled:opacity-50 flex items-center justify-center gap-2">
+              {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+              Save Changes
+            </button>
+          </div>
         </div>
-        <div className="p-6 border-t border-white/10 flex gap-3">
-          <button onClick={onClose} className="flex-1 py-3 rounded-xl bg-white/5 font-black uppercase text-sm hover:bg-white/10">Cancel</button>
-          <button onClick={handleSave} disabled={saving}
-            className="flex-1 py-3 rounded-xl bg-purple-500 text-white font-black uppercase text-sm hover:bg-purple-600 disabled:opacity-50 flex items-center justify-center gap-2">
-            {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-            Save Changes
-          </button>
-        </div>
-      </div>
+      </AdminPageShell>
     </div>
   );
 }
