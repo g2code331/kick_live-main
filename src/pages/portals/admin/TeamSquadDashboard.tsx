@@ -73,6 +73,16 @@ export default function TeamSquadDashboard({ team, onBack }: TeamSquadDashboardP
   const totalGoals = players.reduce((sum, p) => sum + (p.goals || 0), 0);
   const totalAssists = players.reduce((sum, p) => sum + (p.assists || 0), 0);
 
+  // Adding a player takes over the whole screen with its own back button, instead of a modal.
+  if (showPlayerCreator) {
+    return (
+      <PlayerCreator
+        onBack={() => { setShowPlayerCreator(false); loadPlayers(); }}
+        teamId={team.id}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#0B0E13]">
       {/* Header */}
@@ -249,26 +259,15 @@ export default function TeamSquadDashboard({ team, onBack }: TeamSquadDashboardP
         )}
       </div>
 
-      {/* Player Creator Modal */}
-      {showPlayerCreator && (
-        <PlayerCreator
-          isOpen={showPlayerCreator}
-          onClose={() => {
-            setShowPlayerCreator(false);
-            loadPlayers();
-          }}
-          teamId={team.id}
-        />
-      )}
-
-      {/* Edit Player Modal */}
+      {/* Edit Player — full-screen overlay-free panel */}
       {showEditModal && selectedPlayer && (
-        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={() => setShowEditModal(false)}></div>
-          <div className="relative w-full max-w-2xl glass rounded-[2.5rem] border border-white/10 shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b border-white/10 flex items-center justify-between sticky top-0 bg-[#0B0E13]">
-              <h2 className="text-xl font-black uppercase">Edit Player</h2>
-              <button onClick={() => setShowEditModal(false)} className="p-2 hover:bg-white/10 rounded-lg"><Edit size={20} /></button>
+        <div className="fixed inset-0 z-[60] bg-[#0B0E13] overflow-y-auto">
+          <div className="max-w-2xl mx-auto">
+            <div className="p-6 border-b border-white/10 flex items-center justify-between sticky top-0 bg-[#0B0E13] z-10">
+              <div className="flex items-center gap-3">
+                <button onClick={() => setShowEditModal(false)} className="p-2 hover:bg-white/10 rounded-lg"><ArrowLeft size={20} /></button>
+                <h2 className="text-xl font-black uppercase">Edit Player</h2>
+              </div>
             </div>
             
             <div className="p-6 space-y-4">

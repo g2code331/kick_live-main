@@ -31,6 +31,7 @@ import type { ReactNode } from "react";
 import { AlertTriangle, CheckCircle2, Clock3, Lock, LockOpen, RefreshCw, Send, Undo2, Users, Wifi, WifiOff, X, Zap } from "lucide-react";
 
 import { invalidate, useQuery } from "../../../lib/data";
+import AdminPageShell from "./AdminPageShell";
 import { squadFor } from "../../../lib/data/queries.ts";
 import { fetchAudit, type MatchAuditData } from "../../../lib/live/api.ts";
 import { GOAL_TYPE_CHOICES, MINUTE_CEILINGS, TAP_GROUPS, tapEvent } from "../../../lib/live/eventCatalog.ts";
@@ -342,36 +343,31 @@ export default function MatchControlCenter({ match, isOpen = true, onClose, onBa
   }
 
   return (
-    <div className="fixed inset-0 z-[250] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-[#0B0E13]/95 backdrop-blur-xl" onClick={close} role="presentation" />
-      <div className="relative flex h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-[3rem] border border-white/10 bg-[#0d1117]/80 shadow-2xl glass">
-        {/* ── header ── */}
-        <div className="flex items-center justify-between border-b border-white/10 bg-white/[0.02] p-6">
-          <div className="flex items-center gap-5">
-            <span className="rounded-lg bg-brand-red px-3 py-1 text-[10px] font-black uppercase tracking-widest">Live control</span>
-            <div>
-              <h2 className="text-lg font-black uppercase italic tracking-tighter">
-                {state.match?.competition ?? "Match"} {state.match?.round ? `· ${state.match.round}` : ""}
-              </h2>
-              <p className="text-[10px] font-black uppercase tracking-widest text-white/40">{state.match?.venue ?? "Venue not set"}</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3 text-[10px] font-black uppercase tracking-widest">
-            <span className={`flex items-center gap-1 ${connectionTone}`}>
-              {connection.status === "live" ? <Wifi size={14} /> : <WifiOff size={14} />}
-              {transportLabel}
-              {secondsSinceFrame !== null ? ` · ${String(secondsSinceFrame)}s` : ""}
-            </span>
-            <button onClick={() => void actions.refresh()} className="rounded-lg p-2 transition-colors hover:bg-white/10" title="Reload the authoritative snapshot">
-              <RefreshCw size={16} />
-            </button>
-            <button onClick={close} className="rounded-full p-2 transition-colors hover:bg-white/10" title="Close">
-              <X size={18} />
-            </button>
-          </div>
-        </div>
-
-        <div className="flex-1 space-y-6 overflow-y-auto p-6 no-scrollbar">
+    <AdminPageShell
+      title={
+        <span className="flex items-center gap-3">
+          <span className="rounded-lg bg-brand-red px-2.5 py-1 text-[10px] font-black uppercase tracking-widest">Live</span>
+          <span className="truncate">{state.match?.competition ?? "Match"} {state.match?.round ? `· ${state.match.round}` : ""}</span>
+        </span>
+      }
+      subtitle={state.match?.venue ?? "Venue not set"}
+      onBack={close}
+      backLabel="Back"
+      actions={
+        <>
+          <span className={`hidden sm:flex items-center gap-1 text-[10px] font-black uppercase tracking-widest ${connectionTone}`}>
+            {connection.status === "live" ? <Wifi size={14} /> : <WifiOff size={14} />}
+            {transportLabel}
+            {secondsSinceFrame !== null ? ` · ${String(secondsSinceFrame)}s` : ""}
+          </span>
+          <button onClick={() => void actions.refresh()} className="rounded-lg p-2 transition-colors hover:bg-white/10 border border-white/10" title="Reload the authoritative snapshot">
+            <RefreshCw size={16} />
+          </button>
+        </>
+      }
+    >
+      <div className="glass rounded-[2rem] lg:rounded-[3rem] border border-white/10 overflow-hidden">
+        <div className="space-y-6 p-6 lg:p-8">
           {/* ── scoreboard: read-only by construction ── */}
           <div className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.03] p-6">
             <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-brand-green/5 to-brand-blue/5" />
@@ -831,23 +827,21 @@ export default function MatchControlCenter({ match, isOpen = true, onClose, onBa
             </form>
           </div>
         ) : null}
-      </div>
-    </div>
+        </div>
+    </AdminPageShell>
   );
 }
 
 function Shell({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   return (
-    <div className="fixed inset-0 z-[250] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-[#0B0E13]/95 backdrop-blur-xl" onClick={onClose} role="presentation" />
-      <div className="glass relative w-full max-w-lg space-y-4 rounded-[2rem] border border-white/10 p-8 text-center">
-        <h2 className="text-xl font-black uppercase italic tracking-tighter">{title}</h2>
+    <AdminPageShell title={title} onBack={onClose} backLabel="Back">
+      <div className="glass rounded-[2rem] border border-white/10 p-8 space-y-4 text-center max-w-lg">
         {children}
         <button onClick={onClose} className="rounded-xl border border-white/10 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white/50">
           close
         </button>
       </div>
-    </div>
+    </AdminPageShell>
   );
 }
 

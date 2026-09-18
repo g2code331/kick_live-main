@@ -1,20 +1,21 @@
 import { useState, useEffect } from 'react';
 import { 
   Trophy, Users, Settings, Calendar, 
-  Check, Globe, Zap, Hash, Plus, ArrowLeft, ArrowRight, Loader2, X, Edit, Trash2
+  Check, Globe, Zap, Hash, ArrowLeft, Loader2
 } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
 import { CompetitionEngine } from '../../../lib/CompetitionEngine';
+import AdminPageShell from './AdminPageShell';
 
 interface CompetitionWizardProps {
-  isOpen: boolean;
-  onClose: () => void;
+  /** Return to the tournaments list (replaces the old modal onClose). */
+  onBack: () => void;
 }
 
   type Step = 'basic' | 'teams' | 'format' | 'rules' | 'preview';
   type TournamentFormat = 'league' | 'cup' | 'knockout';
   
-  export default function CompetitionWizard({ isOpen, onClose }: CompetitionWizardProps) {
+  export default function CompetitionWizard({ onBack }: CompetitionWizardProps) {
     const [currentStep, setCurrentStep] = useState<Step>('basic');
     const [loading, setLoading] = useState(false);
     const [wizardMsg, setWizardMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -38,8 +39,8 @@ interface CompetitionWizardProps {
     });
 
   useEffect(() => {
-    if (isOpen) fetchTeams();
-  }, [isOpen]);
+    fetchTeams();
+  }, []);
 
   async function fetchTeams() {
     // Only fetch necessary columns, limit to 50 teams
@@ -114,7 +115,7 @@ interface CompetitionWizardProps {
       }
 
       setWizardMsg({ type: 'success', text: 'Competition created successfully!' });
-      setTimeout(() => { onClose(); window.location.reload(); }, 1200);
+      setTimeout(() => { onBack(); window.location.reload(); }, 1200);
     } catch (err: any) {
       setWizardMsg({ type: 'error', text: 'Error: ' + err.message });
     } finally {
@@ -122,11 +123,14 @@ interface CompetitionWizardProps {
     }
   };
 
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-[#0B0E13]/95 backdrop-blur-xl" onClick={onClose}></div>
+    <AdminPageShell
+      title={<>Tournament <span className="text-brand-green">Wizard</span></>}
+      subtitle={`Step: ${currentStep}`}
+      icon={<Trophy size={22} />}
+      onBack={onBack}
+      backLabel="Tournaments"
+    >
       {wizardMsg && (
         <div className={`fixed bottom-6 right-6 z-[9999] flex items-center gap-3 px-5 py-4 rounded-2xl shadow-2xl border backdrop-blur-xl font-bold text-sm max-w-sm animate-in slide-in-from-right-4 duration-300 ${
           wizardMsg.type === 'success' ? 'bg-brand-green/20 border-brand-green/40' : 'bg-red-500/20 border-red-500/40'
@@ -134,22 +138,9 @@ interface CompetitionWizardProps {
           {wizardMsg.type === 'success' ? '✅' : '❌'} {wizardMsg.text}
         </div>
       )}
-      <div className="relative w-full max-w-4xl glass rounded-[3rem] border border-white/10 shadow-2xl overflow-hidden flex flex-col h-[85vh] animate-in zoom-in-95 duration-500">
-        
-        <div className="p-10 border-b border-white/10 flex items-center justify-between">
-           <div className="flex items-center gap-4">
-              <div className="w-12 h-12 gradient-green rounded-2xl flex items-center justify-center">
-                <Trophy className="text-black" />
-              </div>
-              <div>
-                <h2 className="text-2xl font-black italic uppercase tracking-tighter">Tournament <span className="text-brand-green">Wizard</span></h2>
-                <p className="text-[10px] text-white/40 uppercase tracking-widest font-black">Step: {currentStep}</p>
-              </div>
-           </div>
-           <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full"><X /></button>
-        </div>
+      <div className="glass rounded-[2rem] lg:rounded-[3rem] border border-white/10 overflow-hidden flex flex-col">
 
-        <div className="flex-1 overflow-y-auto p-10 space-y-8 no-scrollbar">
+        <div className="flex-1 p-6 lg:p-10 space-y-8">
           {currentStep === 'basic' && (
             <div className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -407,10 +398,10 @@ interface CompetitionWizardProps {
           )}
         </div>
 
-        <div className="p-8 border-t border-white/10 flex justify-between bg-white/[0.02]">
+        <div className="p-6 lg:p-8 border-t border-white/10 flex justify-between bg-white/[0.02]">
           <button 
             onClick={() => {
-              if (currentStep === 'basic') onClose();
+              if (currentStep === 'basic') onBack();
               else if (currentStep === 'teams') setCurrentStep('basic');
               else if (currentStep === 'format') setCurrentStep('teams');
               else if (currentStep === 'rules') setCurrentStep('format');
@@ -435,6 +426,6 @@ interface CompetitionWizardProps {
           </button>
         </div>
       </div>
-    </div>
+    </AdminPageShell>
   );
 }

@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  Users, Trash2, Edit, Loader2, X, Save,
+  Users, Trash2, Edit, Loader2, Save,
   CheckCircle2, XCircle, Clock, RefreshCw, Eye,
-  ShieldCheck, AlertTriangle, MapPin, User
+  ShieldCheck, AlertTriangle, MapPin, User, Calendar
 } from 'lucide-react';
+import AdminPageShell from './AdminPageShell';
 import { supabase } from '../../../lib/supabase';
 import TeamSquadDashboard from './TeamSquadDashboard';
 
@@ -192,6 +193,142 @@ export default function TeamDashboard() {
     setTeamMatches(data || []);
     setShowMatchesModal(true);
   };
+
+  // Squad dashboard takes over the whole screen (it has its own back button).
+  if (showSquadDashboard && selectedTeam) {
+    return <TeamSquadDashboard team={selectedTeam} onBack={() => setShowSquadDashboard(false)} />;
+  }
+
+  // Edit team — full page instead of an overlay card.
+  if (showEditModal && selectedTeam) {
+    return (
+      <AdminPageShell title="Edit Team" subtitle={selectedTeam.name} icon={<Edit size={22} />} onBack={() => setShowEditModal(false)} backLabel="Teams">
+        <div className="glass rounded-[2rem] lg:rounded-[2.5rem] border border-white/10 overflow-hidden max-w-2xl">
+          <div className="p-6 lg:p-8 space-y-4">
+            {/* Live preview */}
+            <div className="glass rounded-xl p-4 border border-white/5 flex items-center gap-3 mb-2">
+              <div className="w-12 h-12 rounded-xl flex items-center justify-center text-xl font-black"
+                style={{ background: `linear-gradient(135deg, ${editForm.primary_color}, ${editForm.secondary_color})` }}>
+                {editForm.short_name?.[0] || '?'}
+              </div>
+              <div>
+                <p className="font-black uppercase">{editForm.name || 'Team Name'}</p>
+                <p className="text-white/40 text-xs">{editForm.city || '—'}{editForm.venue ? ` • ${editForm.venue}` : ''}</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              {([
+                { key: 'name', label: 'Team Name' },
+                { key: 'short_name', label: 'Short Name', upper: true, maxLen: 5 },
+                { key: 'city', label: 'City' },
+                { key: 'venue', label: 'Stadium' },
+              ] as any[]).map(f => (
+                <div key={f.key}>
+                  <label className="text-[10px] font-black uppercase text-white/40 mb-2 block">{f.label}</label>
+                  <input
+                    type="text"
+                    maxLength={f.maxLen}
+                    value={editForm[f.key as keyof typeof editForm]}
+                    onChange={e => setEditForm({ ...editForm, [f.key]: f.upper ? e.target.value.toUpperCase() : e.target.value })}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-brand-green/50"
+                  />
+                </div>
+              ))}
+            </div>
+            <div>
+              <label className="text-[10px] font-black uppercase text-white/40 mb-2 block">Coach</label>
+              <input value={editForm.coach} onChange={e => setEditForm({ ...editForm, coach: e.target.value })}
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-brand-green/50" />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-[10px] font-black uppercase text-white/40 mb-2 block">Primary Color</label>
+                <input type="color" value={editForm.primary_color} onChange={e => setEditForm({ ...editForm, primary_color: e.target.value })}
+                  className="w-full h-12 rounded-xl cursor-pointer border-0 bg-transparent" />
+              </div>
+              <div>
+                <label className="text-[10px] font-black uppercase text-white/40 mb-2 block">Secondary Color</label>
+                <input type="color" value={editForm.secondary_color} onChange={e => setEditForm({ ...editForm, secondary_color: e.target.value })}
+                  className="w-full h-12 rounded-xl cursor-pointer border-0 bg-transparent" />
+              </div>
+            </div>
+          </div>
+          <div className="p-6 border-t border-white/10 flex gap-3">
+            <button onClick={() => setShowEditModal(false)}
+              className="flex-1 py-3 rounded-xl bg-white/5 text-white font-black uppercase tracking-widest hover:bg-white/10">
+              Cancel
+            </button>
+            <button onClick={handleSaveEdit}
+              className="flex-1 py-3 rounded-xl gradient-green text-black font-black uppercase tracking-widest flex items-center justify-center gap-2">
+              <Save size={16} /> Save Changes
+            </button>
+          </div>
+        </div>
+      </AdminPageShell>
+    );
+  }
+
+  // Delete confirmation — full page instead of an overlay card.
+  if (showDeleteModal && selectedTeam) {
+    return (
+      <AdminPageShell title="Delete Team" subtitle={selectedTeam.name} icon={<Trash2 size={22} />} onBack={() => setShowDeleteModal(false)} backLabel="Teams">
+        <div className="glass rounded-[2rem] lg:rounded-[2.5rem] border border-red-500/30 p-8 text-center max-w-md">
+          <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Trash2 size={32} className="text-red-400" />
+          </div>
+          <h2 className="text-xl font-black uppercase mb-2">Delete Team?</h2>
+          <p className="text-white/40 text-sm mb-6">
+            Delete <span className="text-white font-bold">"{selectedTeam.name}"</span>? This removes all associated data and cannot be undone.
+          </p>
+          <div className="flex gap-3">
+            <button onClick={() => setShowDeleteModal(false)}
+              className="flex-1 py-3 rounded-xl bg-white/5 font-black uppercase tracking-widest hover:bg-white/10">
+              Cancel
+            </button>
+            <button onClick={handleConfirmDelete}
+              className="flex-1 py-3 rounded-xl bg-red-500 text-white font-black uppercase tracking-widest hover:bg-red-600">
+              Delete
+            </button>
+          </div>
+        </div>
+      </AdminPageShell>
+    );
+  }
+
+  // Team matches — full page instead of an overlay card.
+  if (showMatchesModal && selectedTeam) {
+    return (
+      <AdminPageShell title={`${selectedTeam.name} — Matches`} icon={<Calendar size={22} />} onBack={() => setShowMatchesModal(false)} backLabel="Teams">
+        <div className="glass rounded-[2rem] lg:rounded-[2.5rem] border border-white/10 overflow-hidden max-w-2xl">
+          <div className="divide-y divide-white/5">
+            {teamMatches.length === 0 ? (
+              <div className="p-12 text-center">
+                <p className="text-white/30 font-bold uppercase">No matches found</p>
+              </div>
+            ) : teamMatches.map((m: any) => {
+              const done = ['full_time', 'completed', 'finished'].includes(m.status);
+              const live = ['first_half', 'second_half', 'extra_time', 'half_time'].includes(m.status);
+              return (
+                <div key={m.id} className="flex items-center gap-4 px-6 py-4 hover:bg-white/[0.02]">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-sm truncate">{m.homeTeam?.name} vs {m.awayTeam?.name}</p>
+                    <p className="text-[10px] text-white/30">{m.start_time ? new Date(m.start_time).toLocaleDateString() : '—'}</p>
+                  </div>
+                  {done ? (
+                    <span className="font-black text-brand-green">{m.home_score} – {m.away_score}</span>
+                  ) : live ? (
+                    <span className="text-[10px] font-black text-red-400 animate-pulse bg-red-400/10 px-2 py-1 rounded">LIVE</span>
+                  ) : (
+                    <span className="text-[10px] text-white/30 font-bold uppercase">{m.status}</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </AdminPageShell>
+    );
+  }
 
   return (
     <div className="space-y-6 animate-in">
@@ -550,146 +687,6 @@ export default function TeamDashboard() {
         </>
       )}
 
-      {/* ── Edit Modal ────────────────────────────────────────────────────────── */}
-      {showEditModal && selectedTeam && (
-        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={() => setShowEditModal(false)} />
-          <div className="relative w-full max-w-2xl glass rounded-[2.5rem] border border-white/10 shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b border-white/10 flex items-center justify-between sticky top-0 bg-[#0B0E13]">
-              <h2 className="text-xl font-black uppercase">Edit Team</h2>
-              <button onClick={() => setShowEditModal(false)} className="p-2 hover:bg-white/10 rounded-xl"><X size={20} /></button>
-            </div>
-            <div className="p-6 space-y-4">
-              {/* Live preview */}
-              <div className="glass rounded-xl p-4 border border-white/5 flex items-center gap-3 mb-2">
-                <div className="w-12 h-12 rounded-xl flex items-center justify-center text-xl font-black"
-                  style={{ background: `linear-gradient(135deg, ${editForm.primary_color}, ${editForm.secondary_color})` }}>
-                  {editForm.short_name?.[0] || '?'}
-                </div>
-                <div>
-                  <p className="font-black uppercase">{editForm.name || 'Team Name'}</p>
-                  <p className="text-white/40 text-xs">{editForm.city || '—'}{editForm.venue ? ` • ${editForm.venue}` : ''}</p>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                {([
-                  { key: 'name', label: 'Team Name' },
-                  { key: 'short_name', label: 'Short Name', upper: true, maxLen: 5 },
-                  { key: 'city', label: 'City' },
-                  { key: 'venue', label: 'Stadium' },
-                ] as any[]).map(f => (
-                  <div key={f.key}>
-                    <label className="text-[10px] font-black uppercase text-white/40 mb-2 block">{f.label}</label>
-                    <input
-                      type="text"
-                      maxLength={f.maxLen}
-                      value={editForm[f.key as keyof typeof editForm]}
-                      onChange={e => setEditForm({ ...editForm, [f.key]: f.upper ? e.target.value.toUpperCase() : e.target.value })}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-brand-green/50"
-                    />
-                  </div>
-                ))}
-              </div>
-              <div>
-                <label className="text-[10px] font-black uppercase text-white/40 mb-2 block">Coach</label>
-                <input value={editForm.coach} onChange={e => setEditForm({ ...editForm, coach: e.target.value })}
-                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-brand-green/50" />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-[10px] font-black uppercase text-white/40 mb-2 block">Primary Color</label>
-                  <input type="color" value={editForm.primary_color} onChange={e => setEditForm({ ...editForm, primary_color: e.target.value })}
-                    className="w-full h-12 rounded-xl cursor-pointer border-0 bg-transparent" />
-                </div>
-                <div>
-                  <label className="text-[10px] font-black uppercase text-white/40 mb-2 block">Secondary Color</label>
-                  <input type="color" value={editForm.secondary_color} onChange={e => setEditForm({ ...editForm, secondary_color: e.target.value })}
-                    className="w-full h-12 rounded-xl cursor-pointer border-0 bg-transparent" />
-                </div>
-              </div>
-            </div>
-            <div className="p-6 border-t border-white/10 flex gap-3">
-              <button onClick={() => setShowEditModal(false)}
-                className="flex-1 py-3 rounded-xl bg-white/5 text-white font-black uppercase tracking-widest hover:bg-white/10">
-                Cancel
-              </button>
-              <button onClick={handleSaveEdit}
-                className="flex-1 py-3 rounded-xl gradient-green text-black font-black uppercase tracking-widest flex items-center justify-center gap-2">
-                <Save size={16} /> Save Changes
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Delete Modal ─────────────────────────────────────────────────────── */}
-      {showDeleteModal && selectedTeam && (
-        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={() => setShowDeleteModal(false)} />
-          <div className="relative w-full max-w-md glass rounded-[2.5rem] border border-red-500/30 shadow-2xl p-8 text-center">
-            <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Trash2 size={32} className="text-red-400" />
-            </div>
-            <h2 className="text-xl font-black uppercase mb-2">Delete Team?</h2>
-            <p className="text-white/40 text-sm mb-6">
-              Delete <span className="text-white font-bold">"{selectedTeam.name}"</span>? This removes all associated data and cannot be undone.
-            </p>
-            <div className="flex gap-3">
-              <button onClick={() => setShowDeleteModal(false)}
-                className="flex-1 py-3 rounded-xl bg-white/5 font-black uppercase tracking-widest hover:bg-white/10">
-                Cancel
-              </button>
-              <button onClick={handleConfirmDelete}
-                className="flex-1 py-3 rounded-xl bg-red-500 text-white font-black uppercase tracking-widest hover:bg-red-600">
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Matches Modal ────────────────────────────────────────────────────── */}
-      {showMatchesModal && selectedTeam && (
-        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={() => setShowMatchesModal(false)} />
-          <div className="relative w-full max-w-2xl glass rounded-[2.5rem] border border-white/10 shadow-2xl overflow-hidden max-h-[85vh]">
-            <div className="p-6 border-b border-white/10 flex items-center justify-between sticky top-0 bg-[#0B0E13]">
-              <h2 className="text-lg font-black uppercase">{selectedTeam.name} — Matches</h2>
-              <button onClick={() => setShowMatchesModal(false)} className="p-2 hover:bg-white/10 rounded-xl"><X size={20} /></button>
-            </div>
-            <div className="overflow-y-auto max-h-[60vh] divide-y divide-white/5">
-              {teamMatches.length === 0 ? (
-                <div className="p-12 text-center">
-                  <p className="text-white/30 font-bold uppercase">No matches found</p>
-                </div>
-              ) : teamMatches.map((m: any) => {
-                const done = ['full_time', 'completed', 'finished'].includes(m.status);
-                const live = ['first_half', 'second_half', 'extra_time', 'half_time'].includes(m.status);
-                return (
-                  <div key={m.id} className="flex items-center gap-4 px-6 py-4 hover:bg-white/[0.02]">
-                    <div className="flex-1 min-w-0">
-                      <p className="font-bold text-sm truncate">{m.homeTeam?.name} vs {m.awayTeam?.name}</p>
-                      <p className="text-[10px] text-white/30">{m.start_time ? new Date(m.start_time).toLocaleDateString() : '—'}</p>
-                    </div>
-                    {done ? (
-                      <span className="font-black text-brand-green">{m.home_score} – {m.away_score}</span>
-                    ) : live ? (
-                      <span className="text-[10px] font-black text-red-400 animate-pulse bg-red-400/10 px-2 py-1 rounded">LIVE</span>
-                    ) : (
-                      <span className="text-[10px] text-white/30 font-bold uppercase">{m.status}</span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Squad Dashboard (full-screen overlay) ──────────────────────────── */}
-      {showSquadDashboard && selectedTeam && (
-        <TeamSquadDashboard team={selectedTeam} onBack={() => setShowSquadDashboard(false)} />
-      )}
     </div>
   );
 }
