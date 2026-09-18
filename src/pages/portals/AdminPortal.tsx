@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { 
   Shield, Users, Calendar, Trophy, Newspaper, Settings, Target,
-  LogOut, TrendingUp, Activity, Plus, Menu, X, FileText, Bell
+  LogOut, TrendingUp, Activity, Plus, Menu, X, FileText, Bell, MessageSquare
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
@@ -212,7 +212,14 @@ export default function AdminPortal({ onNavigate }: { onNavigate: (page: string)
           ))}
         </nav>
 
-        <div className="pt-6 border-t border-white/10">
+        <div className="pt-6 border-t border-white/10 space-y-1">
+          <button
+            onClick={() => { window.location.hash = '/messages'; }}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-white/70 hover:bg-white/[0.06] hover:text-white transition-all font-bold text-sm"
+          >
+            <MessageSquare size={20} />
+            Messages
+          </button>
           <button onClick={handleSignOut} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-brand-red hover:bg-brand-red/10 transition-all font-bold text-sm">
             <LogOut size={20} />
             Sign Out
