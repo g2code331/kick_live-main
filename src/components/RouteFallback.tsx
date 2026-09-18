@@ -3,27 +3,25 @@ import { assetUrl } from "../lib/app-shell.ts";
 /**
  * The `Suspense` fallback for Phase 4's split routes (`src/App.tsx`).
  *
- * It is the boot splash's language, not a spinner: `App.tsx` already shows the mark, the wordmark colour and
- * three bouncing dots while auth resolves, so a route chunk arriving is the same visual event it already
- * handles. `prefers-reduced-motion` is respected the way the rest of the app respects it (Tailwind's
- * `motion-reduce:` variant strips the animation, leaving a static mark).
+ * It speaks the boot splash's language: the static wordmark plus a thin indeterminate progress bar —
+ * no spinning logo and no glow. `App.tsx` shows the same mark while auth resolves, so a route chunk
+ * arriving is the same visual event. `prefers-reduced-motion` is honoured in `index.css` (the bar
+ * freezes and the breathe stops), leaving a legible static mark.
  *
- * The image is `brand/icon-192.png` — the file the header is already loading — rather than a dedicated
- * spinner graphic, so a route change costs no bytes at all.
+ * The image is `brand/wordmark-480.png` — the file the splash is already loading — rather than a
+ * dedicated spinner graphic, so a route change costs no extra bytes.
  */
 export default function RouteFallback() {
   return (
-    <div className="relative min-h-[60vh] flex items-center justify-center" role="status" aria-live="polite">
-      <div className="text-center">
-        <div className="w-16 h-16 mx-auto mb-4 animate-pulse motion-reduce:animate-none">
-          <img src={assetUrl("brand/icon-192.png")} alt="" className="w-full h-full object-contain" />
-        </div>
-        <p className="text-[#39FF14] font-black uppercase tracking-[0.3em] text-xs">Loading</p>
-        <div className="flex gap-2 mt-3 justify-center">
-          <span className="w-1.5 h-1.5 bg-brand-green rounded-full animate-bounce motion-reduce:animate-none" style={{ animationDelay: "0ms" }} />
-          <span className="w-1.5 h-1.5 bg-brand-green rounded-full animate-bounce motion-reduce:animate-none" style={{ animationDelay: "150ms" }} />
-          <span className="w-1.5 h-1.5 bg-brand-green rounded-full animate-bounce motion-reduce:animate-none" style={{ animationDelay: "300ms" }} />
-        </div>
+    <div className="relative min-h-[60vh] flex items-center justify-center px-6" role="status" aria-live="polite">
+      <div className="text-center w-full max-w-[220px]">
+        <img
+          src={assetUrl("brand/wordmark-480.png")}
+          alt=""
+          className="w-full max-w-[180px] h-auto mx-auto mb-5 object-contain animate-brand-breathe"
+        />
+        <div className="loader-track h-1 w-full mx-auto" aria-label="Loading" />
+        <p className="mt-3 text-white/45 font-semibold uppercase tracking-[0.3em] text-[11px]">Loading</p>
       </div>
     </div>
   );

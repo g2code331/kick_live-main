@@ -27,7 +27,7 @@ const byFile = new Map(built.map((item) => [item.file, item]));
 
 /** Reference shapes only: prose that *names* a master is not a page loading it. */
 const MASTER_REF = /(?:src|href)=["']\.?\/?kicklive-(?:icon|wordmark|logo)\.png["']|assetUrl\(\s*["']kicklive-(?:icon|wordmark|logo)\.png|url\(\s*['"]?\/?kicklive-(?:icon|wordmark|logo)\.png/;
-const MASTERS = ["public/kicklive-icon.png", "public/kicklive-wordmark.png", "public/kicklive-logo.png"];
+const MASTERS = ["public/kicklive-icon.png", "public/kicklive-wordmark.png"];
 
 function sources(dir: string, out: string[] = []): string[] {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {

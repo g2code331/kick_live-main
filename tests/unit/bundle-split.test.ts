@@ -53,8 +53,11 @@ describe("bundle split · the route table", () => {
     assert.ok(suspenseAt > app.indexOf("<AppBackground />"), "AppBackground renders immediately; the fallback only replaces the route, not the page");
     const fallback = read("src/components/RouteFallback.tsx");
     assert.match(fallback, /role="status"/, "a loader that screen readers never announce is a loader nobody knows the reason for");
-    assert.match(fallback, /motion-reduce:/, "the app's existing reduced-motion rule applies to a new animation too");
-    assert.match(fallback, /brand\/icon-192\.png/, "the fallback reuses the mark the header already downloaded instead of adding bytes to the wait");
+    // Reduced motion is honoured in index.css (`.loader-track`/`.animate-brand-breathe` freeze under
+    // prefers-reduced-motion:reduce) rather than via a Tailwind `motion-reduce:` variant, so the pin is
+    // on the classes the CSS rule targets.
+    assert.match(fallback, /animate-brand-breathe|loader-track/, "the fallback uses the app's reduced-motion-aware loading language");
+    assert.match(fallback, /brand\/wordmark-480\.png/, "the fallback reuses the wordmark the splash already downloaded instead of adding bytes to the wait");
   });
 
   it("does not lazify FanPortal, which has never had a route", () => {

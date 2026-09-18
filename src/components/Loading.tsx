@@ -5,35 +5,29 @@ interface LoadingProps {
   size?: 'sm' | 'md' | 'lg';
 }
 
-export default function Loading({ text = 'LOADING...', size = 'md' }: LoadingProps) {
-  const sizeClasses = {
-    sm: 'w-12 h-12',
-    md: 'w-20 h-20',
-    lg: 'w-32 h-32'
+export default function Loading({ text = 'LOADING', size = 'md' }: LoadingProps) {
+  const markClasses = {
+    sm: 'max-w-[160px]',
+    md: 'max-w-[220px]',
+    lg: 'max-w-[300px]',
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-[#0B0E13]">
-      <div className="relative">
-        {/* Rotating Logo */}
-        <div className={`${sizeClasses[size]} animate-spin`}>
-          <img src={assetUrl("brand/icon-192.png")} alt="KickLive" className="w-full h-full object-contain" />
-        </div>
-        
-        {/* Pulsing Glow Effect */}
-        <div className="absolute inset-0 bg-brand-green/20 rounded-full blur-xl animate-pulse"></div>
-      </div>
-      
-      {/* Loading Text */}
-      <p className="text-brand-green font-black uppercase tracking-[0.3em] mt-6 animate-pulse">
-        {text}
-      </p>
-      
-      {/* Dots Animation */}
-      <div className="flex gap-2 mt-4">
-        <div className="w-2 h-2 bg-brand-green rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-        <div className="w-2 h-2 bg-brand-green rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-        <div className="w-2 h-2 bg-brand-green rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+    <div className="min-h-screen flex flex-col items-center justify-center bg-[#0B0E13] px-6">
+      <div className="w-full max-w-xs text-center">
+        {/* Static wordmark — no spin, no glow */}
+        <img
+          src={assetUrl("brand/wordmark-480.png")}
+          alt="KickLive"
+          className={`${markClasses[size]} w-full h-auto mx-auto mb-8 object-contain animate-brand-breathe`}
+        />
+
+        {/* Modern indeterminate progress bar */}
+        <div className="loader-track h-1 w-full max-w-[220px] mx-auto" role="status" aria-label={text} />
+
+        <p className="mt-4 text-white/50 font-semibold uppercase tracking-[0.3em] text-xs">
+          {text}
+        </p>
       </div>
     </div>
   );

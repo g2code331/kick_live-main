@@ -67,17 +67,15 @@ function AppContent() {
     return (
       <>
         <AppBackground />
-        <div className="relative min-h-screen flex items-center justify-center">
-          <div className="text-center z-10">
-            <div className="w-32 h-32 mx-auto mb-6 animate-spin">
-              <img src={assetUrl("brand/icon-192.png")} alt="KickLive" className="w-full h-full object-contain" />
-            </div>
-            <p className="text-[#39FF14] font-black uppercase tracking-[0.3em] animate-pulse">Loading...</p>
-            <div className="flex gap-2 mt-4 justify-center">
-              <div className="w-2 h-2 bg-brand-green rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-              <div className="w-2 h-2 bg-brand-green rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-              <div className="w-2 h-2 bg-brand-green rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-            </div>
+        <div className="relative min-h-screen flex items-center justify-center px-6">
+          <div className="text-center z-10 w-full max-w-xs">
+            <img
+              src={assetUrl("brand/wordmark-480.png")}
+              alt="KickLive"
+              className="w-full max-w-[280px] h-auto mx-auto mb-8 object-contain animate-brand-breathe"
+            />
+            <div className="loader-track h-1 w-full max-w-[220px] mx-auto" role="status" aria-label="Loading" />
+            <p className="mt-4 text-white/50 font-semibold uppercase tracking-[0.3em] text-xs">Loading</p>
           </div>
         </div>
       </>

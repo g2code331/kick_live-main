@@ -104,41 +104,24 @@ export default function Header() {
   return (
     <header className="sticky top-0 z-50 glass border-b border-white/10">
       <div className="container mx-auto px-4 py-3 relative flex items-center justify-between">
-        {/* Refresh Button (was the icon logo) */}
+        {/* Wordmark, doubling as the refresh control (no spin, no glow) */}
         <button
           onClick={handleRefresh}
           aria-label="Refresh app"
           title="Refresh"
-          className="relative flex items-center justify-center shrink-0 group focus:outline-none"
+          className="relative flex flex-col items-start shrink-0 group focus:outline-none"
         >
-          <span
-            className="absolute inset-0 rounded-full opacity-40 group-hover:opacity-70 transition-opacity duration-500 animate-brand-aura -z-10"
-            aria-hidden="true"
-          />
-          <img
-            src={assetUrl("brand/icon-192.png")}
-            alt="Refresh"
-            className={`relative h-14 sm:h-16 md:h-20 w-auto object-contain drop-shadow-[0_0_14px_rgba(57,255,20,0.5)] transition-transform duration-300 ${
-              isRefreshing ? 'animate-spin' : 'group-hover:rotate-[25deg] group-active:scale-90'
-            }`}
-          />
-        </button>
-
-        {/* Centered Wordmark Logo */}
-        <div
-          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center cursor-pointer"
-          onClick={() => navigate('/')}
-        >
-          <span
-            className="absolute inset-0 scale-150 rounded-full opacity-50 animate-brand-aura -z-10"
-            aria-hidden="true"
-          />
           <img
             src={assetUrl("brand/wordmark-312.png")}
             alt="KickLive"
-            className="relative h-9 sm:h-11 md:h-[3.25rem] w-auto object-contain drop-shadow-[0_0_10px_rgba(0,212,255,0.55)] hover:drop-shadow-[0_0_20px_rgba(255,0,212,0.7)] transition-all duration-300"
+            className="relative h-9 sm:h-11 md:h-[3.25rem] w-auto object-contain transition-opacity duration-300 group-hover:opacity-80 group-active:opacity-60"
           />
-        </div>
+          {/* Modern refresh affordance: a thin indeterminate bar, only while refreshing */}
+          <span
+            className={`loader-track mt-1 h-0.5 w-full transition-opacity duration-200 ${isRefreshing ? 'opacity-100' : 'opacity-0'}`}
+            aria-hidden="true"
+          />
+        </button>
 
         {/* Right Side */}
         <div className="flex items-center gap-3">

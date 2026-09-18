@@ -9,10 +9,13 @@ Please place your PNG logo files in this /public folder:
    - Used for: Browser tab favicon, login page, signup page, header
    - Recommended size: 512x512 pixels
 
-2. kicklive-logo.png (Optional - for future use)
-   - This is the horizontal banner logo
-   - Used for: Email headers, presentations, marketing
-   - Recommended size: 800x200 pixels
+2. kicklive-wordmark.png
+   - This is the horizontal wordmark logo (the "KickLive" lettering)
+   - Used for: the app header, the boot splash, the route/refresh loading states,
+     and email headers / presentations / marketing
+   - Recommended size: 1536x1024 pixels (3:2)
+   - The browser draws the derived public/brand/wordmark-312.png (built by
+     `npm run brand:assets`), never this master directly.
 
 =====================================
 IMPORTANT:
