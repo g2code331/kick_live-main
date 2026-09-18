@@ -97,11 +97,18 @@ fi
 
 # 3. the log-file switch and CSP header must be exercised somewhere: assert the knobs exist in the
 #    built bundle rather than launching a third time (cheap, and it fails if main.ts drops them).
-for needle in 'KICKLIVE_SMOKE_BAD_LOAD' 'FALLBACK_ACTIVE' 'X-KickLive-Feed' 'setDesktopName'; do
+#    NOTE: these must be strings the MAIN-PROCESS bundle (build/electron/main.cjs) actually contains.
+#    `X-KickLive-Feed` used to be listed here but that key only lives in shared/branding.ts's
+#    renderDesktopFile() — the .desktop generator — which main.ts never imports, so esbuild tree-shook
+#    it out and the needle failed silently (stderr only, no ::error::) on every run. The CSP header the
+#    comment means is `Content-Security-Policy` (set in main.ts's onHeadersReceived / brandCsp), and the
+#    log-file switch is `KICKLIVE_LOG_FILE`.
+for needle in 'KICKLIVE_SMOKE_BAD_LOAD' 'FALLBACK_ACTIVE' 'KICKLIVE_LOG_FILE' 'Content-Security-Policy' 'setDesktopName'; do
   if grep -q "$needle" build/electron/main.cjs; then
     echo "  ok: bundle contains ${needle}"
   else
     echo "  MISSING: build/electron/main.cjs no longer contains ${needle}" >&2
+    [ -n "${GITHUB_ACTIONS:-}" ] && printf '::error::desktop-smoke MISSING: build/electron/main.cjs no longer contains %s\n' "$needle"
     status=1
   fi
 done
