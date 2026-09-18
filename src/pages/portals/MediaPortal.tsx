@@ -102,6 +102,11 @@ export default function MediaPortal({ onNavigate }: MediaPortalProps) {
     { id: 'articles', label: 'Articles', icon: <Newspaper size={18} /> },
   ];
 
+  // Publishing takes over the whole screen with its own back button, instead of a modal overlay.
+  if (publisherOpen) {
+    return <MediaPublisher onBack={() => { setPublisherOpen(false); fetchArticles(); }} />;
+  }
+
   return (
     <div className="min-h-screen flex">
       {/* ── Toast ── */}
@@ -329,12 +334,6 @@ export default function MediaPortal({ onNavigate }: MediaPortalProps) {
           </div>
         )}
       </main>
-
-      {/* ── Publisher modal ── */}
-      <MediaPublisher
-        isOpen={publisherOpen}
-        onClose={() => { setPublisherOpen(false); fetchArticles(); }}
-      />
 
       {/* ── Edit modal ── */}
       {editTarget && (

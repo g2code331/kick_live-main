@@ -202,11 +202,10 @@ export default function SeasonManagement() {
         )}
       </div>
 
-      {/* Master Reset Modal */}
+      {/* Master Reset — inline panel (no overlay) */}
       {showResetConfirm && (
-        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={() => setShowResetConfirm(false)}></div>
-          <div className="relative w-full max-w-md glass rounded-[2rem] border border-white/10 p-6">
+        <div className="max-w-md">
+          <div className="glass rounded-[2rem] border border-brand-red/30 p-6">
             <div className="text-center mb-6">
               <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-brand-red/20 flex items-center justify-center">
                 <RotateCcw size={32} className="text-brand-red" />

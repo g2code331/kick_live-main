@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { X, Calendar, MapPin, Edit2, Search, Filter, Loader2, Play, RotateCcw } from 'lucide-react';
+import { Calendar, MapPin, Edit2, Search, Filter, Loader2, Play, RotateCcw } from 'lucide-react';
+import AdminPageShell from './AdminPageShell';
 import { invalidate, useQuery } from '../../../lib/data';
 // Reads go through `src/lib/data`. The two writes below do not, on purpose: a fixture reshuffle is a
 // privileged mutation, and moving writes behind the Worker is Phase 2's route-by-route migration, not
@@ -12,11 +13,10 @@ import MatchControlCenter from './MatchControlCenter';
 
 interface FixturesViewerProps {
   competition: any;
-  isOpen: boolean;
-  onClose: () => void;
+  onBack: () => void;
 }
 
-export default function FixturesViewer({ competition, isOpen, onClose }: FixturesViewerProps) {
+export default function FixturesViewer({ competition, onBack }: FixturesViewerProps) {
   const [fixtures, setFixtures] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -28,11 +28,11 @@ export default function FixturesViewer({ competition, isOpen, onClose }: Fixture
   // read embeds the two club names, which replaces the third query this screen used to issue for them. The
   // board also refreshes on the `fast` class now, which it never did — left open, it showed the schedule as
   // of whenever it was opened.
-  const clubs = useQuery(teamsIndex, {}, { enabled: isOpen });
+  const clubs = useQuery(teamsIndex, {}, { enabled: true });
   const rows = useQuery(
     competitionFixtures,
     { competitionId: Number(competition?.id ?? 0), limit: 200 },
-    { enabled: isOpen && !!competition?.id, poll: FRESHNESS.fast },
+    { enabled: !!competition?.id, poll: FRESHNESS.fast },
   );
   const teams = (clubs.data ?? []) as any[];
 
@@ -103,50 +103,50 @@ export default function FixturesViewer({ competition, isOpen, onClose }: Fixture
     f.awayTeam?.name?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  if (!isOpen) return null;
+  // Opening a fixture's live console takes over the whole page (its own back button returns here),
+  // instead of stacking a second overlay on top of this one.
+  if (isMatchControlOpen) {
+    return (
+      <MatchControlCenter
+        match={selectedMatch}
+        onBack={() => setIsMatchControlOpen(false)}
+        onUpdate={loadFixtures}
+      />
+    );
+  }
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-[#0B0E13]/95 backdrop-blur-xl" onClick={onClose}></div>
-      
-      <div className="relative w-full max-w-5xl glass rounded-[3rem] border border-white/10 shadow-2xl overflow-hidden flex flex-col h-[90vh] animate-in zoom-in-95 duration-500">
-        
-        {/* Header */}
-        <div className="p-10 border-b border-white/10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="flex items-center gap-4">
-            <div className="w-14 h-14 bg-[#39FF14]/10 rounded-2xl flex items-center justify-center text-[#39FF14]">
-              <Calendar size={28} />
-            </div>
-            <div>
-              <h2 className="text-2xl font-black italic uppercase tracking-tighter">{competition?.name}</h2>
-              <p className="text-xs text-white/40 uppercase tracking-widest font-black">Tournament Fixtures</p>
-            </div>
+    <AdminPageShell
+      title={competition?.name || 'Fixtures'}
+      subtitle="Tournament fixtures"
+      icon={<Calendar size={22} />}
+      onBack={onBack}
+      backLabel="Tournaments"
+      actions={
+        <>
+          <div className="relative hidden md:block">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20" size={16} />
+            <input 
+              type="text"
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+              placeholder="Search teams..."
+              className="bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 py-2 text-sm focus:outline-none focus:border-[#39FF14]/50 w-48 lg:w-56"
+            />
           </div>
-
-          <div className="flex items-center gap-4">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20" size={16} />
-              <input 
-                type="text"
-                value={searchTerm}
-                onChange={e => setSearchTerm(e.target.value)}
-                placeholder="Search teams..."
-                className="bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 py-2.5 text-sm focus:outline-none focus:border-[#39FF14]/50 w-64"
-              />
-            </div>
-            <button 
-              onClick={handleReshuffle}
-              disabled={isReshuffling || fixtures.length === 0}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-bold uppercase tracking-widest transition-all disabled:opacity-50"
-            >
-              <RotateCcw size={14} className={isReshuffling ? 'animate-spin' : ''} /> Reshuffle
-            </button>
-            <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors"><X /></button>
-          </div>
-        </div>
-
+          <button 
+            onClick={handleReshuffle}
+            disabled={isReshuffling || fixtures.length === 0}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-[10px] font-bold uppercase tracking-widest transition-all disabled:opacity-50"
+          >
+            <RotateCcw size={14} className={isReshuffling ? 'animate-spin' : ''} /> <span className="hidden sm:inline">Reshuffle</span>
+          </button>
+        </>
+      }
+    >
+      <div className="glass rounded-[2rem] lg:rounded-[3rem] border border-white/10 overflow-hidden flex flex-col">
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-10 no-scrollbar">
+        <div className="flex-1 p-6 lg:p-10">
           {loading ? (
             <div className="flex flex-col items-center justify-center h-64 gap-4">
                <Loader2 className="animate-spin text-[#39FF14]" size={32} />
@@ -203,15 +203,6 @@ export default function FixturesViewer({ competition, isOpen, onClose }: Fixture
           )}
         </div>
       </div>
-
-      {isMatchControlOpen && (
-        <MatchControlCenter 
-          match={selectedMatch} 
-          isOpen={isMatchControlOpen} 
-          onClose={() => setIsMatchControlOpen(false)} 
-          onUpdate={loadFixtures}
-        />
-      )}
-    </div>
+    </AdminPageShell>
   );
 }

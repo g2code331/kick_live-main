@@ -1,15 +1,13 @@
 import { useState, useEffect } from 'react';
 import { 
   Shield, Users, Calendar, Trophy, Newspaper, Settings, Target,
-  LogOut, TrendingUp, AlertCircle, CheckCircle, ChevronRight,
-  UserPlus, FileText, Activity, Plus
+  LogOut, TrendingUp, Activity, Plus, Menu, X, FileText
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
 import CompetitionWizard from './admin/CompetitionWizard';
 import CompetitionEditor from './admin/CompetitionEditor';
 import FixturesViewer from './admin/FixturesViewer';
-import PlayerCreator from './shared/PlayerCreator';
 import MediaPublisher from './shared/MediaPublisher';
 import AppSettingsDashboard from './admin/AppSettingsDashboard';
 import UserManagement from './admin/UserManagement';
@@ -18,7 +16,6 @@ import SystemMonitoring from './admin/SystemMonitoring';
 import TeamDashboard from './admin/TeamDashboard';
 import TableStatistics from './admin/TableStatistics';
 import MultiMatchQueue from './admin/MultiMatchQueue';
-import SeasonManagement from './admin/SeasonManagement';
 import { assetUrl } from '../../lib/media/assets';
 
 type AdminTab = 'overview' | 'users' | 'matches' | 'teams' | 'media' | 'competitions' | 'sponsorship' | 'monitoring' | 'tables' | 'settings';
@@ -35,16 +32,12 @@ export default function AdminPortal({ onNavigate }: { onNavigate: (page: string)
   const [_loading, setLoading] = useState(true);
   const [pendingTeamsCount, setPendingTeamsCount] = useState(0);
 
-  const [isCompetitionWizardOpen, setIsCompetitionWizardOpen] = useState(false);
-  const [isCompetitionEditorOpen, setIsCompetitionEditorOpen] = useState(false);
-  const [isFixturesViewerOpen, setIsFixturesViewerOpen] = useState(false);
+  // The sidebar can be shown/hidden on every breakpoint via the hamburger.
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Which full-page sub-screen (if any) is showing over the current tab. Each opens its own page
+  // with a back button instead of an overlay card.
+  const [subScreen, setSubScreen] = useState<null | 'wizard' | 'editor' | 'fixtures' | 'media'>(null);
   const [selectedCompetition, setSelectedCompetition] = useState<any>(null);
-  const [isPlayerCreatorOpen, setIsPlayerCreatorOpen] = useState(false);
-  const [isMediaPublisherOpen, setIsMediaPublisherOpen] = useState(false);
-  const [isTeamAdderOpen, setIsTeamAdderOpen] = useState(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [selectedTeam, setSelectedTeam] = useState<any>(null);
-  const [isTeamDashboardOpen, setIsTeamDashboardOpen] = useState(false);
 
   useEffect(() => {
     async function loadAdminData() {
@@ -132,6 +125,19 @@ export default function AdminPortal({ onNavigate }: { onNavigate: (page: string)
     }
   };
 
+  // Full-page sub-screens: each renders over the current tab with its own back button, replacing the
+  // old overlay cards. Wrapped so the page has normal padding and a dark background.
+  if (subScreen) {
+    return (
+      <div className="min-h-screen bg-[#0B0E13] p-4 lg:p-10">
+        {subScreen === 'wizard' && <CompetitionWizard onBack={() => setSubScreen(null)} />}
+        {subScreen === 'editor' && <CompetitionEditor competition={selectedCompetition} onBack={() => setSubScreen(null)} onUpdate={() => {}} />}
+        {subScreen === 'fixtures' && <FixturesViewer competition={selectedCompetition} onBack={() => setSubScreen(null)} />}
+        {subScreen === 'media' && <MediaPublisher onBack={() => setSubScreen(null)} />}
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#0B0E13] flex">
       {/* Admin Toast */}
@@ -143,20 +149,38 @@ export default function AdminPortal({ onNavigate }: { onNavigate: (page: string)
         </div>
       )}
 
-      {/* ── Sidebar — desktop only ──────────────────────────────────────── */}
-      <aside className="hidden lg:flex w-64 shrink-0 sticky top-0 h-screen glass border-r border-white/10 p-6 flex-col">
-        <div className="flex items-center gap-3 mb-10">
-          <div className="w-10 h-10 gradient-green rounded-xl flex items-center justify-center">
-            <Shield size={20} className="text-black" />
+      {/* ── Sidebar drawer — toggled by the hamburger on every breakpoint ──── */}
+      {/* Dimmed backdrop only for the navigation drawer (not a content card). */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
+          onClick={() => setSidebarOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+      <aside
+        className={`fixed inset-y-0 left-0 z-[70] w-72 max-w-[85vw] glass border-r border-white/10 p-6 flex flex-col transition-transform duration-300 ${
+          sidebarOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+        aria-hidden={!sidebarOpen}
+      >
+        <div className="flex items-center justify-between mb-10">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 gradient-green rounded-xl flex items-center justify-center">
+              <Shield size={20} className="text-black" />
+            </div>
+            <span className="font-black italic uppercase tracking-tighter text-lg">Admin<span className="text-[#39FF14]">Panel</span></span>
           </div>
-          <span className="font-black italic uppercase tracking-tighter text-lg">Admin<span className="text-[#39FF14]">Panel</span></span>
+          <button onClick={() => setSidebarOpen(false)} aria-label="Close menu" className="p-2 rounded-xl hover:bg-white/10 transition-colors">
+            <X size={20} />
+          </button>
         </div>
 
-        <nav className="flex-1 space-y-2">
+        <nav className="flex-1 space-y-2 overflow-y-auto no-scrollbar">
           {menuItems.map((item) => (
             <button
               key={item.id}
-              onClick={() => setActiveTab(item.id as AdminTab)}
+              onClick={() => { setActiveTab(item.id as AdminTab); setSubScreen(null); setSidebarOpen(false); }}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-bold text-sm ${
                 activeTab === item.id ? 'bg-[#39FF14]/10 text-[#39FF14]' : 'text-white/70 hover:text-white hover:bg-white/5'
               }`}
@@ -183,61 +207,19 @@ export default function AdminPortal({ onNavigate }: { onNavigate: (page: string)
       {/* ── Main Content ────────────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col min-h-screen overflow-x-hidden">
 
-        {/* ── Top header ──────────────────────────────────────────────── */}
-        <header className="glass border-b border-white/10 sticky top-0 z-50">
-          <div className="flex items-center justify-between px-4 lg:px-8 py-3">
-            {/* Left: logo (mobile) + title */}
-            <div className="flex items-center gap-3">
-              {/* Shield icon — only on mobile since desktop has sidebar */}
-              <div className="lg:hidden w-9 h-9 gradient-green rounded-xl flex items-center justify-center shrink-0">
-                <Shield size={16} className="text-black" />
-              </div>
-              <div>
-                <h1 className="text-lg lg:text-2xl font-black italic uppercase tracking-tighter leading-none">
-                  System <span className="text-[#39FF14]">Dashboard</span>
-                </h1>
-                <p className="text-white/40 text-[10px] hidden sm:block mt-0.5">Real-time infrastructure management</p>
-              </div>
-            </div>
-
-            {/* Right: actions */}
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setIsCompetitionWizardOpen(true)}
-                className="gradient-green text-black px-3 sm:px-5 py-2 rounded-xl font-black uppercase text-[10px] sm:text-xs tracking-widest flex items-center gap-1.5 hover:scale-105 transition-transform"
-              >
-                <Plus size={14} /> <span className="hidden xs:inline">New</span> Tournament
-              </button>
-              {/* Sign out — mobile only (desktop has sidebar) */}
-              <button onClick={handleSignOut} className="lg:hidden p-2 rounded-xl bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors">
-                <LogOut size={16} />
-              </button>
-            </div>
-          </div>
-
-          {/* ── Mobile tab bar ────────────────────────────────────────── */}
-          <div className="lg:hidden flex overflow-x-auto no-scrollbar gap-1 px-4 pb-3">
-            {menuItems.map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id as AdminTab)}
-                className={`relative flex items-center gap-1.5 px-3 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest whitespace-nowrap shrink-0 transition-all ${
-                  activeTab === tab.id
-                    ? 'bg-brand-green text-black shadow-lg shadow-brand-green/20'
-                    : 'text-white/70 hover:text-white hover:bg-white/10'
-                }`}
-              >
-                {tab.icon}
-                {tab.label}
-                {tab.badge > 0 && (
-                  <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-yellow-500 text-black text-[8px] font-black flex items-center justify-center">
-                    {tab.badge}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
-        </header>
+        {/* ── Slim top bar: only the hamburger. The old "System Dashboard" banner is gone. ── */}
+        <div className="sticky top-0 z-40 glass border-b border-white/10 px-4 lg:px-8 py-2.5 flex items-center gap-3">
+          <button
+            onClick={() => setSidebarOpen(true)}
+            aria-label="Open menu"
+            className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 transition-colors"
+          >
+            <Menu size={20} />
+          </button>
+          <span className="text-xs font-black uppercase tracking-widest text-white/50">
+            {menuItems.find((m) => m.id === activeTab)?.label ?? 'Admin'}
+          </span>
+        </div>
 
         {/* ── Page content ──────────────────────────────────────────────── */}
         <main className="flex-1 overflow-y-auto p-4 lg:p-10 pb-32">
@@ -348,7 +330,7 @@ export default function AdminPortal({ onNavigate }: { onNavigate: (page: string)
                   <p className="text-white/40 text-xs mt-1">{competitionsList.length} tournament{competitionsList.length !== 1 ? 's' : ''} configured</p>
                 </div>
                 <button
-                  onClick={() => setIsCompetitionWizardOpen(true)}
+                  onClick={() => setSubScreen('wizard')}
                   className="gradient-green text-black px-4 py-2.5 rounded-xl font-black uppercase text-xs tracking-widest flex items-center gap-2 hover:scale-105 transition-transform"
                 >
                   <Plus size={14} /> Create Tournament
@@ -362,7 +344,7 @@ export default function AdminPortal({ onNavigate }: { onNavigate: (page: string)
                   <p className="text-white/40 font-black uppercase tracking-widest mb-2">No tournaments yet</p>
                   <p className="text-white/20 text-sm mb-6">Create your first tournament to get started.</p>
                   <button
-                    onClick={() => setIsCompetitionWizardOpen(true)}
+                    onClick={() => setSubScreen('wizard')}
                     className="gradient-green text-black px-6 py-3 rounded-xl font-black uppercase text-xs tracking-widest flex items-center gap-2 mx-auto hover:scale-105 transition-transform"
                   >
                     <Plus size={14} /> Create First Tournament
@@ -387,13 +369,13 @@ export default function AdminPortal({ onNavigate }: { onNavigate: (page: string)
 
                       <div className="mt-auto grid grid-cols-3 gap-2 pt-5 border-t border-white/5">
                         <button
-                          onClick={() => { setSelectedCompetition(comp); setIsFixturesViewerOpen(true); }}
+                          onClick={() => { setSelectedCompetition(comp); setSubScreen('fixtures'); }}
                           className="py-2.5 bg-white/5 rounded-xl hover:bg-white/10 transition-colors text-[10px] font-black uppercase tracking-widest"
                         >
                           Fixtures
                         </button>
                         <button
-                          onClick={() => { setSelectedCompetition(comp); setIsCompetitionEditorOpen(true); }}
+                          onClick={() => { setSelectedCompetition(comp); setSubScreen('editor'); }}
                           className="py-2.5 bg-white/5 rounded-xl hover:bg-white/10 transition-colors text-[10px] font-black uppercase tracking-widest"
                         >
                           Edit
@@ -427,7 +409,7 @@ export default function AdminPortal({ onNavigate }: { onNavigate: (page: string)
                     <p className="text-white/40 text-sm">Manage all media content and publications</p>
                   </div>
                   <button
-                    onClick={() => setIsMediaPublisherOpen(true)}
+                    onClick={() => setSubScreen('media')}
                     className="gradient-green text-black px-4 lg:px-6 py-2.5 lg:py-3 rounded-xl font-black uppercase text-xs tracking-widest flex items-center gap-2"
                   >
                     <Plus size={14} /> New Article
@@ -470,23 +452,10 @@ export default function AdminPortal({ onNavigate }: { onNavigate: (page: string)
           {activeTab === 'monitoring' && <SystemMonitoring />}
           {activeTab === 'teams' && <TeamDashboard />}
           {activeTab === 'tables' && <TableStatistics />}
-          {activeTab === 'settings' && (
-            <div className="space-y-8">
-              <AppSettingsDashboard isOpen={true} onClose={() => setActiveTab('overview')} />
-              <SeasonManagement />
-            </div>
-          )}
+          {activeTab === 'settings' && <AppSettingsDashboard onBack={() => setActiveTab('overview')} />}
 
         </main>
       </div>
-
-      {/* Modals & Wizards */}
-      {isCompetitionWizardOpen && <CompetitionWizard isOpen={isCompetitionWizardOpen} onClose={() => setIsCompetitionWizardOpen(false)} />}
-      {isCompetitionEditorOpen && <CompetitionEditor competition={selectedCompetition} isOpen={isCompetitionEditorOpen} onClose={() => setIsCompetitionEditorOpen(false)} onUpdate={() => {}} />}
-      {isFixturesViewerOpen && <FixturesViewer competition={selectedCompetition} isOpen={isFixturesViewerOpen} onClose={() => setIsFixturesViewerOpen(false)} />}
-      {isPlayerCreatorOpen && <PlayerCreator isOpen={isPlayerCreatorOpen} onClose={() => setIsPlayerCreatorOpen(false)} />}
-      {isMediaPublisherOpen && <MediaPublisher isOpen={isMediaPublisherOpen} onClose={() => setIsMediaPublisherOpen(false)} />}
-      {isSettingsOpen && <AppSettingsDashboard isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />}
     </div>
   );
 }

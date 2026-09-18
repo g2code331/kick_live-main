@@ -3,10 +3,11 @@ import { X, Newspaper, Upload, Loader2, Image as ImageIcon, Link as LinkIcon, Re
 import { supabase } from "../../../lib/supabase";
 import { assetUrl } from "../../../lib/media/assets";
 import { uploadAsset, isMediaUploadError } from "../../../lib/media/upload";
+import AdminPageShell from "../admin/AdminPageShell";
 
 interface MediaPublisherProps {
-  isOpen: boolean;
-  onClose: () => void;
+  /** Return to the previous screen (replaces the old modal onClose). */
+  onBack: () => void;
 }
 
 /** The `news` category cap in workers/src/lib/mediaPolicy.ts, restated here so the
@@ -18,7 +19,7 @@ const ACCEPTED = ["image/png", "image/jpeg", "image/webp", "image/gif"];
 
 type UploadPhase = "idle" | "publishing" | "uploading" | "cancelling";
 
-export default function MediaPublisher({ isOpen, onClose }: MediaPublisherProps) {
+export default function MediaPublisher({ onBack }: MediaPublisherProps) {
   const [phase, setPhase] = useState<UploadPhase>("idle");
   const [progress, setProgress] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -43,23 +44,14 @@ export default function MediaPublisher({ isOpen, onClose }: MediaPublisherProps)
   // `/api/media/assets/...` path load from the right host).
   const previewSrc = staged ? staged.preview : (assetUrl(formData.image_url) ?? "");
 
-  // An object URL is a leak if nothing revokes it, and "close the modal" is exactly
-  // when nobody is watching any more.
+  // An object URL is a leak if nothing revokes it, and leaving this page (unmount) is
+  // exactly when nobody is watching any more.
   useEffect(() => {
-    if (!isOpen) {
+    return () => {
       abortRef.current?.abort();
       abortRef.current = null;
-      setProgress(0);
-      setPhase("idle");
-      setCanRetry(false);
-    }
-    return () => {
-      if (!isOpen && staged) URL.revokeObjectURL(staged.preview);
     };
-    // `staged` is read only to release its URL on close; re-running on every
-    // preview change would revoke a URL the preview is still using.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen]);
+  }, []);
 
   useEffect(
     () => () => {
@@ -152,12 +144,12 @@ export default function MediaPublisher({ isOpen, onClose }: MediaPublisherProps)
 
       if (error) throw error;
       const id = Number((data as { id?: number } | null)?.id ?? 0);
-      onClose();
 
       if (staged && id > 0) {
         articleIdRef.current = id;
         await storeStagedImage(id);
       }
+      onBack();
     } catch (err: any) {
       setPhase("idle");
       alert("Error publishing: " + (err?.message ?? "unknown error"));
@@ -169,32 +161,16 @@ export default function MediaPublisher({ isOpen, onClose }: MediaPublisherProps)
     abortRef.current?.abort();
   };
 
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 z-[250] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={busy ? undefined : onClose}></div>
-      <div className="relative w-full max-w-2xl glass rounded-[2.5rem] border border-white/10 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 max-h-[90vh] flex flex-col">
-        <div className="p-8 border-b border-white/10 flex items-center justify-between bg-gradient-to-r from-purple-500/10 to-transparent">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-purple-500 rounded-xl flex items-center justify-center">
-              <Newspaper className="text-white" size={20} />
-            </div>
-            <div>
-              <h2 className="text-xl font-black italic uppercase tracking-tighter">
-                Publish <span className="text-purple-500">Content</span>
-              </h2>
-              <p className="text-[10px] text-white/40 uppercase font-black tracking-widest">Media Distribution</p>
-            </div>
-          </div>
-          {/* One button, two meanings while a request is in flight: it stops the upload
-              rather than walking away from it mid-byte. */}
-          <button onClick={busy ? handleCancelUpload : onClose} title={busy ? "Cancel the upload in progress" : "Close"} className="p-2 hover:bg-white/10 rounded-full transition-colors">
-            <X size={20} />
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="p-8 space-y-6 overflow-y-auto no-scrollbar">
+    <AdminPageShell
+      title={<>Publish <span className="text-purple-500">Content</span></>}
+      subtitle="Media distribution"
+      icon={<Newspaper size={22} />}
+      onBack={busy ? handleCancelUpload : onBack}
+      backLabel={busy ? "Cancel" : "Back"}
+    >
+      <div className="glass rounded-[2rem] lg:rounded-[2.5rem] border border-white/10 overflow-hidden max-w-3xl">
+        <form onSubmit={handleSubmit} className="p-6 lg:p-8 space-y-6">
           <div className="space-y-2">
             <label className="text-[10px] font-black uppercase tracking-widest text-white/40">Article Title</label>
             <input
@@ -346,6 +322,6 @@ export default function MediaPublisher({ isOpen, onClose }: MediaPublisherProps)
           </div>
         </form>
       </div>
-    </div>
+    </AdminPageShell>
   );
 }

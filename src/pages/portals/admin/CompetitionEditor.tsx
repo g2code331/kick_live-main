@@ -1,15 +1,15 @@
 import { useState, useEffect } from 'react';
 import { X, Save, Trophy, Calendar, Clock, Settings, Loader2, Hash, Users, AlertTriangle, CheckCircle } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
+import AdminPageShell from './AdminPageShell';
 
 interface CompetitionEditorProps {
   competition: any;
-  isOpen: boolean;
-  onClose: () => void;
+  onBack: () => void;
   onUpdate: () => void;
 }
 
-export default function CompetitionEditor({ competition, isOpen, onClose, onUpdate }: CompetitionEditorProps) {
+export default function CompetitionEditor({ competition, onBack, onUpdate }: CompetitionEditorProps) {
   const [activeTab, setActiveTab] = useState<'general' | 'format' | 'schedule' | 'rules'>('general');
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -79,7 +79,7 @@ export default function CompetitionEditor({ competition, isOpen, onClose, onUpda
 
       alert('Competition updated successfully!');
       onUpdate();
-      onClose();
+      onBack();
     } catch (err: any) {
       alert('Error: ' + err.message);
     } finally {
@@ -87,31 +87,17 @@ export default function CompetitionEditor({ competition, isOpen, onClose, onUpda
     }
   };
 
-  if (!isOpen) return null;
-
   const hasMatches = competition?.matches_count > 0;
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-[#0B0E13]/95 backdrop-blur-xl" onClick={onClose}></div>
-      
-      <div className="relative w-full max-w-6xl glass rounded-[3rem] border border-white/10 shadow-2xl overflow-hidden flex flex-col h-[90vh] animate-in zoom-in-95 duration-500">
-        
-        {/* Header */}
-        <div className="px-10 py-8 border-b border-white/10 flex items-center justify-between bg-gradient-to-r from-green-500/10 to-blue-500/10">
-          <div className="flex items-center gap-4">
-            <div className="w-16 h-16 gradient-green rounded-2xl flex items-center justify-center shadow-lg shadow-green-500/30">
-              <Trophy className="text-black" size={32} />
-            </div>
-            <div>
-              <h2 className="text-3xl font-black italic uppercase tracking-tighter">Edit Competition</h2>
-              <p className="text-xs text-white/40 uppercase tracking-widest">{formData.season} Season</p>
-            </div>
-          </div>
-          <button onClick={onClose} className="p-3 hover:bg-white/10 rounded-full transition-colors">
-            <X size={24} />
-          </button>
-        </div>
+    <AdminPageShell
+      title="Edit Competition"
+      subtitle={`${formData.season} Season`}
+      icon={<Trophy size={22} />}
+      onBack={onBack}
+      backLabel="Tournaments"
+    >
+      <div className="glass rounded-[2rem] lg:rounded-[3rem] border border-white/10 overflow-hidden flex flex-col">
 
         {/* Tabs */}
         <div className="px-10 py-6 border-b border-white/10 flex gap-4 overflow-x-auto">
@@ -620,9 +606,9 @@ export default function CompetitionEditor({ competition, isOpen, onClose, onUpda
         </div>
 
         {/* Footer */}
-        <div className="px-10 py-6 border-t border-white/10 flex justify-end gap-4 bg-[#0B0E13]/90 backdrop-blur-xl">
+        <div className="px-6 lg:px-10 py-6 border-t border-white/10 flex justify-end gap-4 bg-white/[0.02]">
           <button 
-            onClick={onClose}
+            onClick={onBack}
             className="px-8 py-3 rounded-xl font-bold uppercase text-sm text-white/60 hover:text-white transition-colors"
           >
             Discard
@@ -637,6 +623,6 @@ export default function CompetitionEditor({ competition, isOpen, onClose, onUpda
           </button>
         </div>
       </div>
-    </div>
+    </AdminPageShell>
   );
 }
