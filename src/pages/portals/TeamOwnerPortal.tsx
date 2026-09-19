@@ -5,7 +5,7 @@ import {
   Activity, ChevronRight, Save, Edit2, Trash2, Shield, AlertCircle,
   CheckCircle2, XCircle, Home, X, Star, Loader2, ArrowLeft, User,
   Image, Newspaper, Layout, Target, TrendingUp, RefreshCw, Hash, Globe,
-  ChevronDown, BookOpen, Camera, Film, Eye, EyeOff, Zap
+  ChevronDown, BookOpen, Camera, Film, Eye, EyeOff, Zap, MessageSquare
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
@@ -133,6 +133,9 @@ export default function TeamOwnerPortal() {
           <div className="flex items-center gap-2">
             <button onClick={() => navigate(`/team/${team.id}`)} className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 text-white/40 hover:bg-white/10 font-bold text-xs">
               <Eye size={13} /> Public Page
+            </button>
+            <button onClick={() => navigate('/messages')} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 text-white/60 hover:bg-white/10 hover:text-white font-bold text-xs">
+              <MessageSquare size={13} /> Messages
             </button>
             <button onClick={() => navigate('/')} className="p-2 rounded-xl bg-white/5 text-white/40 hover:bg-white/10">
               <ArrowLeft size={16} />

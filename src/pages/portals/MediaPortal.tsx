@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   Newspaper, LogOut, TrendingUp, Eye, Clock, Plus,
   Edit, Trash2, CheckCircle2, XCircle, Loader2, RefreshCw, Save,
-  Upload, BarChart3, FileText, Search
+  Upload, BarChart3, FileText, Search, MessageSquare
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
@@ -201,6 +201,13 @@ export default function MediaPortal({ onNavigate }: MediaPortalProps) {
               <p className="text-[10px] text-white/30 uppercase tracking-widest">Publisher</p>
             </div>
           </div>
+          <button
+            onClick={() => onNavigate('/messages')}
+            className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-white/60 hover:text-white hover:bg-white/[0.06] transition-all font-bold text-sm"
+          >
+            <MessageSquare size={16} />
+            Messages
+          </button>
           <button
             onClick={handleSignOut}
             className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-white/40 hover:text-red-400 hover:bg-red-400/5 transition-all font-bold text-sm"

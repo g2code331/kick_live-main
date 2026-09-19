@@ -34,6 +34,7 @@ export const NOTIFICATION_PRIORITY: Record<NotificationKind, number> = {
   news: 20,
   system: 45,
   announcement: 35,
+  message: 65,
 };
 
 /**
@@ -52,10 +53,11 @@ export const NOTIFICATION_TTL_HOURS: Record<NotificationKind, number | null> = {
   news: 24 * 14,
   system: null,
   announcement: 24 * 14,
+  message: null,
 };
 
 /** Which kinds are allowed to reach a device at all, whatever the recipient's preference says. */
-export const PUSHABLE_KINDS: readonly NotificationKind[] = ["goal", "red_card", "half_time", "full_time", "match_start", "match_reminder", "system", "announcement"];
+export const PUSHABLE_KINDS: readonly NotificationKind[] = ["goal", "red_card", "half_time", "full_time", "match_start", "match_reminder", "system", "announcement", "message"];
 
 /**
  * The event→category map. `second_yellow` is a red card by definition; a penalty and an own goal are both

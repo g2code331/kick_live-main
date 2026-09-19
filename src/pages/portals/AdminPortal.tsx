@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { 
   Shield, Users, Calendar, Trophy, Newspaper, Settings, Target,
-  LogOut, TrendingUp, Activity, Plus, Menu, X, FileText
+  LogOut, TrendingUp, Activity, Plus, Menu, X, FileText, Bell, MessageSquare
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
@@ -15,10 +15,11 @@ import SponsorshipManager from './admin/SponsorshipManager';
 import SystemMonitoring from './admin/SystemMonitoring';
 import TeamDashboard from './admin/TeamDashboard';
 import TableStatistics from './admin/TableStatistics';
+import NotificationSender from './admin/NotificationSender';
 import MultiMatchQueue from './admin/MultiMatchQueue';
 import { assetUrl } from '../../lib/media/assets';
 
-type AdminTab = 'overview' | 'users' | 'matches' | 'teams' | 'media' | 'competitions' | 'sponsorship' | 'monitoring' | 'tables' | 'settings';
+type AdminTab = 'overview' | 'users' | 'matches' | 'teams' | 'media' | 'competitions' | 'sponsorship' | 'monitoring' | 'tables' | 'notifications' | 'settings';
 
 export default function AdminPortal({ onNavigate }: { onNavigate: (page: string) => void }) {
   const { profile, signOut } = useAuth();
@@ -38,6 +39,14 @@ export default function AdminPortal({ onNavigate }: { onNavigate: (page: string)
   // with a back button instead of an overlay card.
   const [subScreen, setSubScreen] = useState<null | 'wizard' | 'editor' | 'fixtures' | 'media'>(null);
   const [selectedCompetition, setSelectedCompetition] = useState<any>(null);
+
+  // Re-checkable on demand: the pending-team count feeds both the sidebar badge and the overview banner,
+  // so a stale value after an approve/reject leaves a phantom "awaiting approval" notice (bug #4). It is
+  // refreshed here whenever the overview is shown and by TeamDashboard's onReview callback after a decision.
+  const refreshPendingCount = useCallback(async () => {
+    const pending = await supabase.from('teams').select('id', { count: 'exact', head: true }).eq('status', 'pending');
+    setPendingTeamsCount(pending.count || 0);
+  }, []);
 
   useEffect(() => {
     async function loadAdminData() {
@@ -72,6 +81,12 @@ export default function AdminPortal({ onNavigate }: { onNavigate: (page: string)
     loadAdminData();
   }, []);
 
+  // Whenever the admin lands back on the overview, re-verify the pending count so the banner cannot
+  // outlive the queue it describes.
+  useEffect(() => {
+    if (activeTab === 'overview') void refreshPendingCount();
+  }, [activeTab, refreshPendingCount]);
+
   const handleSignOut = async () => {
     await signOut();
     window.location.hash = '/login';
@@ -89,6 +104,7 @@ export default function AdminPortal({ onNavigate }: { onNavigate: (page: string)
     { id: 'sponsorship', label: 'Sponsorship', icon: <Trophy size={16} />, badge: 0 },
     { id: 'monitoring', label: 'Monitoring', icon: <Activity size={16} />, badge: 0 },
     { id: 'tables', label: 'Tables', icon: <Target size={16} />, badge: 0 },
+    { id: 'notifications', label: 'Notify', icon: <Bell size={16} />, badge: 0 },
     { id: 'settings', label: 'Settings', icon: <Settings size={16} />, badge: 0 },
   ];
 
@@ -196,7 +212,14 @@ export default function AdminPortal({ onNavigate }: { onNavigate: (page: string)
           ))}
         </nav>
 
-        <div className="pt-6 border-t border-white/10">
+        <div className="pt-6 border-t border-white/10 space-y-1">
+          <button
+            onClick={() => { window.location.hash = '/messages'; }}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-white/70 hover:bg-white/[0.06] hover:text-white transition-all font-bold text-sm"
+          >
+            <MessageSquare size={20} />
+            Messages
+          </button>
           <button onClick={handleSignOut} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-brand-red hover:bg-brand-red/10 transition-all font-bold text-sm">
             <LogOut size={20} />
             Sign Out
@@ -450,8 +473,9 @@ export default function AdminPortal({ onNavigate }: { onNavigate: (page: string)
           {activeTab === 'users' && <UserManagement />}
           {activeTab === 'sponsorship' && <SponsorshipManager />}
           {activeTab === 'monitoring' && <SystemMonitoring />}
-          {activeTab === 'teams' && <TeamDashboard />}
+          {activeTab === 'teams' && <TeamDashboard onReview={() => void refreshPendingCount()} />}
           {activeTab === 'tables' && <TableStatistics />}
+          {activeTab === 'notifications' && <NotificationSender onBack={() => setActiveTab('overview')} />}
           {activeTab === 'settings' && <AppSettingsDashboard onBack={() => setActiveTab('overview')} />}
 
         </main>

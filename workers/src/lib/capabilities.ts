@@ -45,6 +45,9 @@ export type Capability =
   | "media.delete"
   // notifications
   | "notifications.broadcast"
+  // messaging (Phase 15)
+  | "messaging.use"
+  | "messaging.staff"
   // future monetisation surfaces (kept as separate capability families on purpose)
   | "advertiser.manage"
   | "campaign.manage"
@@ -95,6 +98,11 @@ const MATRIX: Record<Capability, readonly AppRole[]> = {
   "media.delete": ["admin"],
 
   "notifications.broadcast": ["admin"],
+
+  // Any authenticated account may hold a conversation with the staff desk; only staff may open one
+  // addressed to a chosen user. The RPCs re-check auth.uid()/role, so these are the coarse gate only.
+  "messaging.use": ["fan", "team_manager", "media", "admin"],
+  "messaging.staff": ["media", "admin"],
 
   "advertiser.manage": ["admin"],
   "campaign.manage": ["admin"],

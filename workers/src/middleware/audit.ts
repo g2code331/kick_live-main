@@ -77,6 +77,10 @@ export const SELF_SERVICE_CAPABILITIES: readonly string[] = [
   // A broadcaster claiming a match and standing down from it: an action on their own assignment, and
   // `kicklive_assign_match` / `kicklive_stand_down_assignment` already write the audit row themselves.
   "match.assign",
+  // Messaging with the staff desk: sending into and closing one's own conversations is a self-service act
+  // (the RPC takes the actor from auth.uid()). The one privileged half — staff opening a thread addressed
+  // to a chosen user (`messaging.staff`) — is catalogued in AUDIT_ACTIONS below.
+  "messaging.use",
 ];
 
 /**
@@ -118,6 +122,9 @@ export const AUDIT_ACTIONS: Record<string, { action: string; entityType: string;
   "POST /sponsorship/admin/maintenance": { action: "sponsorship.maintenance", entityType: "system" },
   // notifications — Phase 5, staff side
   "POST /admin/notifications/broadcast": { action: "notifications.broadcast", entityType: "notification_jobs" },
+  "POST /admin/notifications/direct": { action: "notifications.direct", entityType: "notification_jobs" },
+  // messaging — Phase 15, staff-initiated only (user sends are self-service)
+  "POST /messages/start": { action: "messaging.start", entityType: "message_threads" },
   // observability — Phase 9
   "POST /observability/admin/maintenance": { action: "observability.maintenance", entityType: "system" },
   "POST /observability/admin/probe": { action: "observability.health_probe", entityType: "system" },

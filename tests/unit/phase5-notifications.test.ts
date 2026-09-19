@@ -32,6 +32,13 @@ const src = fs.readFileSync(MIGRATION, "utf8");
 /** The file without `--` comment lines: statements, not prose. */
 const code = src.replace(/^\s*--.*$/gm, "");
 
+// Phase 17 added the twelfth category ("message") by REDEFINING the three CHECK constraints, both inline
+// kind lists and the defaults literal on top of phase 5. Those objects are therefore authoritative in the
+// phase-17 file now, not phase 5 — so the vocabulary parity checks read from there, while everything else
+// (the trigger, the unique constraints, the grants) still reads the phase-5 source that owns them.
+const VOCAB_MIGRATION = path.join(REPO, "supabase/migrations/20260920120000_phase17_message_category.sql");
+const vocabCode = fs.readFileSync(VOCAB_MIGRATION, "utf8").replace(/^\s*--.*$/gm, "");
+
 /**
  * Whitespace collapsed. The SQL wraps lines for legibility, and a test that depends on where a line breaks is
  * a test that fails the next time someone improves the formatting — which trains people to delete tests.
@@ -40,13 +47,13 @@ const norm = (s: string) => s.replace(/\s+/g, " ").trim();
 const has = (haystack: string, needle: string, what: string) => assert.ok(norm(haystack).includes(norm(needle)), `${what}\n    expected to find: ${norm(needle)}`);
 
 /** The body of `create or replace function public.<name>(…)`, up to the closing `$$;`. */
-function fnBody(name: string): string {
-  const at = code.indexOf(`create or replace function public.${name}(`);
+function fnBody(name: string, from: string = code): string {
+  const at = from.indexOf(`create or replace function public.${name}(`);
   assert.ok(at >= 0, `${name} is not defined in the migration`);
-  const open = code.indexOf("as $$", at);
-  const close = code.indexOf("$$;", open);
+  const open = from.indexOf("as $$", at);
+  const close = from.indexOf("$$;", open);
   assert.ok(open > 0 && close > open, `${name} has no $$ body`);
-  return code.slice(open + 4, close);
+  return from.slice(open + 4, close);
 }
 
 /** The argument list of a function, as declared — found by counting parens, because one-line and wrapped
@@ -64,9 +71,11 @@ function fnArgs(name: string): string {
   return code.slice(at + head.length, i - 1);
 }
 
-/** The kind list inside a `check (kind in (…))`, parsed rather than string-compared. */
+/** The kind list inside a `check (kind in (…))`, parsed rather than string-compared. Reads the phase-17
+ *  vocabulary source, which redefines all three constraints. */
 function kindsIn(constraint: string): string[] {
-  const flat = norm(code);
+  const flat = norm(vocabCode);
+  // Phase 17 uses `add constraint <name> check (kind in (…))`; match on the constraint name + kind clause.
   const at = flat.indexOf(`constraint ${constraint} check (kind in (`);
   assert.ok(at >= 0, `${constraint} does not gate on kind`);
   const open = at + `constraint ${constraint} check (kind in (`.length;
@@ -76,9 +85,10 @@ function kindsIn(constraint: string): string[] {
     .map((x) => x.trim().replace(/^'|'$/g, ""));
 }
 
-/** Every `unnest(array[…]) as k(ind)?` list, as parsed kinds. */
+/** Every `unnest(array[…]) as k(ind)?` list, as parsed kinds — from the phase-17 source that redefines both
+ *  preference RPCs. */
 function inlineKindLists(): string[][] {
-  return [...norm(code).matchAll(/select unnest\(array\[([^\]]+)\]\) as k(?:ind)?/g)].map((m) => m[1]!.split(",").map((x) => x.trim().replace(/^'|'$/g, "")));
+  return [...norm(vocabCode).matchAll(/select unnest\(array\[([^\]]+)\]\) as k(?:ind)?/g)].map((m) => m[1]!.split(",").map((x) => x.trim().replace(/^'|'$/g, "")));
 }
 
 describe("phase5 · the vocabulary is one list, repeated as little as SQL allows", () => {
@@ -97,12 +107,17 @@ describe("phase5 · the vocabulary is one list, repeated as little as SQL allows
   });
 
   it("matches the TypeScript the settings screen renders", () => {
-    assert.equal(NOTIFICATION_KINDS.length, 11, "the brief's categories, no more");
-    assert.deepEqual([...NOTIFICATION_KINDS], ["goal", "red_card", "half_time", "full_time", "match_start", "match_reminder", "team_update", "competition_update", "news", "system", "announcement"]);
+    // Eleven from the brief plus `message` (phase 17), which gave staff-reply alerts their own switch.
+    assert.equal(NOTIFICATION_KINDS.length, 12, "the brief's categories plus message");
+    assert.deepEqual(
+      [...NOTIFICATION_KINDS],
+      ["goal", "red_card", "half_time", "full_time", "match_start", "match_reminder", "team_update", "competition_update", "news", "system", "announcement", "message"],
+    );
   });
 
   it("drives the preference defaults on both sides", () => {
-    const body = fnBody("kicklive_preference_defaults");
+    // Phase 17 redefines the defaults literal, so read it from the vocabulary source.
+    const body = fnBody("kicklive_preference_defaults", vocabCode);
     assert.ok(/select '\{/.test(norm(body)) && /\}'::jsonb/.test(norm(body)), "the defaults must be a literal jsonb object, so there is nothing to compute wrongly");
     const lines = [...body.matchAll(/"(\w+)": (true|false)/g)].map((m) => `${m[1]}=${m[2]}`);
     assert.deepEqual(

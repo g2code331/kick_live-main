@@ -40,6 +40,7 @@ const PlayerProfile = lazy(() => import("./pages/PlayerProfile"));
 const MatchDetails = lazy(() => import("./pages/MatchDetails"));
 const ProfilePage = lazy(() => import("./pages/ProfilePage"));
 const NewsPage = lazy(() => import("./pages/NewsPage"));
+const MessagesPage = lazy(() => import("./pages/MessagesPage"));
 import { initDataLayer } from "./lib/data";
 import { log } from "./lib/log";
 import { assetUrl } from "./lib/app-shell.ts";
@@ -106,6 +107,7 @@ function AppContent() {
         <Route path="/forgot-password" element={<ForgotPasswordPage onNavigate={handleNavigate} />} />
         {/* User Profile */}
         <Route path="/profile" element={<ProfilePage />} />
+        <Route path="/messages" element={user ? <MessagesPage /> : <Navigate to="/login" />} />
         {/*
           Protected Portal Routes — UX only, and deliberately not a security control.
           `profile.role` is a value the browser can overwrite, so these guards only stop honest users

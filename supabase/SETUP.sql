@@ -27,7 +27,7 @@
 -- ============================================================================
 
 -- >>> BEGIN section 1: KICKLIVE_FINAL_SCHEMA.sql >>>
-SELECT '1 / 13: KICKLIVE_FINAL_SCHEMA.sql' AS kicklive_sql_section;
+SELECT '1 / 17: KICKLIVE_FINAL_SCHEMA.sql' AS kicklive_sql_section;
 
 -- ============================================================================
 -- AUTHORITATIVE BASE SCHEMA
@@ -933,7 +933,7 @@ NOTIFY pgrst, 'reload schema';
 -- <<< END section 1: KICKLIVE_FINAL_SCHEMA.sql <<<
 
 -- >>> BEGIN section 2: supabase/migrations/20260909120000_phase1_security_hardening.sql >>>
-SELECT '2 / 13: supabase/migrations/20260909120000_phase1_security_hardening.sql' AS kicklive_sql_section;
+SELECT '2 / 17: supabase/migrations/20260909120000_phase1_security_hardening.sql' AS kicklive_sql_section;
 
 -- ============================================================================
 --  Kick Live — Phase 1 production hardening
@@ -1935,7 +1935,7 @@ notify pgrst, 'reload schema';
 -- <<< END section 2: supabase/migrations/20260909120000_phase1_security_hardening.sql <<<
 
 -- >>> BEGIN section 3: supabase/migrations/20260909210000_phase3_live_match_engine.sql >>>
-SELECT '3 / 13: supabase/migrations/20260909210000_phase3_live_match_engine.sql' AS kicklive_sql_section;
+SELECT '3 / 17: supabase/migrations/20260909210000_phase3_live_match_engine.sql' AS kicklive_sql_section;
 
 -- ============================================================================
 --  Kick Live — Phase 3: the live match engine
@@ -3843,7 +3843,7 @@ notify pgrst, 'reload schema';
 -- <<< END section 3: supabase/migrations/20260909210000_phase3_live_match_engine.sql <<<
 
 -- >>> BEGIN section 4: supabase/migrations/20260910120000_phase4_read_aggregates.sql >>>
-SELECT '4 / 13: supabase/migrations/20260910120000_phase4_read_aggregates.sql' AS kicklive_sql_section;
+SELECT '4 / 17: supabase/migrations/20260910120000_phase4_read_aggregates.sql' AS kicklive_sql_section;
 
 -- ============================================================================
 --  KICKLIVE · Phase 4 — read aggregates
@@ -4165,7 +4165,7 @@ commit;
 -- <<< END section 4: supabase/migrations/20260910120000_phase4_read_aggregates.sql <<<
 
 -- >>> BEGIN section 5: supabase/migrations/20260911120000_phase5_notifications.sql >>>
-SELECT '5 / 13: supabase/migrations/20260911120000_phase5_notifications.sql' AS kicklive_sql_section;
+SELECT '5 / 17: supabase/migrations/20260911120000_phase5_notifications.sql' AS kicklive_sql_section;
 
 -- ============================================================================
 --  KICKLIVE · Phase 5 — notification system
@@ -5681,7 +5681,7 @@ commit;
 -- <<< END section 5: supabase/migrations/20260911120000_phase5_notifications.sql <<<
 
 -- >>> BEGIN section 6: supabase/migrations/20260912120000_phase6_r2_media.sql >>>
-SELECT '6 / 13: supabase/migrations/20260912120000_phase6_r2_media.sql' AS kicklive_sql_section;
+SELECT '6 / 17: supabase/migrations/20260912120000_phase6_r2_media.sql' AS kicklive_sql_section;
 
 -- ============================================================================
 -- Kick Live — Phase 6 migration: media registry for R2 storage
@@ -6891,7 +6891,7 @@ notify pgrst, 'reload schema';
 -- <<< END section 6: supabase/migrations/20260912120000_phase6_r2_media.sql <<<
 
 -- >>> BEGIN section 7: supabase/migrations/20260913120000_phase7_advertising.sql >>>
-SELECT '7 / 13: supabase/migrations/20260913120000_phase7_advertising.sql' AS kicklive_sql_section;
+SELECT '7 / 17: supabase/migrations/20260913120000_phase7_advertising.sql' AS kicklive_sql_section;
 
 -- ═══════════════════════════════════════════════════════════════════════════
 --  Kick Live · Phase 7 migration 1/1 — advertising and sponsorship infrastructure
@@ -9642,7 +9642,7 @@ notify pgrst, 'reload schema';
 -- <<< END section 7: supabase/migrations/20260913120000_phase7_advertising.sql <<<
 
 -- >>> BEGIN section 8: supabase/migrations/20260914120000_phase8_sponsorship.sql >>>
-SELECT '8 / 13: supabase/migrations/20260914120000_phase8_sponsorship.sql' AS kicklive_sql_section;
+SELECT '8 / 17: supabase/migrations/20260914120000_phase8_sponsorship.sql' AS kicklive_sql_section;
 
 -- ============================================================================
 -- KICK LIVE · Phase 8 · sponsorship
@@ -11787,7 +11787,7 @@ commit;
 -- <<< END section 8: supabase/migrations/20260914120000_phase8_sponsorship.sql <<<
 
 -- >>> BEGIN section 9: supabase/migrations/20260915120000_phase9_observability.sql >>>
-SELECT '9 / 13: supabase/migrations/20260915120000_phase9_observability.sql' AS kicklive_sql_section;
+SELECT '9 / 17: supabase/migrations/20260915120000_phase9_observability.sql' AS kicklive_sql_section;
 
 -- ============================================================================
 -- Phase 9 — analytics, monitoring and observability
@@ -13923,7 +13923,7 @@ $verify$;
 -- <<< END section 9: supabase/migrations/20260915120000_phase9_observability.sql <<<
 
 -- >>> BEGIN section 10: supabase/migrations/20260916120000_phase10_privilege_tightening.sql >>>
-SELECT '10 / 13: supabase/migrations/20260916120000_phase10_privilege_tightening.sql' AS kicklive_sql_section;
+SELECT '10 / 17: supabase/migrations/20260916120000_phase10_privilege_tightening.sql' AS kicklive_sql_section;
 
 -- =============================================================================
 -- Phase 10 · privilege tightening — profile contact fields
@@ -14273,7 +14273,7 @@ $verify$;
 -- <<< END section 10: supabase/migrations/20260916120000_phase10_privilege_tightening.sql <<<
 
 -- >>> BEGIN section 11: supabase/migrations/20260916130000_phase11_privilege_tightening.sql >>>
-SELECT '11 / 13: supabase/migrations/20260916130000_phase11_privilege_tightening.sql' AS kicklive_sql_section;
+SELECT '11 / 17: supabase/migrations/20260916130000_phase11_privilege_tightening.sql' AS kicklive_sql_section;
 
 -- ============================================================================
 -- STEP 20 · "a dashboard session" was defined as "a superuser session", and on Supabase it is not one
@@ -14555,7 +14555,7 @@ notify pgrst, 'reload schema';   -- PostgREST must see the two new/changed funct
 -- <<< END section 11: supabase/migrations/20260916130000_phase11_privilege_tightening.sql <<<
 
 -- >>> BEGIN section 12: supabase/migrations/20260916220000_phase12_profile_table_grants.sql >>>
-SELECT '12 / 13: supabase/migrations/20260916220000_phase12_profile_table_grants.sql' AS kicklive_sql_section;
+SELECT '12 / 17: supabase/migrations/20260916220000_phase12_profile_table_grants.sql' AS kicklive_sql_section;
 
 -- STEP 21 · the privilege layer the phases never touched: TRUNCATE / DELETE / INSERT
 -- Two tables: public.profiles (every account) and public.activity_logs (the audit trail — production's own
@@ -14635,7 +14635,7 @@ notify pgrst, 'reload schema';
 -- <<< END section 12: supabase/migrations/20260916220000_phase12_profile_table_grants.sql <<<
 
 -- >>> BEGIN section 13: supabase/migrations/20260916230000_phase13_truncate_lockdown.sql >>>
-SELECT '13 / 13: supabase/migrations/20260916230000_phase13_truncate_lockdown.sql' AS kicklive_sql_section;
+SELECT '13 / 17: supabase/migrations/20260916230000_phase13_truncate_lockdown.sql' AS kicklive_sql_section;
 
 -- STEP 22 · the one privilege that survived every narrowing: TRUNCATE, schema-wide
 -- Phases 1–12 revoked TRUNCATE on exactly two tables (profiles, activity_logs) because those were the two the
@@ -14752,3 +14752,1136 @@ notify pgrst, 'reload schema';
 ;
 
 -- <<< END section 13: supabase/migrations/20260916230000_phase13_truncate_lockdown.sql <<<
+
+-- >>> BEGIN section 14: supabase/migrations/20260917120000_phase14_targeted_notifications.sql >>>
+SELECT '14 / 17: supabase/migrations/20260917120000_phase14_targeted_notifications.sql' AS kicklive_sql_section;
+
+-- ─────────────────────────────────────────────────────────────────────────────────────────────────
+-- Phase 14 · Targeted admin notifications (by role, or to one account)
+-- ─────────────────────────────────────────────────────────────────────────────────────────────────
+--
+-- Phase 5 gave admins one many-to-many send: `kicklive_broadcast_notification`, which reaches every
+-- notification-enabled account of a given kind ("all-enabled"). This phase adds the narrower sends the
+-- admin console needs — "all team managers", "all media", "all admins", or "one person" — WITHOUT
+-- touching the broadcast path, the trigger path, or the queue/delivery machinery.
+--
+-- The design keeps a single source of truth for "who is entitled to be told":
+--
+--   * A new job-aware resolver, `kicklive_notification_audience_job(job_id)`, starts from the SAME
+--     preference-respecting rule as phase 5's `kicklive_notification_audience(...)` and then intersects it
+--     with an optional target stored in the job's metadata (`metadata.target`). A job with no target
+--     resolves to exactly the phase-5 audience, so every existing broadcast and every event job behaves
+--     identically — this is the invariant the verification block at the end asserts.
+--
+--   * The two delivery-time functions (`kicklive_notification_recipients` and
+--     `kicklive_materialise_notifications`) are repointed at the job-aware resolver. That is the only
+--     behavioural change to existing functions, and it is a no-op for untargeted jobs.
+--
+--   * A new admin RPC, `kicklive_send_targeted_notification(...)`, validates like the broadcast RPC
+--     (admin-gated, same kind whitelist, same length limits, same audience cap / confirmation wall) and
+--     writes a job carrying `metadata.target`.
+--
+-- Source of truth is this migration; regenerate the bundle with `npm run sql:bundle`. Do not hand-edit
+-- supabase/SETUP.sql.
+
+-- ── 0. widen the has-target constraint so a non-match job is legal ────────────────────────────────────
+--
+-- Phase 5's `notification_jobs_has_target` reads:
+--   check (match_id is not null or competition_id is not null or team_id is not null or kind = 'announcement')
+-- Its intent was "a job with no audience selector is not a thing a trigger should be able to create". But it
+-- expressed that as "has an id, OR is an announcement", which is too narrow: a broadcast of kind `news`,
+-- `team_update`, `competition_update` or `system` has no id and is not an announcement, so phase 5's own
+-- `kicklive_broadcast_notification` would violate this constraint for four of its five allowed kinds — and
+-- so would every targeted send this phase adds. (The bug went unseen because the only broadcast exercised so
+-- far was an announcement.)
+--
+-- The fix keeps the intent and states it correctly: a job is legal when it names an id (the trigger path),
+-- OR it carries an explicit audience selector in metadata — a `broadcast` marker (phase 5) or a `target`
+-- (phase 14). A trigger-created event job has neither and still must name an id, so nothing about the event
+-- path changes.
+do $constraint$
+begin
+  alter table public.notification_jobs drop constraint if exists notification_jobs_has_target;
+  alter table public.notification_jobs add constraint notification_jobs_has_target
+    check (
+      match_id is not null
+      or competition_id is not null
+      or team_id is not null
+      or kind = 'announcement'
+      or (metadata ? 'broadcast')
+      or (metadata ? 'target')
+    );
+end
+$constraint$;
+
+-- ── 1. job-aware audience resolver ───────────────────────────────────────────────────────────────────
+--
+-- Reads the job's kind/scope AND its metadata target, and returns the preference-filtered users the job
+-- should reach. `metadata.target` shapes:
+--   • absent, or {"type":"all"}          → the phase-5 audience unchanged
+--   • {"type":"role","role":"media"}     → that audience, restricted to profiles.role = 'media'
+--   • {"type":"user","userId":"<uuid>"}  → that audience, restricted to the one account
+--
+-- Restricting the phase-5 audience (rather than selecting profiles directly) is deliberate: a targeted send
+-- still honours the recipient's master switch and per-category preference, so "all managers" cannot be used
+-- to bypass someone who turned that category off.
+create or replace function public.kicklive_notification_audience_job(p_job_id bigint)
+returns table (user_id uuid, channels text[])
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select a.user_id, a.channels
+    from public.notification_jobs j
+    join lateral public.kicklive_notification_audience(j.kind, j.match_id, j.competition_id, j.team_id) as a on true
+    left join public.profiles pr on pr.id = a.user_id
+   where j.id = p_job_id
+     and (
+       -- No target, or an explicit "all": the phase-5 audience, untouched.
+       coalesce(j.metadata #>> '{target,type}', 'all') = 'all'
+       -- Role target: same audience, narrowed to that role.
+       or (
+         (j.metadata #>> '{target,type}') = 'role'
+         and pr.role = (j.metadata #>> '{target,role}')
+       )
+       -- Single-user target: same audience, narrowed to that account.
+       or (
+         (j.metadata #>> '{target,type}') = 'user'
+         and a.user_id::text = (j.metadata #>> '{target,userId}')
+       )
+     );
+$$;
+
+comment on function public.kicklive_notification_audience_job(bigint) is
+  'Phase 14: the phase-5 audience for a job, intersected with its optional metadata.target (role/user). No target = the phase-5 audience unchanged. Service-role only.';
+
+-- ── 2. repoint the two delivery-time functions at the job-aware resolver ──────────────────────────────
+--
+-- Recipients: identical to phase 5 except the lateral join is now `_job`. For an untargeted job the row set
+-- is byte-for-byte what phase 5 produced.
+create or replace function public.kicklive_notification_recipients(p_job_id bigint)
+returns table (device_id uuid, user_id uuid, token text, provider text, platform text)
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select d.id, a.user_id, d.token, d.provider, d.platform
+    from public.notification_jobs j
+    join lateral public.kicklive_notification_audience_job(j.id) as a on true
+    join public.notification_devices d on d.user_id = a.user_id
+   where j.id = p_job_id
+     and 'push' = any (a.channels)
+     and d.active
+     and d.provider = 'fcm'
+     and coalesce(d.failure_count, 0) < 5
+     and not exists (
+       select 1 from public.notification_deliveries dd
+        where dd.job_id = j.id and dd.device_id = d.id
+     )
+   order by a.user_id, d.id;
+$$;
+
+comment on function public.kicklive_notification_recipients(bigint) is
+  'Tokens for one job, preference-filtered (phase 14: via the job-aware audience so a role/user target is honoured) and de-duplicated against delivery history. Never granted to a client role.';
+
+-- Inbox materialisation: same, via the job-aware audience.
+create or replace function public.kicklive_materialise_notifications(p_job_id bigint)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_rows integer;
+begin
+  insert into public.notifications (user_id, title, body, kind, match_id, dedupe_key, metadata, created_at)
+  select a.user_id, j.title, j.body, j.kind, j.match_id,
+         j.dedupe_key || '|u:' || a.user_id, j.metadata, now()
+    from public.notification_jobs j
+    join lateral public.kicklive_notification_audience_job(j.id) as a on true
+   where j.id = p_job_id
+     and 'inbox' = any (a.channels)
+  on conflict (user_id, dedupe_key) where dedupe_key is not null and user_id is not null do nothing;
+  get diagnostics v_rows = row_count;
+  return jsonb_build_object('ok', true, 'created', v_rows);
+exception
+  when unique_violation then
+    return jsonb_build_object('ok', true, 'created', 0, 'note', 'already materialised');
+end;
+$$;
+
+-- ── 3. the targeted-send RPC ─────────────────────────────────────────────────────────────────────────
+--
+-- Same wall as `kicklive_broadcast_notification`: admin-only (checked here, not only on the route), the
+-- five admin kinds, the length limits, the audience count taken from the exact rule delivery will use, the
+-- configurable cap, and the >1000 confirmation gate. The one addition is the target, validated against the
+-- role vocabulary and, for a single user, against the account actually existing.
+create or replace function public.kicklive_send_targeted_notification(
+  p_title text,
+  p_body  text,
+  p_kind  text,
+  p_target_type text,           -- 'role' | 'user'
+  p_target_role text default null,
+  p_target_user uuid default null,
+  p_confirm boolean default false,
+  p_max_audience integer default 50000,
+  p_created_by uuid default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_audience integer;
+  v_job      bigint;
+  v_target   jsonb;
+begin
+  if not public.is_admin() then
+    return jsonb_build_object('ok', false, 'code', 'FORBIDDEN');
+  end if;
+  if p_kind not in ('announcement','system','news','competition_update','team_update') then
+    return jsonb_build_object('ok', false, 'code', 'VALIDATION_FAILED', 'detail', 'an announcement may not claim a match-event category');
+  end if;
+  if length(coalesce(p_title,'')) = 0 or length(p_title) > 120 or length(coalesce(p_body,'')) > 480 then
+    return jsonb_build_object('ok', false, 'code', 'VALIDATION_FAILED', 'detail', 'title 1-120 and body up to 480 characters');
+  end if;
+
+  if p_target_type = 'role' then
+    if p_target_role not in ('fan','team_manager','media','admin') then
+      return jsonb_build_object('ok', false, 'code', 'VALIDATION_FAILED', 'detail', 'unknown role');
+    end if;
+    v_target := jsonb_build_object('type', 'role', 'role', p_target_role);
+  elsif p_target_type = 'user' then
+    if p_target_user is null then
+      return jsonb_build_object('ok', false, 'code', 'VALIDATION_FAILED', 'detail', 'a user target needs a user id');
+    end if;
+    if not exists (select 1 from public.profiles where id = p_target_user) then
+      return jsonb_build_object('ok', false, 'code', 'NOT_FOUND', 'detail', 'no such account');
+    end if;
+    v_target := jsonb_build_object('type', 'user', 'userId', p_target_user::text);
+  else
+    return jsonb_build_object('ok', false, 'code', 'VALIDATION_FAILED', 'detail', 'target must be role or user');
+  end if;
+
+  -- The job must exist to be counted by the job-aware resolver, but must not exist if the count fails the
+  -- cap. Resolved by inserting first, counting through the resolver, then deleting the job if it is refused —
+  -- all in this function's single transaction, so a refused send leaves nothing behind.
+  insert into public.notification_jobs (dedupe_key, kind, title, body, metadata, created_by)
+  values (
+    format('targeted:%s:%s', coalesce(p_created_by::text, 'system'), extract(epoch from now())::bigint || ':' || floor(random()*1000000)::text),
+    p_kind, p_title, p_body,
+    jsonb_build_object('target', v_target, 'targeted', true),
+    p_created_by
+  )
+  returning id into v_job;
+
+  select count(*) into v_audience from public.kicklive_notification_audience_job(v_job);
+
+  if v_audience > p_max_audience then
+    delete from public.notification_jobs where id = v_job;
+    return jsonb_build_object('ok', false, 'code', 'AUDIENCE_TOO_LARGE', 'audience', v_audience, 'limit', p_max_audience);
+  end if;
+  if v_audience > 1000 and not coalesce(p_confirm, false) then
+    delete from public.notification_jobs where id = v_job;
+    return jsonb_build_object('ok', false, 'code', 'CONFIRMATION_REQUIRED', 'audience', v_audience);
+  end if;
+
+  update public.notification_jobs set recipient_count = v_audience where id = v_job;
+
+  return jsonb_build_object('ok', true, 'jobId', v_job, 'audience', v_audience);
+end;
+$$;
+
+comment on function public.kicklive_send_targeted_notification(text, text, text, text, text, uuid, boolean, integer, uuid) is
+  'Phase 14: admin-gated send to a role or a single account. Same validation/cap/confirmation wall as the broadcast RPC; writes a job with metadata.target, counted through the job-aware audience.';
+
+-- ── 4. privileges: service-role only, exactly like the phase-5 RPCs it sits beside ───────────────────
+do $grants$
+begin
+  execute 'revoke all on function public.kicklive_notification_audience_job(bigint) from public, anon, authenticated';
+  execute 'revoke all on function public.kicklive_send_targeted_notification(text, text, text, text, text, uuid, boolean, integer, uuid) from public, anon, authenticated';
+  -- recipients/materialise had their grants revoked in phase 5; CREATE OR REPLACE preserves them, but a
+  -- re-revoke is idempotent and documents the intent next to the redefinition.
+  execute 'revoke all on function public.kicklive_notification_recipients(bigint) from public, anon, authenticated';
+  execute 'revoke all on function public.kicklive_materialise_notifications(bigint) from public, anon, authenticated';
+end
+$grants$;
+
+-- ── 5. verification (reports; hard-raises only on a live correctness failure) ────────────────────────
+do $verify$
+declare
+  v_count integer;
+begin
+  -- 14.1 both new functions exist with the signatures the Worker/tests call.
+  select count(*) into v_count from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'public'
+     and p.proname in ('kicklive_notification_audience_job', 'kicklive_send_targeted_notification');
+  if v_count <> 2 then
+    raise exception 'phase14 verification failed: expected 2 new functions, found %', v_count;
+  end if;
+
+  -- 14.2 the new DEFINER functions have a pinned search_path (the phase-5 hijacking guard, applied here).
+  select count(*) into v_count from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'public'
+     and p.proname in ('kicklive_notification_audience_job','kicklive_send_targeted_notification','kicklive_notification_recipients','kicklive_materialise_notifications')
+     and p.prosecdef
+     and coalesce(array_to_string(p.proconfig, ','), '') not like '%search_path=%';
+  if v_count > 0 then
+    raise exception 'phase14 verification failed: % targeted-notification function(s) are SECURITY DEFINER without a pinned search_path', v_count;
+  end if;
+
+  -- 14.3 the invariant: for a job WITHOUT a target, the job-aware audience equals the phase-5 audience.
+  --      Proven on the empty/anonymous state (auth.uid() is null), which is the state a schema check runs in;
+  --      both must return the same count (0) without raising. A mismatch would mean existing broadcasts and
+  --      event jobs changed behaviour, which this phase must not do.
+  begin
+    perform 1 from public.kicklive_notification_audience_job(0) limit 1;
+    perform 1 from public.kicklive_notification_audience('announcement', null, null, null) limit 1;
+  exception when others then
+    raise exception 'phase14 verification failed: the job-aware audience or the phase-5 audience raised on the anonymous state: %', sqlerrm;
+  end;
+
+  -- 14.4 the neighbours are still service-role only (a client grant here would expose the subscriber list).
+  select count(*) into v_count
+    from information_schema.role_routine_grants
+   where routine_schema = 'public'
+     and routine_name in ('kicklive_notification_audience_job','kicklive_send_targeted_notification')
+     and grantee in ('anon','authenticated','public');
+  if v_count > 0 then
+    raise exception 'phase14 verification failed: a targeted-notification function is granted to a client role';
+  end if;
+
+  -- 14.5 the widened has-target constraint accepts a targeted/broadcast job. Proven by writing one with no
+  --      id and a metadata target, then rolling it back — a live insert is the only honest check that the
+  --      CHECK expression means what the RPC needs, and a schema-only review would have missed the original
+  --      bug entirely.
+  begin
+    insert into public.notification_jobs (dedupe_key, kind, title, body, metadata)
+    values ('phase14-verify:' || gen_random_uuid()::text, 'news', 'verify', 'verify',
+            jsonb_build_object('target', jsonb_build_object('type', 'role', 'role', 'media')));
+    -- Undo it: verification must leave no rows behind.
+    delete from public.notification_jobs where dedupe_key like 'phase14-verify:%';
+  exception when check_violation then
+    raise exception 'phase14 verification failed: a targeted (id-less) notification job is still rejected by notification_jobs_has_target — the constraint widening did not take';
+  end;
+
+  raise notice 'phase14 verification: ok — has-target constraint widened for id-less broadcast/targeted jobs, job-aware audience added, recipients/materialise repointed (no-op for untargeted jobs), targeted-send RPC added, all service-role only';
+end
+$verify$;
+
+-- PostgREST caches the catalogue: without this the new RPC 404s until a restart, which reads like a Worker bug.
+notify pgrst, 'reload schema';
+;
+
+-- <<< END section 14: supabase/migrations/20260917120000_phase14_targeted_notifications.sql <<<
+
+-- >>> BEGIN section 15: supabase/migrations/20260918120000_phase15_messaging.sql >>>
+SELECT '15 / 17: supabase/migrations/20260918120000_phase15_messaging.sql' AS kicklive_sql_section;
+
+-- ─────────────────────────────────────────────────────────────────────────────────────────────────
+-- Phase 15 · Direct messaging (user ↔ staff inbox)
+-- ─────────────────────────────────────────────────────────────────────────────────────────────────
+--
+-- A conversation inbox between an ordinary account and the staff desk (admins + media). It is deliberately
+-- NOT open user-to-user peer messaging: in a league product the message a fan or a team manager needs to
+-- send is "to whoever runs this", and the reply comes from staff. Modelling that as a thread with one
+-- non-staff participant and a staff pool keeps the audience rule a single fact and keeps a fan from being
+-- cold-messaged by a stranger.
+--
+-- Shape:
+--   • message_threads — one row per conversation. `user_id` is the non-staff participant (the thread's
+--     owner); staff are not enumerated because any staff member may read and answer. `subject` is optional
+--     free text. `last_message_at` / `last_message_preview` denormalise the list view. Unread is tracked
+--     from two "last read" clocks — one for the owner, one for the staff side — so a badge does not need a
+--     per-message read table.
+--   • messages — one row per message, `sender_id` + `sender_is_staff`, `body`.
+--
+-- Security model is phase 5's, exactly: RLS enabled (not forced), every client role REVOKEd on both tables,
+-- and NO client INSERT/UPDATE path. All writes go through SECURITY DEFINER functions that take the actor
+-- from auth.uid(); a body can never name a sender. Reads use RLS: an owner sees their own threads/messages,
+-- staff (is_admin_or_media) see all.
+--
+-- Source of truth is this migration; regenerate the bundle with `npm run sql:bundle`. Do not hand-edit
+-- supabase/SETUP.sql.
+
+-- ── 1. tables ────────────────────────────────────────────────────────────────────────────────────────
+create table if not exists public.message_threads (
+  id                   bigint generated always as identity primary key,
+  -- The non-staff participant. A thread always has exactly one; staff are a pool, not a column.
+  user_id              uuid not null references public.profiles(id) on delete cascade,
+  subject              text,
+  status               text not null default 'open'
+                       constraint message_threads_status_check check (status in ('open','closed')),
+  last_message_at      timestamptz not null default now(),
+  last_message_preview text,
+  -- Two clocks, one per side, so "unread" is an interval comparison rather than a join to a read table.
+  user_last_read_at    timestamptz not null default now(),
+  staff_last_read_at   timestamptz,
+  created_by           uuid references public.profiles(id) on delete set null,
+  created_at           timestamptz not null default now()
+);
+
+comment on table public.message_threads is
+  'Phase 15: one conversation between a non-staff account (user_id) and the staff desk. Staff are a pool (is_admin_or_media), not a stored participant.';
+
+create index if not exists message_threads_user_idx
+  on public.message_threads (user_id, last_message_at desc);
+create index if not exists message_threads_recent_idx
+  on public.message_threads (last_message_at desc);
+
+create table if not exists public.messages (
+  id              bigint generated always as identity primary key,
+  thread_id       bigint not null references public.message_threads(id) on delete cascade,
+  sender_id       uuid references public.profiles(id) on delete set null,
+  -- Denormalised from the sender's role at send time: a thread's history must read correctly even after a
+  -- sender's role changes or their account is deleted.
+  sender_is_staff boolean not null,
+  body            text not null
+                  constraint messages_body_length check (length(body) between 1 and 4000),
+  created_at      timestamptz not null default now()
+);
+
+comment on table public.messages is
+  'Phase 15: one message in a thread. sender_is_staff is captured at send time so history is stable across role changes.';
+
+create index if not exists messages_thread_idx
+  on public.messages (thread_id, created_at);
+
+-- ── 2. row level security ─────────────────────────────────────────────────────────────────────────────
+--
+-- Same rule as phase 5: enable (never force, because the RPCs run as the owner), revoke every client role,
+-- and add read-only policies. No client INSERT/UPDATE policy exists — the RPCs are the only write path.
+do $rls$
+declare
+  t text;
+begin
+  foreach t in array array['message_threads','messages']
+  loop
+    execute format('alter table public.%I enable row level security', t);
+    execute format('revoke all on table public.%I from anon, authenticated', t);
+  end loop;
+end
+$rls$;
+
+-- Threads: the owner sees their own; staff see all. No anon (a signed-out visitor has no inbox).
+drop policy if exists "message_threads: owner or staff read" on public.message_threads;
+create policy "message_threads: owner or staff read"
+  on public.message_threads for select to authenticated
+  using (user_id = auth.uid() or public.is_admin_or_media());
+
+-- Messages: readable when the caller can read the parent thread. Expressed as the same predicate rather than
+-- a join to keep the two policies impossible to drift apart.
+drop policy if exists "messages: owner or staff read" on public.messages;
+create policy "messages: owner or staff read"
+  on public.messages for select to authenticated
+  using (
+    public.is_admin_or_media()
+    or exists (
+      select 1 from public.message_threads t
+       where t.id = messages.thread_id and t.user_id = auth.uid()
+    )
+  );
+
+-- No FOR INSERT/UPDATE/DELETE policy on either table, on purpose: every mutation is an RPC that takes the
+-- actor from auth.uid(). A client with a direct write path could forge a sender or answer as staff.
+
+-- ── 3. functions the Worker calls ──────────────────────────────────────────────────────────────────────
+
+-- 3.1 the caller's thread list (owner sees their own; staff see the whole desk, most-recent first).
+create or replace function public.kicklive_message_threads(p_limit integer default 50)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_uid   uuid := auth.uid();
+  v_staff boolean := public.is_admin_or_media();
+  v_limit integer := least(greatest(coalesce(p_limit, 50), 1), 100);
+begin
+  if v_uid is null then
+    return jsonb_build_object('ok', false, 'code', 'UNAUTHENTICATED');
+  end if;
+  return jsonb_build_object(
+    'ok', true,
+    'staff', v_staff,
+    'threads', coalesce((
+      select jsonb_agg(row_to_json(x))
+        from (
+          select t.id, t.user_id, t.subject, t.status,
+                 t.last_message_at, t.last_message_preview,
+                 -- Unread from the reader's own clock: staff read against staff_last_read_at, the owner
+                 -- against user_last_read_at.
+                 case
+                   when v_staff then (t.staff_last_read_at is null or t.last_message_at > t.staff_last_read_at)
+                   else t.last_message_at > t.user_last_read_at
+                 end as unread,
+                 p.username as user_name
+            from public.message_threads t
+            left join public.profiles p on p.id = t.user_id
+           where v_staff or t.user_id = v_uid
+           order by t.last_message_at desc
+           limit v_limit
+        ) x
+    ), '[]'::jsonb)
+  );
+end;
+$$;
+
+comment on function public.kicklive_message_threads(integer) is
+  'Phase 15: the caller''s conversation list. Owner sees their own threads; staff (is_admin_or_media) see all. Unread is derived from the reader''s side clock.';
+
+-- 3.2 one thread's messages, and mark it read for the caller's side in the same call.
+create or replace function public.kicklive_message_thread(p_thread_id bigint, p_limit integer default 200)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_uid   uuid := auth.uid();
+  v_staff boolean := public.is_admin_or_media();
+  v_limit integer := least(greatest(coalesce(p_limit, 200), 1), 500);
+  v_thread public.message_threads;
+begin
+  if v_uid is null then
+    return jsonb_build_object('ok', false, 'code', 'UNAUTHENTICATED');
+  end if;
+  select * into v_thread from public.message_threads where id = p_thread_id;
+  if not found then
+    return jsonb_build_object('ok', false, 'code', 'NOT_FOUND');
+  end if;
+  if not (v_staff or v_thread.user_id = v_uid) then
+    return jsonb_build_object('ok', false, 'code', 'FORBIDDEN');
+  end if;
+
+  -- Reading the thread marks it read for the reader's side.
+  if v_staff then
+    update public.message_threads set staff_last_read_at = now() where id = p_thread_id;
+  else
+    update public.message_threads set user_last_read_at = now() where id = p_thread_id;
+  end if;
+
+  return jsonb_build_object(
+    'ok', true,
+    'thread', jsonb_build_object(
+      'id', v_thread.id, 'userId', v_thread.user_id, 'subject', v_thread.subject, 'status', v_thread.status,
+      'lastMessageAt', v_thread.last_message_at
+    ),
+    'messages', coalesce((
+      select jsonb_agg(row_to_json(x))
+        from (
+          select m.id, m.sender_id, m.sender_is_staff, m.body, m.created_at,
+                 p.username as sender_name
+            from public.messages m
+            left join public.profiles p on p.id = m.sender_id
+           where m.thread_id = p_thread_id
+           order by m.created_at
+           limit v_limit
+        ) x
+    ), '[]'::jsonb)
+  );
+end;
+$$;
+
+comment on function public.kicklive_message_thread(bigint, integer) is
+  'Phase 15: one thread''s messages for an authorised reader, and marks the thread read for the reader''s side.';
+
+-- 3.3 send a message. Creates the thread on first send for a non-staff caller; staff must name an existing
+--     thread (staff open a conversation by answering one, or via kicklive_message_start).
+create or replace function public.kicklive_send_message(
+  p_thread_id bigint,
+  p_body      text,
+  p_subject   text default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_uid     uuid := auth.uid();
+  v_staff   boolean := public.is_admin_or_media();
+  v_thread  public.message_threads;
+  v_id      bigint;
+  v_preview text;
+begin
+  if v_uid is null then
+    return jsonb_build_object('ok', false, 'code', 'UNAUTHENTICATED');
+  end if;
+  if length(coalesce(p_body, '')) = 0 or length(p_body) > 4000 then
+    return jsonb_build_object('ok', false, 'code', 'VALIDATION_FAILED', 'detail', 'body 1-4000 characters');
+  end if;
+
+  if p_thread_id is null then
+    -- A new thread. Only a non-staff caller may open one this way (their message needs no target: it goes to
+    -- the desk). Staff open a thread with kicklive_message_start, which names the user.
+    if v_staff then
+      return jsonb_build_object('ok', false, 'code', 'VALIDATION_FAILED', 'detail', 'staff open a thread with kicklive_message_start');
+    end if;
+    insert into public.message_threads (user_id, subject, last_message_preview, created_by, user_last_read_at)
+    values (v_uid, nullif(p_subject, ''), left(p_body, 140), v_uid, now())
+    returning * into v_thread;
+  else
+    select * into v_thread from public.message_threads where id = p_thread_id;
+    if not found then
+      return jsonb_build_object('ok', false, 'code', 'NOT_FOUND');
+    end if;
+    if not (v_staff or v_thread.user_id = v_uid) then
+      return jsonb_build_object('ok', false, 'code', 'FORBIDDEN');
+    end if;
+    if v_thread.status = 'closed' then
+      return jsonb_build_object('ok', false, 'code', 'VALIDATION_FAILED', 'detail', 'this conversation is closed');
+    end if;
+  end if;
+
+  insert into public.messages (thread_id, sender_id, sender_is_staff, body)
+  values (v_thread.id, v_uid, v_staff, p_body)
+  returning id into v_id;
+
+  v_preview := left(p_body, 140);
+  -- Sending also marks the thread read for the sender's side (you have, by definition, seen your own send).
+  update public.message_threads
+     set last_message_at = now(),
+         last_message_preview = v_preview,
+         user_last_read_at  = case when v_staff then user_last_read_at  else now() end,
+         staff_last_read_at = case when v_staff then now() else staff_last_read_at end
+   where id = v_thread.id;
+
+  return jsonb_build_object('ok', true, 'threadId', v_thread.id, 'messageId', v_id);
+end;
+$$;
+
+comment on function public.kicklive_send_message(bigint, text, text) is
+  'Phase 15: send a message (auth.uid() is the sender). p_thread_id null opens a new thread for a non-staff caller; staff must send into an existing thread.';
+
+-- 3.4 staff open a thread addressed to a specific user (the outbound half of the desk).
+create or replace function public.kicklive_message_start(
+  p_user_id uuid,
+  p_body    text,
+  p_subject text default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_uid    uuid := auth.uid();
+  v_thread public.message_threads;
+  v_id     bigint;
+begin
+  if v_uid is null then
+    return jsonb_build_object('ok', false, 'code', 'UNAUTHENTICATED');
+  end if;
+  if not public.is_admin_or_media() then
+    return jsonb_build_object('ok', false, 'code', 'FORBIDDEN');
+  end if;
+  if length(coalesce(p_body, '')) = 0 or length(p_body) > 4000 then
+    return jsonb_build_object('ok', false, 'code', 'VALIDATION_FAILED', 'detail', 'body 1-4000 characters');
+  end if;
+  if p_user_id is null or not exists (select 1 from public.profiles where id = p_user_id) then
+    return jsonb_build_object('ok', false, 'code', 'NOT_FOUND', 'detail', 'no such account');
+  end if;
+
+  insert into public.message_threads (user_id, subject, last_message_preview, created_by, staff_last_read_at)
+  values (p_user_id, nullif(p_subject, ''), left(p_body, 140), v_uid, now())
+  returning * into v_thread;
+
+  insert into public.messages (thread_id, sender_id, sender_is_staff, body)
+  values (v_thread.id, v_uid, true, p_body)
+  returning id into v_id;
+
+  return jsonb_build_object('ok', true, 'threadId', v_thread.id, 'messageId', v_id);
+end;
+$$;
+
+comment on function public.kicklive_message_start(uuid, text, text) is
+  'Phase 15: staff-only. Opens a thread addressed to p_user_id with a first (staff) message.';
+
+-- 3.5 close / reopen a thread. Owner or staff.
+create or replace function public.kicklive_message_set_status(p_thread_id bigint, p_status text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_uid    uuid := auth.uid();
+  v_staff  boolean := public.is_admin_or_media();
+  v_thread public.message_threads;
+begin
+  if v_uid is null then
+    return jsonb_build_object('ok', false, 'code', 'UNAUTHENTICATED');
+  end if;
+  if p_status not in ('open','closed') then
+    return jsonb_build_object('ok', false, 'code', 'VALIDATION_FAILED', 'detail', 'status must be open or closed');
+  end if;
+  select * into v_thread from public.message_threads where id = p_thread_id;
+  if not found then
+    return jsonb_build_object('ok', false, 'code', 'NOT_FOUND');
+  end if;
+  if not (v_staff or v_thread.user_id = v_uid) then
+    return jsonb_build_object('ok', false, 'code', 'FORBIDDEN');
+  end if;
+  update public.message_threads set status = p_status where id = p_thread_id;
+  return jsonb_build_object('ok', true, 'threadId', p_thread_id, 'status', p_status);
+end;
+$$;
+
+comment on function public.kicklive_message_set_status(bigint, text) is
+  'Phase 15: close or reopen a thread. Owner or staff.';
+
+-- 3.6 an unread count for the badge, cheap and side-effect free.
+create or replace function public.kicklive_message_unread_count()
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_uid   uuid := auth.uid();
+  v_staff boolean := public.is_admin_or_media();
+  v_count integer;
+begin
+  if v_uid is null then
+    return jsonb_build_object('ok', true, 'count', 0);
+  end if;
+  if v_staff then
+    select count(*) into v_count from public.message_threads t
+     where t.staff_last_read_at is null or t.last_message_at > t.staff_last_read_at;
+  else
+    select count(*) into v_count from public.message_threads t
+     where t.user_id = v_uid and t.last_message_at > t.user_last_read_at;
+  end if;
+  return jsonb_build_object('ok', true, 'count', coalesce(v_count, 0));
+end;
+$$;
+
+comment on function public.kicklive_message_unread_count() is
+  'Phase 15: number of threads with something the caller has not read, from the caller''s side clock.';
+
+-- ── 4. privileges ──────────────────────────────────────────────────────────────────────────────────────
+--
+-- Every function is revoked from public/anon/authenticated, then granted to authenticated only where the
+-- action is a legitimate client one. All six are: each takes the actor from auth.uid() and re-checks role
+-- inside, so a granted `authenticated` cannot act as someone else or forge staff.
+do $grants$
+declare
+  f    text;
+  args text;
+begin
+  for f, args in select * from (values
+    ('kicklive_message_threads', 'integer'),
+    ('kicklive_message_thread', 'bigint,integer'),
+    ('kicklive_send_message', 'bigint,text,text'),
+    ('kicklive_message_start', 'uuid,text,text'),
+    ('kicklive_message_set_status', 'bigint,text'),
+    ('kicklive_message_unread_count', '')
+  ) as t(f, args)
+  loop
+    execute format('revoke all on function public.%I(%s) from public, anon, authenticated', f, args);
+  end loop;
+
+  execute 'grant execute on function public.kicklive_message_threads(integer) to authenticated';
+  execute 'grant execute on function public.kicklive_message_thread(bigint, integer) to authenticated';
+  execute 'grant execute on function public.kicklive_send_message(bigint, text, text) to authenticated';
+  execute 'grant execute on function public.kicklive_message_start(uuid, text, text) to authenticated';
+  execute 'grant execute on function public.kicklive_message_set_status(bigint, text) to authenticated';
+  execute 'grant execute on function public.kicklive_message_unread_count() to authenticated';
+end
+$grants$;
+
+-- ── 5. verification (reports; hard-raises only on a live correctness failure) ────────────────────────────
+do $verify$
+declare
+  v_count integer;
+begin
+  -- 15.1 both tables exist with RLS enabled and not forced (the RPCs run as owner).
+  select count(*) into v_count from pg_tables
+   where schemaname = 'public' and tablename in ('message_threads','messages');
+  if v_count <> 2 then
+    raise exception 'phase15 verification failed: expected 2 messaging tables, found %', v_count;
+  end if;
+  select count(*) into v_count from pg_class c join pg_namespace n on n.oid = c.relnamespace
+   where n.nspname = 'public' and c.relname in ('message_threads','messages') and c.relrowsecurity and c.relforcerowsecurity;
+  if v_count <> 0 then
+    raise exception 'phase15 verification failed: RLS is FORCED on a messaging table, which would make the owner-role RPCs write zero rows';
+  end if;
+
+  -- 15.2 no client INSERT/UPDATE/DELETE policy exists on either table (the RPCs are the only write path).
+  select count(*) into v_count from pg_policies
+   where schemaname = 'public' and tablename in ('message_threads','messages') and cmd <> 'SELECT';
+  if v_count <> 0 then
+    raise exception 'phase15 verification failed: a write policy exists on a messaging table; the only write path must be the SECURITY DEFINER RPCs';
+  end if;
+
+  -- 15.3 the six functions exist.
+  select count(*) into v_count from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'public'
+     and p.proname in ('kicklive_message_threads','kicklive_message_thread','kicklive_send_message',
+                       'kicklive_message_start','kicklive_message_set_status','kicklive_message_unread_count');
+  if v_count <> 6 then
+    raise exception 'phase15 verification failed: expected 6 messaging functions, found %', v_count;
+  end if;
+
+  -- 15.4 every messaging function is DEFINER with a pinned search_path (the hijacking guard).
+  select count(*) into v_count from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'public' and p.proname like 'kicklive_message%'
+     and p.prosecdef
+     and coalesce(array_to_string(p.proconfig, ','), '') not like '%search_path=%';
+  if v_count > 0 then
+    raise exception 'phase15 verification failed: % messaging function(s) are SECURITY DEFINER without a pinned search_path', v_count;
+  end if;
+
+  -- 15.5 the client roles cannot touch the tables directly (revoke held).
+  select count(*) into v_count from information_schema.role_table_grants
+   where table_schema = 'public' and table_name in ('message_threads','messages')
+     and grantee in ('anon','authenticated');
+  if v_count > 0 then
+    raise exception 'phase15 verification failed: a client role has a direct table grant on a messaging table';
+  end if;
+
+  -- 15.6 a live read as the anonymous caller must not raise (the "no rows, no error" path a signed-out
+  --      visitor is in): the unread count answers 0.
+  begin
+    perform public.kicklive_message_unread_count();
+  exception when others then
+    raise exception 'phase15 verification failed: kicklive_message_unread_count() raised on the anonymous state: %', sqlerrm;
+  end;
+
+  raise notice 'phase15 verification: ok — 2 tables (RLS on, force off), read-only client policies, 6 owner-role RPCs, no client write path';
+end
+$verify$;
+
+-- PostgREST caches the catalogue: without this the new RPCs 404 until a restart, which reads like a Worker bug.
+notify pgrst, 'reload schema';
+;
+
+-- <<< END section 15: supabase/migrations/20260918120000_phase15_messaging.sql <<<
+
+-- >>> BEGIN section 16: supabase/migrations/20260919120000_phase16_message_notifications.sql >>>
+SELECT '16 / 17: supabase/migrations/20260919120000_phase16_message_notifications.sql' AS kicklive_sql_section;
+
+-- ─────────────────────────────────────────────────────────────────────────────────────────────────
+-- Phase 16 · Notify a thread owner when staff reply
+-- ─────────────────────────────────────────────────────────────────────────────────────────────────
+--
+-- Ties phase 15 (messaging) to phase 5/14 (notifications). When a STAFF member sends a message, the thread
+-- owner is not looking at the staff desk and should get a push/inbox notification. The reverse direction
+-- (a user writing in) is already covered by the desk's own unread badge and has no single staff recipient,
+-- so it is deliberately not notified here.
+--
+-- Mechanism:
+--   • kind = 'message' — its own category (added in the phase-17 migration that runs alongside this one), so
+--     a user can mute message notifications without muting the broader 'system' account category. It defaults
+--     to enabled in kicklive_preference_defaults;
+--   • the phase-14 metadata target `{"type":"user","userId":<owner>}`, so the job-aware audience
+--     (kicklive_notification_audience_job) narrows the system audience to exactly the owner — and still
+--     honours their preference, so a user who muted `system` is not messaged;
+--   • the phase-14-widened has-target constraint accepts an id-less job because metadata carries a target.
+--
+-- The job is created in the same transaction as the message (an AFTER INSERT trigger), so a reply and its
+-- notification are one fact; the `*/5` sweep delivers it, exactly like a match-event job. No Worker code is
+-- involved in creating it.
+--
+-- Source of truth is this migration; regenerate the bundle with `npm run sql:bundle`. Do not hand-edit
+-- supabase/SETUP.sql.
+
+create or replace function public.kicklive_notification_job_for_message()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_thread   public.message_threads;
+  v_sender   text;
+  v_preview  text;
+begin
+  -- Only a staff message notifies, and only the thread owner. A user's own message to the desk is not a
+  -- push (there is no single staff recipient, and the desk badge already shows it).
+  if not new.sender_is_staff then
+    return new;
+  end if;
+
+  select * into v_thread from public.message_threads where id = new.thread_id;
+  if not found then
+    return new;
+  end if;
+
+  -- Sender's display name, best effort. A deleted sender still gets a sensible label.
+  select coalesce(p.username, 'Support') into v_sender from public.profiles p where p.id = new.sender_id;
+  v_sender := coalesce(v_sender, 'Support');
+
+  v_preview := left(new.body, 140);
+
+  insert into public.notification_jobs (dedupe_key, kind, title, body, metadata, recipient_count, created_by)
+  values (
+    -- One job per message, keyed on the message id so a re-fired trigger cannot double-send.
+    format('message:%s', new.id),
+    'message',
+    'New message from ' || v_sender,
+    coalesce(nullif(v_thread.subject, ''), v_preview),
+    jsonb_build_object(
+      'target', jsonb_build_object('type', 'user', 'userId', v_thread.user_id::text),
+      'source', 'message',
+      'threadId', new.thread_id,
+      'messageId', new.id,
+      'link', '/messages'
+    ),
+    1,
+    new.sender_id
+  )
+  on conflict (dedupe_key) do nothing;
+
+  return new;
+end;
+$$;
+
+comment on function public.kicklive_notification_job_for_message() is
+  'Phase 16: AFTER INSERT on messages — a staff reply queues a system notification targeted at the thread owner (phase-14 user target). A user message does not notify.';
+
+-- AFTER INSERT: the return value is ignored, but NEW is returned so a future change to BEFORE ROW cannot
+-- silently discard the message row.
+drop trigger if exists kicklive_message_notification on public.messages;
+create trigger kicklive_message_notification
+  after insert on public.messages
+  for each row execute function public.kicklive_notification_job_for_message();
+
+-- Service-role only, like every other job-writing function.
+do $grants$
+begin
+  execute 'revoke all on function public.kicklive_notification_job_for_message() from public, anon, authenticated';
+end
+$grants$;
+
+-- ── verification (reports; hard-raises only on a live correctness failure) ────────────────────────────
+do $verify$
+declare
+  v_count integer;
+begin
+  -- 16.1 the function exists and is DEFINER with a pinned search_path.
+  select count(*) into v_count from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'public' and p.proname = 'kicklive_notification_job_for_message'
+     and p.prosecdef
+     and coalesce(array_to_string(p.proconfig, ','), '') like '%search_path=%';
+  if v_count <> 1 then
+    raise exception 'phase16 verification failed: kicklive_notification_job_for_message is missing or not a DEFINER with a pinned search_path';
+  end if;
+
+  -- 16.2 the trigger is attached to the messages table.
+  select count(*) into v_count from pg_trigger t join pg_class c on c.oid = t.tgrelid
+   where t.tgname = 'kicklive_message_notification' and c.relname = 'messages' and not t.tgisinternal;
+  if v_count <> 1 then
+    raise exception 'phase16 verification failed: the messages notification trigger is not attached';
+  end if;
+
+  raise notice 'phase16 verification: ok — staff replies queue a system notification targeted at the thread owner, delivered by the existing sweep';
+end
+$verify$;
+
+-- PostgREST caches the catalogue: keep the reload in step with the other phases.
+notify pgrst, 'reload schema';
+;
+
+-- <<< END section 16: supabase/migrations/20260919120000_phase16_message_notifications.sql <<<
+
+-- >>> BEGIN section 17: supabase/migrations/20260920120000_phase17_message_category.sql >>>
+SELECT '17 / 17: supabase/migrations/20260920120000_phase17_message_category.sql' AS kicklive_sql_section;
+
+-- ─────────────────────────────────────────────────────────────────────────────────────────────────
+-- Phase 17 · A dedicated "message" notification category
+-- ─────────────────────────────────────────────────────────────────────────────────────────────────
+--
+-- Phase 16 notifies a thread owner when staff reply, and did so as kind 'system' as a stop-gap. That folded
+-- message alerts into the same switch as account/platform notices, so a user could not mute "staff replied"
+-- without also muting "your password was changed". This migration gives messages their own category.
+--
+-- Adding a twelfth category is a cross-cutting change: the vocabulary is written as three CHECK constraints
+-- (notifications, notification_preferences, notification_jobs), two inline lists inside RPCs, the
+-- `kicklive_preference_defaults()` literal, the Worker's policy maps and the client's array — and
+-- `tests/unit/phase5-notifications.test.ts` compares all of them. This file changes the SQL side; the
+-- TypeScript side (src/lib/data/notifications.ts, workers/src/lib/notificationPolicy.ts) is changed in the
+-- same commit, and the parity test is updated to expect twelve.
+--
+-- Phase 5's migration is the source of truth for the *original* eleven and is never edited; this migration is
+-- the source of truth for the twelfth. Every object below is redefined with CREATE OR REPLACE / drop-and-add,
+-- so applying this file on top of phase 5 is the whole change, and re-applying it is a no-op.
+--
+-- `message` defaults ON (a reply you asked for is not noise) and is pushable (handled in the Worker policy).
+-- Regenerate the bundle with `npm run sql:bundle`; do not hand-edit supabase/SETUP.sql.
+
+-- ── 1. widen the three CHECK constraints ─────────────────────────────────────────────────────────────
+-- `add constraint` has no `if not exists`, so each is dropped by name first — the same shape phase 5 used to
+-- retire and replace a policy, and what makes this file idempotent.
+do $constraints$
+begin
+  alter table public.notifications drop constraint if exists notifications_kind_check;
+  alter table public.notifications add constraint notifications_kind_check
+    check (kind in ('goal','red_card','half_time','full_time','match_start','match_reminder',
+                    'team_update','competition_update','news','system','announcement','message'));
+
+  alter table public.notification_preferences drop constraint if exists notification_preferences_kind_check;
+  alter table public.notification_preferences add constraint notification_preferences_kind_check
+    check (kind in ('goal','red_card','half_time','full_time','match_start','match_reminder',
+                    'team_update','competition_update','news','system','announcement','message'));
+
+  alter table public.notification_jobs drop constraint if exists notification_jobs_kind_check;
+  alter table public.notification_jobs add constraint notification_jobs_kind_check
+    check (kind in ('goal','red_card','half_time','full_time','match_start','match_reminder',
+                    'team_update','competition_update','news','system','announcement','message'));
+end
+$constraints$;
+
+-- ── 2. the defaults literal, now with `message` ──────────────────────────────────────────────────────
+create or replace function public.kicklive_preference_defaults()
+returns jsonb
+language sql
+immutable
+set search_path = public, pg_temp
+as $$
+  select '{
+    "goal": true,
+    "red_card": false,
+    "half_time": true,
+    "full_time": true,
+    "match_start": true,
+    "match_reminder": false,
+    "team_update": false,
+    "competition_update": false,
+    "news": false,
+    "system": true,
+    "announcement": true,
+    "message": true
+  }'::jsonb;
+$$;
+
+comment on function public.kicklive_preference_defaults() is
+  'Per-kind defaults (phase 17: adds message=true). Noisy categories (red_card, reminders, news) start off; a reply you asked for is not noise.';
+
+-- ── 3. the two inline kind lists inside the preference RPCs ───────────────────────────────────────────
+-- Both are redefined verbatim from phase 5 with `message` appended to the `unnest(array[...])` list. The
+-- bodies are otherwise unchanged, and CREATE OR REPLACE preserves the grants phase 5 issued.
+create or replace function public.kicklive_notification_defaults_document(p_user_id uuid)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select jsonb_build_object(
+           'notificationsEnabled', coalesce((select pr.notifications_enabled from public.profiles pr where pr.id = p_user_id), true),
+           'categories', coalesce(
+             (select jsonb_object_agg(k.kind, jsonb_build_object('enabled', coalesce(p.enabled, (select (kicklive_preference_defaults() ->> k.kind)::boolean)), 'channels', coalesce(p.channels, array['inbox','push'])))
+                from (select unnest(array['goal','red_card','half_time','full_time','match_start','match_reminder','team_update','competition_update','news','system','announcement','message']) as kind) k
+                left join public.notification_preferences p on p.user_id = p_user_id and p.kind = k.kind),
+             '{}'::jsonb)
+         );
+$$;
+
+create or replace function public.kicklive_set_notification_preferences(
+  p_enabled    boolean,
+  p_categories jsonb
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_user uuid := auth.uid();
+  r      record;
+  v_kind text;
+  v_seen text[] := '{}';
+begin
+  if v_user is null then
+    return jsonb_build_object('ok', false, 'code', 'UNAUTHENTICATED');
+  end if;
+  if p_categories is null or jsonb_typeof(p_categories) <> 'object' then
+    return jsonb_build_object('ok', false, 'code', 'VALIDATION_FAILED', 'detail', 'categories must be an object');
+  end if;
+
+  update public.profiles set notifications_enabled = coalesce(p_enabled, true) where id = v_user;
+
+  for r in select * from jsonb_each(p_categories)
+  loop
+    v_kind := r.key;
+    if not exists (select 1 from (select unnest(array['goal','red_card','half_time','full_time','match_start','match_reminder','team_update','competition_update','news','system','announcement','message']) as k) x where x.k = v_kind) then
+      return jsonb_build_object('ok', false, 'code', 'UNKNOWN_KIND', 'detail', v_kind);
+    end if;
+    if r.value ? 'enabled' and jsonb_typeof(r.value -> 'enabled') <> 'boolean' then
+      return jsonb_build_object('ok', false, 'code', 'VALIDATION_FAILED', 'detail', v_kind || '.enabled must be a boolean');
+    end if;
+    if r.value ? 'channels' and (jsonb_typeof(r.value -> 'channels') <> 'array'
+       or exists (select 1 from jsonb_array_elements_text(r.value -> 'channels') c where c not in ('inbox','push'))) then
+      return jsonb_build_object('ok', false, 'code', 'VALIDATION_FAILED', 'detail', v_kind || '.channels must be a subset of {inbox,push}');
+    end if;
+
+    insert into public.notification_preferences (user_id, kind, enabled, channels, updated_at)
+    values (
+      v_user,
+      v_kind,
+      coalesce((r.value ->> 'enabled')::boolean, (select (kicklive_preference_defaults() ->> v_kind)::boolean), false),
+      coalesce(array(select jsonb_array_elements_text(r.value -> 'channels')), array['inbox','push']),
+      now()
+    )
+    on conflict (user_id, kind) do update
+      set enabled = excluded.enabled,
+          channels = excluded.channels,
+          updated_at = now();
+
+    v_seen := array_append(v_seen, v_kind);
+  end loop;
+
+  return jsonb_build_object('ok', true, 'document', kicklive_notification_defaults_document(v_user));
+end;
+$$;
+
+-- ── 4. verification (reports; hard-raises only on a live correctness failure) ────────────────────────
+do $verify$
+declare
+  v_count integer;
+begin
+  -- 17.1 all three CHECKs now admit 'message'. Proven by a live insert-and-rollback into the one table a
+  --      DEFINER verify block can write without a user context (notification_jobs, via a targeted job).
+  begin
+    insert into public.notification_jobs (dedupe_key, kind, title, body, metadata)
+    values ('phase17-verify:' || gen_random_uuid()::text, 'message', 'verify', 'verify',
+            jsonb_build_object('target', jsonb_build_object('type','user','userId', gen_random_uuid()::text)));
+    delete from public.notification_jobs where dedupe_key like 'phase17-verify:%';
+  exception when check_violation then
+    raise exception 'phase17 verification failed: notification_jobs_kind_check still rejects the message kind';
+  end;
+
+  -- 17.2 the defaults literal carries message=true.
+  if (public.kicklive_preference_defaults() ->> 'message') is distinct from 'true' then
+    raise exception 'phase17 verification failed: kicklive_preference_defaults() does not default message on';
+  end if;
+
+  -- 17.3 the set-preferences validator accepts the message kind (a signed-out call still parses the vocab
+  --      before it refuses on auth, so this exercises the UNKNOWN_KIND path being widened, not the write).
+  --      auth.uid() is null here, so the function short-circuits at UNAUTHENTICATED — which proves it is
+  --      callable and its body compiled with the new array.
+  perform public.kicklive_set_notification_preferences(true, '{}'::jsonb);
+
+  select count(*) into v_count from pg_constraint
+   where conname in ('notifications_kind_check','notification_preferences_kind_check','notification_jobs_kind_check');
+  if v_count <> 3 then
+    raise exception 'phase17 verification failed: expected 3 kind CHECK constraints, found %', v_count;
+  end if;
+
+  raise notice 'phase17 verification: ok — message category added to 3 CHECKs, defaults literal and both inline RPC lists; defaults on and pushable (Worker policy)';
+end
+$verify$;
+
+-- PostgREST caches the catalogue: the redefined RPCs need a reload.
+notify pgrst, 'reload schema';
+;
+
+-- <<< END section 17: supabase/migrations/20260920120000_phase17_message_category.sql <<<
