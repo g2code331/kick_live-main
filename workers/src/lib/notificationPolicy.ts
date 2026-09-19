@@ -17,7 +17,7 @@
  * something writes to these tables without the Worker. `tests/unit/phase5-notifications.test.ts` compares the
  * two and fails the build if they drift.
  */
-import { NOTIFICATION_KINDS, PREFERENCE_DEFAULTS } from "../../../src/lib/data/notifications.ts";
+import { NOTIFICATION_KINDS, PREFERENCE_DEFAULTS } from "../../../src/lib/data/notification-vocab.ts";
 
 /** Categories a user can toggle. Mirrors `notification_preferences.kind`. */
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];

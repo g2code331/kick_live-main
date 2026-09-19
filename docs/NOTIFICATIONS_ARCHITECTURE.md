@@ -740,3 +740,46 @@ npx wrangler secret put FCM_SERVICE_ACCOUNT_JSON --config workers/wrangler.toml 
 what `KICKLIVE_QUEUE_MODE=memory` does: `queue.send` appends to an array the local harness drains
 synchronously, so the _consumer_ logic (the part with all the interesting failure handling) is exercised by
 the same command developers already run, rather than only by tests.
+
+## 22. The client opt-in flow — IMPLEMENTED (the browser/native half §15 designed)
+
+§15 designed the web-push client; this section records the code that now exists for it, plus the native
+Android/iOS path. The Worker already sends real FCM payloads (`workers/src/services/fcm.ts`, with a
+`webpush` **and** an `android` block); what was missing was a client that obtains a registration token and
+hands it to `POST /notifications/devices`. That client is now built.
+
+| file                                 | role                                                                                                                                                                                                                                                                                                                                                                          |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/lib/data/notification-vocab.ts` | the import-free vocabulary (kinds, defaults, labels, pure document helpers). Compiled into **both** the browser and the Worker, so it may not import browser globals — extracted from `notifications.ts` for exactly that reason (§below)                                                                                                                                     |
+| `src/lib/push/firebase-config.ts`    | reads the PUBLIC `VITE_FIREBASE_*` config; `isPushConfigured()` degrades throw-free, mirroring `isSupabaseConfigured()`                                                                                                                                                                                                                                                       |
+| `src/lib/push/platform.ts`           | runtime shell detection (web vs Capacitor android/ios), since the PWA and the app ship the same bundle                                                                                                                                                                                                                                                                        |
+| `src/lib/push/index.ts`              | `enablePush()` — the whole opt-in. Web path: Firebase JS SDK `getToken({ vapidKey, serviceWorkerRegistration })`. Native path: `@capacitor/push-notifications` `register()` → the `registration` event. Both `import()`ed lazily so neither enters the boot chunk. Returns a typed result the UI renders (`unconfigured`/`unsupported`/`denied`/`no-token`/`register-failed`) |
+| `scripts/build-firebase-sw.mjs`      | generates `firebase-messaging-sw.js` (background push + `notificationclick` → `data.link`) with the public config baked in; writes nothing and removes any stale worker when unconfigured. Hooked into `scripts/build-web.mjs` after the PWA step                                                                                                                             |
+| `src/pages/ProfilePage.tsx`          | the "Enable push on this device" button in the Notifications tab (offered only when `transport === 'fcm'` and the shell can obtain a token; a `denied` permission shows recovery guidance instead of a dead button)                                                                                                                                                           |
+
+**Config plumbing.** The public Firebase config travels the same anti-drift path as the Supabase pair:
+set `VITE_FIREBASE_*` in `workers/wrangler.toml` `[env.<env>.vars]`, run `npm run web:env`, and the
+generator passes them through into the mode file (`scripts/build-web-env.mjs`, `firebaseLines()`). Empty is
+supported and byte-identical to before — push simply reports itself unconfigured and the app degrades to the
+in-app inbox (the bell). `.env.example` documents all seven keys.
+
+**Why `notification-vocab.ts` exists.** When `notifications.ts` gained the API client functions (`loadInbox`,
+`registerDevice`, …) it began importing `../api/index.ts`, which uses `crypto`/`import.meta.env`. That file
+is _also_ imported by the Worker (`notificationPolicy.ts` needs `NOTIFICATION_KINDS`/`PREFERENCE_DEFAULTS`),
+so the Workers typecheck (`tsconfig.workers.json`) started pulling browser globals into a runtime that has
+none — `npm run typecheck` failed. The fix is a clean seam: the pure vocabulary moved to
+`notification-vocab.ts` (imports nothing), `notifications.ts` re-exports it for existing browser imports, and
+the Worker imports the pure module directly. `tests/unit/phase18-push.test.ts` pins the config gate and the
+SW generator; `npm run typecheck` is green again.
+
+**Native Android.** `android/app/build.gradle` already applies the google-services plugin _conditionally_
+(when `google-services.json` is present) and `android/build.gradle` carries the classpath, so the native
+project is push-ready. `@capacitor/push-notifications` auto-registers on `npx cap sync`. The remaining native
+steps are the operator's: drop `google-services.json` into `android/app/`, `npx cap sync android`, and (for
+richer Android channels matching the `channel_id` the Worker sets, e.g. `kicklive_goal`) create the channels
+in `MainActivity`/a plugin — the OS falls back to a default channel if they are absent, so push works without
+them.
+
+**Still not claimable as "a goal reaches a phone" from CI** (§18's limitation stands): obtaining a real
+token needs a browser or device and a live Firebase project. The client is unit-tested structurally; the
+end-to-end proof is a manual step on a configured deployment.

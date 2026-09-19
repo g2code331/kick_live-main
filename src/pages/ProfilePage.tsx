@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, User, Mail, Smartphone, Key, Bell, Save, LogOut, Eye, EyeOff, Camera, CheckCircle, XCircle, LayoutDashboard, Loader2, Trash2, ShieldAlert } from 'lucide-react';
+import { ArrowLeft, User, Mail, Smartphone, Key, Bell, BellOff, Save, LogOut, Eye, EyeOff, Camera, CheckCircle, XCircle, LayoutDashboard, Loader2, Trash2, ShieldAlert } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import Header from '../components/Header';
@@ -20,6 +20,7 @@ import {
   type NotificationConfig,
   type NotificationDevice,
 } from '../lib/data/notifications.ts';
+import { enablePush, canOfferPush, currentPermission } from '../lib/push';
 
 const DASHBOARD_BY_ROLE: Record<string, { label: string; path: string }> = {
   admin: { label: 'Go to Admin Dashboard', path: '/admin' },
@@ -54,6 +55,7 @@ export default function ProfilePage() {
   const [devices, setDevices] = useState<NotificationDevice[]>([]);
   const [devicesLoading, setDevicesLoading] = useState(false);
   const [removingDevice, setRemovingDevice] = useState<string | null>(null);
+  const [enablingPush, setEnablingPush] = useState(false);
 
   const showMsg = (type: 'success' | 'error', msg: string) => {
     setToast({ type, msg });
@@ -98,6 +100,24 @@ export default function ProfilePage() {
       cancelled = true;
     };
   }, [activeTab, notifConfig, devicesLoading]);
+
+  const optInToPush = async () => {
+    setEnablingPush(true);
+    const result = await enablePush();
+    setEnablingPush(false);
+    if (result.ok) {
+      showMsg('success', 'This device will now receive push notifications.');
+      // Reload the device list so the freshly registered device shows up.
+      setDevicesLoading(true);
+      const rows = await listDevices();
+      setDevices(rows);
+      setDevicesLoading(false);
+    } else if (result.reason === 'denied') {
+      showMsg('error', 'Notifications are blocked. Allow them in your browser settings, then try again.');
+    } else {
+      showMsg('error', result.message);
+    }
+  };
 
   const removeDevice = async (id: string) => {
     setRemovingDevice(id);
@@ -424,6 +444,29 @@ export default function ProfilePage() {
                           </p>
                         </div>
                       </div>
+                    )}
+
+                    {/* Opt-in: offered when the deployment can push AND this browser can obtain a token.
+                        A denied permission is shown as guidance rather than a dead button. */}
+                    {notifConfig?.transport === 'fcm' && canOfferPush() && (
+                      currentPermission() === 'denied' ? (
+                        <div className="flex items-start gap-3 p-4 rounded-2xl bg-white/[0.03] border border-white/5">
+                          <BellOff size={18} className="text-white/40 shrink-0 mt-0.5" />
+                          <p className="text-[11px] text-white/40">
+                            Notifications are blocked for this site. Enable them in your browser's site settings, then reload to turn on push here.
+                          </p>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => void optInToPush()}
+                          disabled={enablingPush}
+                          className="w-full flex items-center justify-center gap-2 p-4 rounded-2xl bg-brand-green/10 border border-brand-green/20 text-brand-green font-bold hover:bg-brand-green/20 transition-all disabled:opacity-60"
+                        >
+                          {enablingPush ? <Loader2 size={16} className="animate-spin" /> : <Bell size={16} />}
+                          {enablingPush ? 'Enabling…' : 'Enable push on this device'}
+                        </button>
+                      )
                     )}
 
                     {devicesLoading ? (

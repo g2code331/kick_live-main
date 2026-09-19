@@ -127,8 +127,30 @@ async function render(env, vars) {
     `VITE_SUPABASE_URL=${url}\n` +
     `VITE_SUPABASE_ANON_KEY=${key}\n` +
     `VITE_EXPECTED_PROJECT_REF=${ref}\n` +
-    `VITE_API_BASE_URL=${apiOrigin}\n`
+    `VITE_API_BASE_URL=${apiOrigin}\n` +
+    firebaseLines(vars)
   );
+}
+
+/**
+ * The PUBLIC Firebase web config for push, passed through from `[env.<env>.vars]` when present. Every
+ * value is public by design (like the anon key): it identifies the project to Google's SDK, and the
+ * authority to actually SEND a push stays in the Worker's `FCM_SERVICE_ACCOUNT` secret, which never
+ * enters a browser bundle. Emitted only when a project id is set, so an un-provisioned deployment's env
+ * file stays byte-for-byte what it was and push cleanly degrades to the in-app inbox.
+ */
+function firebaseLines(vars) {
+  const names = [
+    "VITE_FIREBASE_API_KEY",
+    "VITE_FIREBASE_AUTH_DOMAIN",
+    "VITE_FIREBASE_PROJECT_ID",
+    "VITE_FIREBASE_STORAGE_BUCKET",
+    "VITE_FIREBASE_MESSAGING_SENDER_ID",
+    "VITE_FIREBASE_APP_ID",
+    "VITE_FIREBASE_VAPID_KEY",
+  ];
+  if (!String(vars.VITE_FIREBASE_PROJECT_ID || "").trim()) return "";
+  return names.map((n) => `${n}=${String(vars[n] || "").trim()}\n`).join("");
 }
 
 /**

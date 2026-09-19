@@ -60,6 +60,10 @@ export async function main() {
   console.log(`build:web → vite build (config vite.config.ts${mode ? `, mode ${mode} → .env.${mode}` : ""}) → ${path.relative(REPO_ROOT, outDir)}`);
   await build({ root: REPO_ROOT, configFile: path.join(REPO_ROOT, "vite.config.ts"), logLevel: "info", ...(mode ? { mode } : {}) });
   const pwa = await buildPwa({ outDir, target: "web", log: (line) => console.log(line) });
+  // The Firebase background-push worker, generated from VITE_FIREBASE_* when configured; a no-op (and a
+  // cleanup of any stale worker) otherwise, so an unconfigured build ships no dead push worker.
+  const { buildFirebaseSw } = await import("./build-firebase-sw.mjs");
+  await buildFirebaseSw({ outDir, mode, log: (line) => console.log(line) });
   const manifest = emitBuildManifest(outDir, "web");
   const jsBytes = manifest.files.filter((f) => /\.(js)$/.test(f.path)).reduce((n, f) => n + f.bytes, 0);
   console.log(`build:web: ${String(manifest.fileCount)} files, ${fmtSize(manifest.totalBytes)} total, JS ${fmtSize(jsBytes)} (version ${manifest.version})`);
